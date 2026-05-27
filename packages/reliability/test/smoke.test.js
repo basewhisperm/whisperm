@@ -77,13 +77,15 @@ test('createReliabilityIncident returns SEV3', () => {
 });
 
 test('burn rate and budget remaining use SLO math', () => {
+  const epsilon = Number.EPSILON * 10;
+
   const burnRate = calculateBurnRate({ observedErrorRate: 0.005, sloTarget: 0.999 });
-  assert.equal(burnRate, 5);
+  assert.ok(Math.abs(burnRate - 5) < epsilon);
 
   const remaining = calculateErrorBudgetRemaining({
     totalRequests: 1000,
     errorRequests: 1,
     sloTarget: 0.999,
   });
-  assert.equal(remaining, 0);
+  assert.ok(Math.abs(remaining - 0) < epsilon);
 });
