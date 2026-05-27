@@ -2,7 +2,7 @@
   "name": "whisperm",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.11.0",
+  "packageManager": "pnpm@9.15.4",
   "engines": {
     "node": ">=20.11.0"
   },
