@@ -7,7 +7,9 @@ import {
   correlationMetadataSchema,
   errorModelSchema,
   eventEnvelopeSchema,
-  tenantRequestContextSchema
+  tenantMembershipSchema,
+  tenantRequestContextSchema,
+  tenantRoleSchema
 } from "../dist/index.js";
 
 test("correlation metadata schema validates expected shape", () => {
@@ -100,6 +102,39 @@ test("event envelope schema enforces tenant-aware metadata and payload", () => {
       tenantId: "tenant-1",
       payload: { value: 1 },
       correlation: { correlationId: "corr-1" }
+    });
+  });
+});
+
+
+test("tenant role schema mirrors Prisma TenantRole contract", () => {
+  assert.equal(tenantRoleSchema.parse("OWNER"), "OWNER");
+  assert.equal(tenantRoleSchema.parse("ADMIN"), "ADMIN");
+  assert.equal(tenantRoleSchema.parse("MEMBER"), "MEMBER");
+  assert.equal(tenantRoleSchema.parse("VIEWER"), "VIEWER");
+
+  assert.throws(() => {
+    tenantRoleSchema.parse("SUPER_ADMIN");
+  });
+});
+
+test("tenant membership schema validates active tenant-scoped role data", () => {
+  const membership = tenantMembershipSchema.parse({
+    tenantId: "tenant-1",
+    userId: "user-1",
+    role: "ADMIN",
+    isActive: true,
+    email: "admin@example.com"
+  });
+
+  assert.equal(membership.role, "ADMIN");
+
+  assert.throws(() => {
+    tenantMembershipSchema.parse({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      role: "INVALID",
+      isActive: true
     });
   });
 });

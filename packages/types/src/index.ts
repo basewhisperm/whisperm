@@ -10,6 +10,36 @@ export const correlationMetadataSchema = z.object({
 
 export type CorrelationMetadata = z.infer<typeof correlationMetadataSchema>;
 
+export const tenantRoleValues = ["OWNER", "ADMIN", "MEMBER", "VIEWER"] as const;
+export const tenantRoleSchema = z.enum(tenantRoleValues);
+export type TenantRole = z.infer<typeof tenantRoleSchema>;
+
+export const authPrincipalSchema = z.object({
+  userId: z.string().min(1),
+  externalSubject: z.string().min(1),
+  tenantIds: z.array(z.string().min(1)).min(1)
+}).strict();
+
+export type AuthPrincipal = z.infer<typeof authPrincipalSchema>;
+
+export const tenantMembershipSchema = z.object({
+  tenantId: z.string().min(1),
+  userId: z.string().min(1),
+  role: tenantRoleSchema,
+  isActive: z.boolean(),
+  email: z.string().email().optional(),
+  displayName: z.string().min(1).optional()
+}).strict();
+
+export type TenantMembership = z.infer<typeof tenantMembershipSchema>;
+
+export const authContextSchema = z.object({
+  principal: authPrincipalSchema,
+  membership: tenantMembershipSchema.optional()
+}).strict();
+
+export type AuthContext = z.infer<typeof authContextSchema>;
+
 export const tenantRequestContextSchema = z.object({
   tenantId: z.string().min(1),
   actorId: z.string().min(1).optional(),
