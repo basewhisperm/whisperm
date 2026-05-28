@@ -13,6 +13,7 @@ export interface FastifyRequestLike {
   auth?: AuthenticatedRequestContext;
   tenant?: TenantMembership;
   correlationId?: string;
+  body?: unknown;
 }
 
 export interface FastifyReplyLike {
@@ -25,6 +26,8 @@ export type FastifyHookHandler = (
   request: FastifyRequestLike,
   reply: FastifyReplyLike,
 ) => Promise<void> | void;
+
+export type FastifyRouteHandler = FastifyHookHandler;
 
 export const firstHeaderValue = (
   headers: FastifyRequestLike["headers"],

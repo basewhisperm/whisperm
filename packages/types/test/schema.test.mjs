@@ -7,6 +7,9 @@ import {
   correlationMetadataSchema,
   errorModelSchema,
   eventEnvelopeSchema,
+  inboundEventSchema,
+  inboundWebhookRequestSchema,
+  normalizeInboundEvent,
   tenantMembershipSchema,
   tenantRequestContextSchema,
   tenantRoleSchema
@@ -137,4 +140,137 @@ test("tenant membership schema validates active tenant-scoped role data", () => 
       isActive: true
     });
   });
+});
+
+test("inbound event schema supports future providers and rejects invalid payloads", () => {
+  const event = inboundEventSchema.parse({
+    tenantId: "tenant-1",
+    source: {
+      provider: "META",
+      providerEventId: "meta-event-1",
+      eventType: "message.created"
+    },
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload: { object: "page" }
+  });
+
+  assert.equal(event.source.provider, "META");
+
+  assert.doesNotThrow(() => {
+    inboundEventSchema.parse({
+      tenantId: "tenant-1",
+      source: {
+        provider: "LINKEDIN",
+        providerEventId: "linkedin-event-1",
+        eventType: "lead.created"
+      },
+      payload: {}
+    });
+  });
+
+  assert.doesNotThrow(() => {
+    inboundEventSchema.parse({
+      tenantId: "tenant-1",
+      source: {
+        provider: "GMAIL",
+        providerEventId: "gmail-event-1",
+        eventType: "message.received"
+      },
+      payload: {}
+    });
+  });
+
+  assert.doesNotThrow(() => {
+    inboundEventSchema.parse({
+      tenantId: "tenant-1",
+      source: {
+        provider: "WEB_FORM",
+        providerEventId: "web-form-event-1",
+        eventType: "submitted"
+      },
+      payload: {}
+    });
+  });
+
+  assert.doesNotThrow(() => {
+    inboundEventSchema.parse({
+      tenantId: "tenant-1",
+      source: {
+        provider: "INTERNAL_WORKFLOW",
+        providerEventId: "internal-event-1",
+        eventType: "scheduled"
+      },
+      payload: {}
+    });
+  });
+
+  assert.throws(() => {
+    inboundEventSchema.parse({
+      tenantId: "tenant-1",
+      source: {
+        provider: "UNSUPPORTED",
+        providerEventId: "event-1",
+        eventType: "created"
+      },
+      payload: {}
+    });
+  });
+});
+
+test("inbound webhook schema fails closed when tenant contexts differ", () => {
+  const valid = inboundWebhookRequestSchema.parse({
+    tenantId: "tenant-1",
+    event: {
+      tenantId: "tenant-1",
+      source: {
+        provider: "WEB_FORM",
+        providerEventId: "form-event-1",
+        eventType: "submitted"
+      },
+      payload: { formId: "contact" }
+    }
+  });
+
+  assert.equal(valid.event.tenantId, "tenant-1");
+
+  assert.throws(() => {
+    const parsed = inboundWebhookRequestSchema.parse({
+      tenantId: "tenant-1",
+      event: {
+        tenantId: "tenant-2",
+        source: {
+          provider: "WEB_FORM",
+          providerEventId: "form-event-1",
+          eventType: "submitted"
+        },
+        payload: { formId: "contact" }
+      }
+    });
+
+    assert.equal(parsed.tenantId, parsed.event.tenantId);
+  });
+});
+
+test("normalization creates deterministic tenant-scoped metadata without business automation", () => {
+  const normalized = normalizeInboundEvent({
+    event: {
+      tenantId: "tenant-1",
+      source: {
+        provider: "GMAIL",
+        providerEventId: "gmail-message-1",
+        eventType: "Message Received"
+      },
+      payload: { historyId: "123" }
+    },
+    correlation: { correlationId: "corr-1", requestId: "req-1" },
+    receivedAt: new Date("2026-01-01T00:00:00.000Z"),
+    eventId: "evt-1"
+  });
+
+  assert.equal(normalized.id, "evt-1");
+  assert.equal(normalized.tenantId, "tenant-1");
+  assert.equal(normalized.type, "whisperm.inbound.gmail.message.received");
+  assert.equal(normalized.occurredAt, "2026-01-01T00:00:00.000Z");
+  assert.equal(normalized.idempotencyKey, "tenant-1:GMAIL:gmail-message-1");
+  assert.equal(normalized.correlation.correlationId, "corr-1");
 });
