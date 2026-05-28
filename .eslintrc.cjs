@@ -1,15 +1,12 @@
 module.exports = {
   root: true,
-  ignorePatterns: ["**/dist/**", "**/build/**", "**/.next/**"],
-  extends: [],
-  overrides: [
-    {
-      files: ["**/*.ts", "**/*.tsx"],
-      parserOptions: {
-        project: true,
-        tsconfigRootDir: __dirname
-      },
-      rules: {}
-    }
-  ]
+  env: {
+    node: true,
+    es2022: true,
+  },
+  parserOptions: {
+    ecmaVersion: "latest",
+    sourceType: "module",
+  },
+  ignorePatterns: ["dist", "node_modules"],
 };
