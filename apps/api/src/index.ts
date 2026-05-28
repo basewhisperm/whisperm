@@ -1,5 +1,17 @@
 export const packageName = "@whisperm/api" as const;
 
+export { EventIngestionError } from "./events/errors.js";
+export type { EventIngestionErrorCode, EventIngestionErrorOptions } from "./events/errors.js";
+export { createInboundWebhookIngestionHandler } from "./events/ingestion.js";
+export type { InboundWebhookIngestionDependencies } from "./events/ingestion.js";
+export type {
+  EventIdempotencyProtection,
+  EventIdempotencyReservation,
+  EventPersistenceService,
+  EventQueue,
+  EventQueueMessage,
+  RetrySafeEventProcessor,
+} from "./events/contracts.js";
 export { AuthError } from "./auth/errors.js";
 export type { AuthErrorCode, AuthErrorOptions } from "./auth/errors.js";
 export { createJwtAccessTokenVerifier } from "./auth/jwt.js";
@@ -26,4 +38,4 @@ export type {
   TenantRole,
 } from "./auth/types.js";
 export { correlationIdMiddleware } from "./http/correlation.js";
-export type { FastifyHookHandler, FastifyReplyLike, FastifyRequestLike, RequestLogger } from "./http/fastify.js";
+export type { FastifyHookHandler, FastifyReplyLike, FastifyRequestLike, FastifyRouteHandler, RequestLogger } from "./http/fastify.js";

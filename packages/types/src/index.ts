@@ -112,3 +112,91 @@ export type EventEnvelope<TPayload> = {
   correlation: CorrelationMetadata;
   idempotencyKey?: string;
 };
+
+export const inboundEventProviderValues = ["META", "LINKEDIN", "GMAIL", "WEB_FORM", "INTERNAL_WORKFLOW"] as const;
+export const inboundEventProviderSchema = z.enum(inboundEventProviderValues);
+export type InboundEventProvider = z.infer<typeof inboundEventProviderSchema>;
+
+export const inboundEventSourceSchema = z.object({
+  provider: inboundEventProviderSchema,
+  providerEventId: z.string().min(1),
+  eventType: z.string().min(1),
+  sourceId: z.string().min(1).optional()
+}).strict();
+
+export type InboundEventSource = z.infer<typeof inboundEventSourceSchema>;
+
+export const inboundEventPayloadSchema = z.record(z.string(), z.unknown());
+
+export const inboundEventSchema = z.object({
+  tenantId: z.string().min(1),
+  source: inboundEventSourceSchema,
+  occurredAt: z.string().datetime().optional(),
+  payload: inboundEventPayloadSchema,
+  idempotencyKey: z.string().min(1).optional(),
+  correlation: correlationMetadataSchema.optional()
+}).strict();
+
+export type InboundEvent = z.infer<typeof inboundEventSchema>;
+
+export const normalizedInboundEventSchema = z.object({
+  id: z.string().min(1),
+  type: z.string().min(1),
+  version: z.literal(1),
+  occurredAt: z.string().datetime(),
+  receivedAt: z.string().datetime(),
+  tenantId: z.string().min(1),
+  source: inboundEventSourceSchema,
+  payload: inboundEventPayloadSchema,
+  correlation: correlationMetadataSchema,
+  idempotencyKey: z.string().min(1)
+}).strict();
+
+export type NormalizedInboundEvent = z.infer<typeof normalizedInboundEventSchema>;
+
+export interface NormalizeInboundEventInput {
+  event: InboundEvent;
+  correlation: CorrelationMetadata;
+  receivedAt: Date;
+  eventId: string;
+}
+
+const normalizeEventTypeSegment = (value: string): string =>
+  value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, ".").replace(/^\.+|\.+$/gu, "");
+
+export const buildInboundEventIdempotencyKey = (event: InboundEvent): string => {
+  const explicitKey = event.idempotencyKey?.trim();
+  if (explicitKey !== undefined && explicitKey.length > 0) {
+    return explicitKey;
+  }
+
+  return [event.tenantId, event.source.provider, event.source.providerEventId].join(":");
+};
+
+export const normalizeInboundEvent = (input: NormalizeInboundEventInput): NormalizedInboundEvent => {
+  const typeSegment = normalizeEventTypeSegment(input.event.source.eventType);
+  const normalized = {
+    id: input.eventId,
+    type: `whisperm.inbound.${normalizeEventTypeSegment(input.event.source.provider)}.${typeSegment}`,
+    version: 1,
+    occurredAt: input.event.occurredAt ?? input.receivedAt.toISOString(),
+    receivedAt: input.receivedAt.toISOString(),
+    tenantId: input.event.tenantId,
+    source: input.event.source,
+    payload: input.event.payload,
+    correlation: input.event.correlation ?? input.correlation,
+    idempotencyKey: buildInboundEventIdempotencyKey(input.event)
+  } as const;
+
+  return normalizedInboundEventSchema.parse(normalized);
+};
+
+export const inboundWebhookRequestSchema = z.object({
+  tenantId: z.string().min(1),
+  event: inboundEventSchema
+}).strict().refine((value) => value.tenantId === value.event.tenantId, {
+  message: "Webhook tenantId must match event tenantId",
+  path: ["event", "tenantId"]
+});
+
+export type InboundWebhookRequest = z.infer<typeof inboundWebhookRequestSchema>;
