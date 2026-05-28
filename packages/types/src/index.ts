@@ -202,6 +202,8 @@ export const inboundWebhookRequestSchema = z.object({
 export type InboundWebhookRequest = z.infer<typeof inboundWebhookRequestSchema>;
 export * from "./workflow.js";
 export * from "./ai.js";
+export * from "./prompts.js";
+export * from "./planning.js";
 
 export * from "./tool-runtime.js";
 export * from "./retrieval.js";
