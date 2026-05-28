@@ -47,6 +47,92 @@ enum IncidentSeverity {
   CRITICAL
 }
 
+
+enum WorkflowExecutionState {
+  PENDING
+  SCHEDULED
+  RUNNING
+  WAITING_FOR_APPROVAL
+  WAITING_FOR_EVENT
+  RETRY_SCHEDULED
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  DEAD_LETTERED
+}
+
+enum WorkflowStepExecutionState {
+  PENDING
+  RUNNING
+  WAITING
+  RETRY_SCHEDULED
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  DEAD_LETTERED
+}
+
+enum AiExecutionState {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum EventPersistenceState {
+  RECEIVED
+  NORMALIZED
+  PROCESSED
+  FAILED
+  DEAD_LETTERED
+}
+
+enum IdempotencyKeyState {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum QueueJobState {
+  WAITING
+  DELAYED
+  ACTIVE
+  COMPLETED
+  FAILED
+  RETRY_SCHEDULED
+  DEAD_LETTERED
+  CANCELLED
+}
+
+enum ExecutionLeaseState {
+  ACTIVE
+  RELEASED
+  EXPIRED
+  STOLEN
+}
+
+enum DistributedLockState {
+  HELD
+  RELEASED
+  EXPIRED
+}
+
+enum EventDeliveryState {
+  PENDING
+  PUBLISHED
+  CONSUMED
+  FAILED
+  DEAD_LETTERED
+}
+
+enum TraceSpanStatus {
+  OK
+  ERROR
+  UNSET
+}
+
 model Tenant {
   id         String   @id @default(uuid()) @db.Uuid
   slug       String   @unique
@@ -67,6 +153,22 @@ model Tenant {
   reliabilityIncidents   ReliabilityIncident[]
   promptLibraryEntries   PromptLibraryEntry[]
   publishJobs            PublishJob[]
+  auditLogs              AuditLog[]
+  workflowExecutions     WorkflowExecution[]
+  workflowStepExecutions WorkflowStepExecution[]
+  aiExecutions           AiExecution[]
+  eventIngestions        EventIngestion[]
+  idempotencyKeys        IdempotencyKey[]
+  vectorDocuments        VectorDocument[]
+  executionTraces        ExecutionTrace[]
+  executionTraceSpans    ExecutionTraceSpan[]
+  queueJobs              QueueJob[]
+  deadLetterJobs         DeadLetterJob[]
+  scheduledJobs          ScheduledJob[]
+  executionLeases        ExecutionLease[]
+  distributedLocks       DistributedLock[]
+  outboxEvents           OutboxEvent[]
+  inboxEvents            InboxEvent[]
 }
 
 model TenantUser {
@@ -363,4 +465,392 @@ model PublishJob {
   @@index([tenantId, externalId])
   @@index([tenantId, idempotencyKey])
   @@index([tenantId, state, scheduledAt])
+}
+
+
+// Persistence foundation models below are additive and tenant-scoped. They are
+// organized as expand-only schema primitives so generated migrations can be
+// rolled out safely before application code starts writing to them.
+
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  actorId       String?
+  action        String
+  targetType    String
+  targetId      String?
+  correlationId String
+  requestId     String?
+  occurredAt    DateTime @default(now())
+  metadata      Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, actorId, occurredAt])
+  @@index([tenantId, action, occurredAt])
+  @@index([tenantId, targetType, targetId])
+  @@index([tenantId, correlationId])
+}
+
+model WorkflowExecution {
+  id              String                 @id @default(uuid()) @db.Uuid
+  tenantId        String                 @db.Uuid
+  workflowId      String
+  workflowVersion Int
+  runId           String
+  state           WorkflowExecutionState @default(PENDING)
+  idempotencyKey  String?
+  input           Json                   @default("{}")
+  output          Json?
+  error           Json?
+  correlationId   String
+  causationId     String?
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  tenant Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  steps  WorkflowStepExecution[]
+  leases ExecutionLease[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, runId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, workflowId, workflowVersion])
+  @@index([tenantId, state, scheduledAt])
+  @@index([tenantId, correlationId])
+}
+
+model WorkflowStepExecution {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  tenantId            String                     @db.Uuid
+  workflowExecutionId String                     @db.Uuid
+  stepId              String
+  state               WorkflowStepExecutionState @default(PENDING)
+  attempt             Int                        @default(0)
+  maxAttempts         Int                        @default(1)
+  input               Json                       @default("{}")
+  output              Json?
+  error               Json?
+  scheduledAt         DateTime?
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workflowExecution WorkflowExecution @relation(fields: [tenantId, workflowExecutionId], references: [tenantId, id], onDelete: Cascade)
+  leases            ExecutionLease[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, workflowExecutionId, stepId])
+  @@index([tenantId, workflowExecutionId])
+  @@index([tenantId, state, scheduledAt])
+}
+
+model AiExecution {
+  id                  String           @id @default(uuid()) @db.Uuid
+  tenantId            String           @db.Uuid
+  workflowExecutionId String?          @db.Uuid
+  providerId          String
+  providerKind        String
+  model               String
+  state               AiExecutionState @default(PENDING)
+  idempotencyKey      String?
+  promptHash          String
+  request             Json
+  response            Json?
+  usage               Json?
+  error               Json?
+  correlationId       String
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, workflowExecutionId])
+  @@index([tenantId, providerId, model])
+  @@index([tenantId, state, createdAt])
+  @@index([tenantId, correlationId])
+}
+
+model EventIngestion {
+  id             String                @id @default(uuid()) @db.Uuid
+  tenantId       String                @db.Uuid
+  provider       String
+  providerEventId String
+  eventType      String
+  idempotencyKey String
+  state          EventPersistenceState @default(RECEIVED)
+  occurredAt     DateTime
+  receivedAt     DateTime              @default(now())
+  processedAt    DateTime?
+  payload        Json
+  error          Json?
+  correlationId  String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, provider, providerEventId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, state, receivedAt])
+  @@index([tenantId, eventType, occurredAt])
+  @@index([tenantId, correlationId])
+}
+
+model IdempotencyKey {
+  id             String              @id @default(uuid()) @db.Uuid
+  tenantId       String              @db.Uuid
+  scope          String
+  key            String
+  requestHash    String
+  state          IdempotencyKeyState  @default(IN_PROGRESS)
+  response       Json?
+  lockedUntil    DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, scope, key])
+  @@index([tenantId, state, expiresAt])
+  @@index([tenantId, lockedUntil])
+}
+
+model VectorDocument {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @db.Uuid
+  sourceType         String
+  sourceId           String
+  chunkId            String
+  embeddingModel     String?
+  embeddingDimension Int?
+  contentHash        String
+  metadata           Json     @default("{}")
+  indexedAt          DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sourceType, sourceId, chunkId])
+  @@index([tenantId, sourceType, sourceId])
+  @@index([tenantId, embeddingModel])
+  @@index([tenantId, contentHash])
+}
+
+model ExecutionTrace {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  traceId       String
+  rootSpanId    String?
+  correlationId String
+  startedAt     DateTime
+  endedAt       DateTime?
+  attributes    Json     @default("{}")
+
+  tenant Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  spans  ExecutionTraceSpan[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, traceId])
+  @@index([tenantId, correlationId])
+  @@index([tenantId, startedAt])
+}
+
+model ExecutionTraceSpan {
+  id               String          @id @default(uuid()) @db.Uuid
+  tenantId         String          @db.Uuid
+  executionTraceId String          @db.Uuid
+  spanId           String
+  parentSpanId     String?
+  name             String
+  status           TraceSpanStatus @default(UNSET)
+  startedAt        DateTime
+  endedAt          DateTime?
+  attributes       Json            @default("{}")
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  executionTrace ExecutionTrace @relation(fields: [tenantId, executionTraceId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, executionTraceId, spanId])
+  @@index([tenantId, executionTraceId])
+  @@index([tenantId, status, startedAt])
+}
+
+model QueueJob {
+  id             String        @id @default(uuid()) @db.Uuid
+  tenantId       String        @db.Uuid
+  queueName      String
+  jobName        String
+  jobKey         String
+  state          QueueJobState @default(WAITING)
+  payload        Json
+  attemptsMade   Int           @default(0)
+  maxAttempts    Int           @default(1)
+  scheduledAt    DateTime?
+  availableAt    DateTime      @default(now())
+  lockedUntil    DateTime?
+  lastError      Json?
+  correlationId  String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, queueName, jobKey])
+  @@index([tenantId, queueName, state, availableAt])
+  @@index([tenantId, lockedUntil])
+  @@index([tenantId, correlationId])
+}
+
+model DeadLetterJob {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  queueName     String
+  jobName       String
+  jobKey        String
+  payload       Json
+  reason        String
+  attemptsMade  Int
+  failedAt      DateTime @default(now())
+  correlationId String
+  metadata      Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, queueName, jobKey])
+  @@index([tenantId, queueName, failedAt])
+  @@index([tenantId, correlationId])
+}
+
+model ScheduledJob {
+  id            String        @id @default(uuid()) @db.Uuid
+  tenantId      String        @db.Uuid
+  scheduleName  String
+  jobName       String
+  cron          String?
+  runAt         DateTime?
+  payload       Json          @default("{}")
+  state         QueueJobState @default(WAITING)
+  nextRunAt     DateTime?
+  lastRunAt     DateTime?
+  correlationId String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, scheduleName])
+  @@index([tenantId, state, nextRunAt])
+}
+
+model ExecutionLease {
+  id                      String              @id @default(uuid()) @db.Uuid
+  tenantId                String              @db.Uuid
+  leaseKey                String
+  holderId                String
+  workflowExecutionId     String?             @db.Uuid
+  workflowStepExecutionId String?             @db.Uuid
+  state                   ExecutionLeaseState @default(ACTIVE)
+  fencingToken            BigInt
+  acquiredAt              DateTime            @default(now())
+  expiresAt               DateTime
+  releasedAt              DateTime?
+  correlationId           String
+
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workflowExecution     WorkflowExecution?     @relation(fields: [tenantId, workflowExecutionId], references: [tenantId, id], onDelete: Cascade)
+  workflowStepExecution WorkflowStepExecution? @relation(fields: [tenantId, workflowStepExecutionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, leaseKey, fencingToken])
+  @@index([tenantId, leaseKey, state, expiresAt])
+  @@index([tenantId, holderId])
+}
+
+model DistributedLock {
+  id            String               @id @default(uuid()) @db.Uuid
+  tenantId      String               @db.Uuid
+  lockKey       String
+  holderId      String
+  state         DistributedLockState @default(HELD)
+  fencingToken  BigInt
+  acquiredAt    DateTime             @default(now())
+  expiresAt     DateTime
+  releasedAt    DateTime?
+  correlationId String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, lockKey, fencingToken])
+  @@index([tenantId, lockKey, state, expiresAt])
+  @@index([tenantId, holderId])
+}
+
+model OutboxEvent {
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @db.Uuid
+  aggregateType  String
+  aggregateId    String
+  eventType      String
+  eventVersion   Int                @default(1)
+  idempotencyKey String
+  payload        Json
+  headers        Json               @default("{}")
+  state          EventDeliveryState @default(PENDING)
+  availableAt    DateTime           @default(now())
+  publishedAt    DateTime?
+  attemptsMade   Int                @default(0)
+  correlationId  String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, state, availableAt])
+  @@index([tenantId, aggregateType, aggregateId])
+  @@index([tenantId, correlationId])
+}
+
+model InboxEvent {
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @db.Uuid
+  source         String
+  messageId      String
+  eventType      String
+  payload        Json
+  headers        Json               @default("{}")
+  state          EventDeliveryState @default(PENDING)
+  receivedAt     DateTime           @default(now())
+  processedAt    DateTime?
+  attemptsMade   Int                @default(0)
+  correlationId  String
+  error          Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, source, messageId])
+  @@index([tenantId, state, receivedAt])
+  @@index([tenantId, eventType, receivedAt])
+  @@index([tenantId, correlationId])
 }
