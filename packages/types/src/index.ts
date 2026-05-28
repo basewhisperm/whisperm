@@ -200,3 +200,4 @@ export const inboundWebhookRequestSchema = z.object({
 });
 
 export type InboundWebhookRequest = z.infer<typeof inboundWebhookRequestSchema>;
+export * from "./workflow.js";
