@@ -1,0 +1,366 @@
+// Initial WhispeRM data model.
+// This schema defines tenant-scoped persistence contracts only; no migrations are
+// generated or executed from this change.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum ContentState {
+  DRAFT
+  REVIEW
+  APPROVED
+  ARCHIVED
+}
+
+enum PublishState {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum HealthStatus {
+  HEALTHY
+  DEGRADED
+  UNHEALTHY
+  UNKNOWN
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Tenant {
+  id         String   @id @default(uuid()) @db.Uuid
+  slug       String   @unique
+  name       String
+  externalId String?  @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  users                  TenantUser[]
+  contacts               Contact[]
+  contentItems           ContentItem[]
+  contentVariants        ContentVariant[]
+  inboundEvents          InboundEvent[]
+  leadEvents             LeadEvent[]
+  marketMoments          MarketMoment[]
+  tenantSLOs             TenantSLO[]
+  sloSnapshots           SloSnapshot[]
+  reliabilityIncidents   ReliabilityIncident[]
+  promptLibraryEntries   PromptLibraryEntry[]
+  publishJobs            PublishJob[]
+}
+
+model TenantUser {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @db.Uuid
+  externalUserId String?
+  email          String
+  displayName    String?
+  role           TenantRole @default(MEMBER)
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentItems ContentItem[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, email])
+  @@unique([tenantId, externalUserId])
+  @@index([tenantId])
+  @@index([tenantId, externalUserId])
+}
+
+model Contact {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  externalId String?
+  email      String?
+  phone      String?
+  firstName  String?
+  lastName   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentItems  ContentItem[]
+  inboundEvents InboundEvent[]
+  leadEvents    LeadEvent[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, email])
+  @@index([tenantId, phone])
+  @@index([tenantId, externalId])
+}
+
+model ContentItem {
+  id              String       @id @default(uuid()) @db.Uuid
+  tenantId        String       @db.Uuid
+  contactId       String?      @db.Uuid
+  createdByUserId String?      @db.Uuid
+  externalId      String?
+  title           String
+  state           ContentState @default(DRAFT)
+  source          String?
+  metadata        Json?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact       Contact?         @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  createdByUser TenantUser?      @relation(fields: [tenantId, createdByUserId], references: [tenantId, id], onDelete: Restrict)
+  variants      ContentVariant[]
+  publishJobs   PublishJob[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, createdByUserId])
+  @@index([tenantId, state])
+  @@index([tenantId, externalId])
+}
+
+model ContentVariant {
+  id            String       @id @default(uuid()) @db.Uuid
+  tenantId      String       @db.Uuid
+  contentItemId String       @db.Uuid
+  externalId    String?
+  label         String
+  channel       String
+  version       Int          @default(1)
+  state         ContentState @default(DRAFT)
+  body          String
+  metadata      Json?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentItem ContentItem  @relation(fields: [tenantId, contentItemId], references: [tenantId, id], onDelete: Cascade)
+  publishJobs PublishJob[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@unique([tenantId, contentItemId, version])
+  @@index([tenantId])
+  @@index([tenantId, contentItemId])
+  @@index([tenantId, state])
+  @@index([tenantId, externalId])
+}
+
+model InboundEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  contactId     String?  @db.Uuid
+  externalId    String?
+  source        String
+  eventType     String
+  correlationId String?
+  occurredAt    DateTime
+  receivedAt    DateTime @default(now())
+  payload       Json
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact    Contact?    @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  leadEvents LeadEvent[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, source, externalId])
+  @@index([tenantId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, externalId])
+  @@index([tenantId, correlationId])
+  @@index([tenantId, source, eventType, occurredAt])
+}
+
+model LeadEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  contactId      String?  @db.Uuid
+  inboundEventId String?  @db.Uuid
+  externalId     String?
+  eventType      String
+  correlationId  String?
+  occurredAt     DateTime
+  payload        Json?
+  createdAt      DateTime @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact      Contact?      @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  inboundEvent InboundEvent? @relation(fields: [tenantId, inboundEventId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, contactId, occurredAt])
+  @@index([tenantId, inboundEventId])
+  @@index([tenantId, externalId])
+  @@index([tenantId, correlationId])
+  @@index([tenantId, eventType, occurredAt])
+}
+
+model MarketMoment {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  externalId  String?
+  source      String
+  title       String
+  description String?
+  occurredAt  DateTime
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, externalId])
+  @@index([tenantId, source, occurredAt])
+}
+
+model TenantSLO {
+  id           String       @id @default(uuid()) @db.Uuid
+  tenantId     String       @db.Uuid
+  name         String
+  description  String?
+  target       Float
+  window       String
+  healthStatus HealthStatus @default(UNKNOWN)
+  isEnabled    Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  snapshots   SloSnapshot[]
+  incidents   ReliabilityIncident[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([tenantId, healthStatus])
+}
+
+model SloSnapshot {
+  id           String       @id @default(uuid()) @db.Uuid
+  tenantId     String       @db.Uuid
+  tenantSloId  String       @db.Uuid
+  capturedAt   DateTime
+  value        Float
+  healthStatus HealthStatus
+  metadata     Json?
+  createdAt    DateTime     @default(now())
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantSLO TenantSLO @relation(fields: [tenantId, tenantSloId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId])
+  @@index([tenantId, tenantSloId, capturedAt])
+  @@index([tenantId, healthStatus, capturedAt])
+}
+
+model ReliabilityIncident {
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @db.Uuid
+  tenantSloId  String?          @db.Uuid
+  externalId   String?
+  title        String
+  summary      String?
+  severity     IncidentSeverity
+  healthStatus HealthStatus     @default(UNHEALTHY)
+  startedAt    DateTime
+  resolvedAt   DateTime?
+  metadata     Json?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantSLO TenantSLO? @relation(fields: [tenantId, tenantSloId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, externalId])
+  @@index([tenantId, tenantSloId, startedAt])
+  @@index([tenantId, severity, startedAt])
+  @@index([tenantId, healthStatus, startedAt])
+}
+
+model PromptLibraryEntry {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  key         String
+  version     Int      @default(1)
+  name        String
+  description String?
+  prompt      String
+  metadata    Json?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, key, version])
+  @@index([tenantId])
+  @@index([tenantId, key])
+  @@index([tenantId, isActive])
+}
+
+model PublishJob {
+  id               String       @id @default(uuid()) @db.Uuid
+  tenantId         String       @db.Uuid
+  contentItemId    String?      @db.Uuid
+  contentVariantId String?      @db.Uuid
+  externalId       String?
+  idempotencyKey   String?
+  target           String
+  state            PublishState @default(QUEUED)
+  attempts         Int          @default(0)
+  scheduledAt      DateTime?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  errorMessage     String?
+  metadata         Json?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentItem    ContentItem?    @relation(fields: [tenantId, contentItemId], references: [tenantId, id], onDelete: Restrict)
+  contentVariant ContentVariant? @relation(fields: [tenantId, contentVariantId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId])
+  @@index([tenantId, contentItemId])
+  @@index([tenantId, contentVariantId])
+  @@index([tenantId, externalId])
+  @@index([tenantId, idempotencyKey])
+  @@index([tenantId, state, scheduledAt])
+}
