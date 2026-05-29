@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   AnthropicProviderAdapter,
   GeminiProviderAdapter,
+  OpenAIProviderAdapter,
   OpenAiProviderAdapter,
   ProviderModelExecutionRuntime,
 } from '../dist/index.js';
@@ -39,7 +40,7 @@ const descriptor = {
   domain: 'AI',
   displayName: 'Tenant OpenAI adapter',
   enabled: true,
-  capabilities: ['TEXT_GENERATION', 'STRUCTURED_OUTPUT'],
+  capabilities: ['TEXT_GENERATION', 'STRUCTURED_OUTPUT', 'EMBEDDINGS'],
   auth: { scheme: 'API_KEY', apiKey: { secretRef: 'vault://tenant-1/openai/api-key' } },
 };
 
@@ -55,6 +56,8 @@ const createDependencies = (overrides = {}) => ({
     async sendText(transportRequest) {
       assert.equal(transportRequest.tenantId, 'tenant-1');
       assert.equal(transportRequest.apiKey, 'mock-secret-value');
+      assert.equal(transportRequest.correlationId, 'corr-1');
+      assert.equal(transportRequest.messages[0].role, 'user');
       return {
         id: 'raw-response-1',
         content: 'Hello from a mock provider.',
@@ -94,6 +97,117 @@ test('OpenAI adapter resolves secret references and maps normalized responses wi
   assert.deepEqual(events.map(([name]) => name), ['start', 'complete']);
   assert.equal(events[1][1].usage.totalTokens, 18);
 });
+
+test('OpenAIProviderAdapter alias supports structured output capability validation', async () => {
+  const adapter = new OpenAIProviderAdapter(descriptor, createDependencies({
+    transport: {
+      async sendText(transportRequest) {
+        assert.equal(transportRequest.responseFormat, 'JSON_OBJECT');
+        assert.equal(transportRequest.correlationId, 'corr-1');
+        return {
+          id: 'structured-response-1',
+          content: '{"ok":true}',
+          finishReason: 'stop',
+          inputTokens: 10,
+          outputTokens: 4,
+        };
+      },
+    },
+  }));
+
+  const response = await adapter.generate({
+    ...request,
+    options: { responseFormat: 'JSON_OBJECT', maxOutputTokens: 64 },
+  }, { ...route, capabilities: ['TEXT_GENERATION', 'STRUCTURED_OUTPUT'] });
+
+  assert.equal(response.message.content, '{"ok":true}');
+  assert.equal(response.usage.totalTokens, 14);
+
+  await assert.rejects(
+    () => adapter.generate({
+      ...request,
+      options: { responseFormat: 'JSON_OBJECT', maxOutputTokens: 64 },
+    }, route),
+    assertProviderRuntimeError('PROVIDER_CAPABILITY_UNSUPPORTED'),
+  );
+});
+
+test('adapters support deterministic embeddings through mock transports', async () => {
+  const adapter = new GeminiProviderAdapter({ ...descriptor, providerId: 'provider-gemini-1', kind: 'GEMINI', displayName: 'Tenant Gemini adapter' }, createDependencies({
+    transport: {
+      async sendText() {
+        throw new Error('text transport should not be called');
+      },
+      async sendEmbedding(embeddingRequest) {
+        assert.equal(embeddingRequest.tenantId, 'tenant-1');
+        assert.equal(embeddingRequest.providerId, 'provider-gemini-1');
+        assert.equal(embeddingRequest.providerKind, 'GEMINI');
+        assert.equal(embeddingRequest.apiKey, 'mock-secret-value');
+        assert.equal(embeddingRequest.correlationId, 'corr-1');
+        assert.deepEqual(embeddingRequest.inputs, ['alpha', 'beta']);
+        return { embeddings: [[0.1, 0.2], [0.3, 0.4]], inputTokens: 2 };
+      },
+    },
+  }));
+
+  const response = await adapter.embed({
+    tenantId: 'tenant-1',
+    providerId: 'provider-gemini-1',
+    model: 'gemini-embedding-mock',
+    input: ['alpha', 'beta'],
+  }, {
+    tenantId: 'tenant-1',
+    providerId: 'provider-gemini-1',
+    providerKind: 'GEMINI',
+    operation: 'test.embed',
+    correlationId: 'corr-1',
+    actorId: 'agent-1',
+  });
+
+  assert.deepEqual(response.embeddings, [[0.1, 0.2], [0.3, 0.4]]);
+  assert.equal(response.usage.inputTokens, 2);
+  assert.equal(response.correlationId, 'corr-1');
+});
+
+test('provider health checks propagate tenant-safe correlation and never expose secrets', async () => {
+  const adapter = new AnthropicProviderAdapter({
+    ...descriptor,
+    providerId: 'provider-anthropic-1',
+    kind: 'ANTHROPIC',
+    displayName: 'Tenant Anthropic adapter',
+    metadata: { healthCheckModel: 'claude-health-mock' },
+  }, createDependencies({
+    transport: {
+      async sendText() {
+        throw new Error('text transport should not be called');
+      },
+      async checkHealth(healthRequest) {
+        assert.equal(healthRequest.tenantId, 'tenant-1');
+        assert.equal(healthRequest.providerId, 'provider-anthropic-1');
+        assert.equal(healthRequest.providerKind, 'ANTHROPIC');
+        assert.equal(healthRequest.model, 'claude-health-mock');
+        assert.equal(healthRequest.apiKey, 'mock-secret-value');
+        assert.equal(healthRequest.correlationId, 'corr-1');
+        return { status: 'HEALTHY', latencyMs: 12, message: 'mock transport healthy' };
+      },
+    },
+    now: () => new Date('2026-01-01T00:00:00.000Z'),
+  }));
+
+  const health = await adapter.health({
+    tenantId: 'tenant-1',
+    providerId: 'provider-anthropic-1',
+    providerKind: 'ANTHROPIC',
+    operation: 'test.health',
+    correlationId: 'corr-1',
+    actorId: 'agent-1',
+  });
+
+  assert.equal(health.status, 'HEALTHY');
+  assert.equal(health.latencyMs, 12);
+  assert.equal(health.correlationId, 'corr-1');
+});
+
 
 test('Anthropic and Gemini adapter skeletons enforce descriptor kind compatibility', async () => {
   const anthropic = new AnthropicProviderAdapter({ ...descriptor, providerId: 'provider-anthropic-1', kind: 'ANTHROPIC', displayName: 'Tenant Anthropic adapter' }, createDependencies());
