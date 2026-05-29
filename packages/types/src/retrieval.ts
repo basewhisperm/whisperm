@@ -73,7 +73,7 @@ const parseRetrievalSchema = <TSchema extends z.ZodTypeAny>(
   return result.data;
 };
 
-export const retrievalProviderKindValues = ["PGVECTOR", "PINECONE", "WEAVIATE", "QDRANT", "OPENSEARCH", "HYBRID", "IN_MEMORY"] as const;
+export const retrievalProviderKindValues = ["PGVECTOR", "PINECONE", "WEAVIATE", "QDRANT", "OPENSEARCH", "REDIS_VECTOR", "HYBRID", "IN_MEMORY"] as const;
 export const retrievalProviderKindSchema = z.enum(retrievalProviderKindValues);
 export type RetrievalProviderKind = z.infer<typeof retrievalProviderKindSchema>;
 
