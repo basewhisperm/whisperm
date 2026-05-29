@@ -1,0 +1,25 @@
+{
+  "name": "@whisperm/services",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint test/*.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@whisperm/repositories": "workspace:*",
+    "@whisperm/types": "workspace:*",
+    "zod": "3.25.76"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

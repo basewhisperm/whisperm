@@ -82,6 +82,18 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
 
+  packages/services:
+    dependencies:
+      '@whisperm/repositories':
+        specifier: workspace:*
+        version: link:../repositories
+      '@whisperm/types':
+        specifier: workspace:*
+        version: link:../types
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
+
   packages/retrieval-runtime:
     dependencies:
       '@whisperm/types':
