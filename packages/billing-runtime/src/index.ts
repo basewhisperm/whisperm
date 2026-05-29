@@ -628,6 +628,16 @@ export const evaluateQuota = (input: {
   });
 };
 
+/**
+ * Evaluates a single rate-limit window without mutating counters.
+ *
+ * `limit` is the sustained per-window ceiling. When `burstLimit` is present it
+ * is the hard ceiling used for this immediate enforcement decision, allowing a
+ * short spike above `limit` while upstream token-bucket/window accounting drains
+ * the burst back toward the sustained rate. The returned `limit` is therefore
+ * the effective ceiling (`burstLimit ?? limit`) that made this replay-safe
+ * allow/deny decision.
+ */
 export const evaluateRateLimit = (input: {
   readonly policy: RateLimitPolicy;
   readonly observedQuantity: number;

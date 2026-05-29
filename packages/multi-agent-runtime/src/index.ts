@@ -203,6 +203,14 @@ export const agentRegistryEntrySchema = z.object({
   roleIds: z.array(z.string().regex(namespacedNamePattern)).min(1),
   capabilityIds: z.array(z.string().regex(namespacedNamePattern)).min(1),
   enabled: z.boolean().default(true),
+  /**
+   * Per-target-agent concurrency ceiling enforced by the orchestration layer
+   * that atomically claims delegation work. This contract validates the
+   * configured ceiling, while createDelegation remains a pure authorization and
+   * tenant-scope helper because it does not receive the active delegation count
+   * or persistence lock needed to make a race-free decision. Active states are
+   * REQUESTED, ACCEPTED, RUNNING, and WAITING_FOR_APPROVAL.
+   */
   maxConcurrentDelegations: z.number().int().min(1).max(100).default(1),
   supervisionRequired: z.boolean().default(false),
   createdAt: z.string().datetime(),

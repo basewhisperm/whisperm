@@ -317,6 +317,20 @@ const compareModelDescriptors = (left: AiModelDescriptor, right: AiModelDescript
   return `${left.providerId}:${left.model}`.localeCompare(`${right.providerId}:${right.model}`);
 };
 
+/**
+ * Selects a provider-neutral AI model route deterministically.
+ *
+ * Algorithm, in order:
+ * 1. Validate the request and descriptor contracts.
+ * 2. Keep only enabled descriptors permitted by allowedProviderIds.
+ * 3. Apply preferredProviderKind when supplied.
+ * 4. Require every requested capability and enough input/output token capacity.
+ * 5. Sort compatible candidates by priority, then costWeight, then providerId:model.
+ *
+ * The final lexicographic tie-breaker is intentional so tenants receive a stable
+ * route when multiple providers have the same priority and cost. Provider SDK
+ * execution and live availability probing stay outside this pure contract helper.
+ */
 export const routeAiModel = (
   request: AiModelRouteRequest,
   descriptors: readonly AiModelDescriptor[],

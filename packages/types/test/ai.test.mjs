@@ -137,6 +137,13 @@ test("model routing selects deterministic provider-neutral compatible routes", (
 
   assert.equal(localRoute.providerId, "local-default");
   assert.equal(localRoute.model, "local-oss-chat");
+  assert.equal(localRoute.reason, "selected-lowest-priority-cost-compatible-model");
+
+  const tieBreakRoute = routeAiModel(routeRequest(), [
+    { ...descriptors[1], providerId: "z-provider", model: "z-model" },
+    { ...descriptors[1], providerId: "a-provider", model: "a-model" }
+  ]);
+  assert.equal(tieBreakRoute.providerId, "a-provider");
 
   const toolRoute = routeAiModel(routeRequest({ requiredCapabilities: ["TEXT_GENERATION", "TOOL_CALLING"] }), descriptors);
 

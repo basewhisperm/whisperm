@@ -96,6 +96,16 @@ test("module loader composes imported modules before dependent modules", () => {
   assert.deepEqual(graph.registry.validateDependencies().startupOrder, ["logger", "http"]);
 
   assert.throws(() => loadRuntimeModules([{ name: "core" }, { name: "core" }]), ApplicationRuntimeError);
+
+  const cyclic = { name: "core", imports: [] };
+  const api = { name: "api", imports: [cyclic] };
+  cyclic.imports = [api];
+  assert.throws(
+    () => loadRuntimeModules([api]),
+    (error) => error instanceof ApplicationRuntimeError
+      && error.code === "RUNTIME_DEPENDENCY_CYCLE"
+      && error.details.cycle === "api -> core -> api"
+  );
 });
 
 test("integration ports require tenant, request, and correlation propagation", () => {

@@ -314,6 +314,45 @@ export const campaignTriggerContractSchema = z.object({
 });
 export type CampaignTriggerContract = z.output<typeof campaignTriggerContractSchema>;
 
+const detectCampaignSequenceCycle = (sequence: { readonly entryStepId: string; readonly steps: readonly { readonly stepId: string; readonly nextStepIds: readonly string[] }[] }): readonly string[] | undefined => {
+  const stepsById = new Map(sequence.steps.map((step) => [step.stepId, step]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  const visit = (stepId: string, path: readonly string[]): readonly string[] | undefined => {
+    if (visited.has(stepId)) {
+      return undefined;
+    }
+    if (visiting.has(stepId)) {
+      return [...path, stepId];
+    }
+
+    const step = stepsById.get(stepId);
+    if (step === undefined) {
+      return undefined;
+    }
+
+    visiting.add(stepId);
+    for (const nextStepId of step.nextStepIds) {
+      const cycle = visit(nextStepId, [...path, stepId]);
+      if (cycle !== undefined) {
+        return cycle;
+      }
+    }
+    visiting.delete(stepId);
+    visited.add(stepId);
+    return undefined;
+  };
+
+  for (const step of sequence.steps) {
+    const cycle = visit(step.stepId, []);
+    if (cycle !== undefined) {
+      return cycle;
+    }
+  }
+  return undefined;
+};
+
 export const campaignStepContractSchema = z.object({
   tenantId: z.string().min(1),
   stepId: z.string().min(1),
@@ -355,6 +394,15 @@ export const campaignSequenceContractSchema = z.object({
       }
     });
   });
+
+  // Campaign sequences are modeled as deterministic DAGs. Re-entry or recurring
+  // outreach must be represented by campaign triggers/schedules instead of a
+  // nextStepIds cycle so retries and idempotency keys never re-dispatch a step
+  // through an unbounded loop.
+  const cycle = detectCampaignSequenceCycle(sequence);
+  if (cycle !== undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "sequence nextStepIds must form an acyclic graph", path: ["steps"], params: { cycle: cycle.join(" -> ") } });
+  }
 });
 export type CampaignSequenceContract = z.output<typeof campaignSequenceContractSchema>;
 
