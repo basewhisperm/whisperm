@@ -119,6 +119,34 @@ test("registered tool execution validates tenant, permissions, input, output, ev
   );
 });
 
+
+
+test("registered tool execution rejects output schema validation failures", async () => {
+  const registry = createToolRegistry();
+  registry.register(createHandler({
+    handler: {
+      async execute() {
+        return { leadId: "lead-1", name: "" };
+      }
+    }
+  }));
+  const events = [];
+
+  await assert.rejects(
+    async () => executeRegisteredTool({
+      registry,
+      request: request(),
+      context: context(),
+      eventHook: { async emit(event) { events.push(event); } },
+      now: () => new Date("2026-01-01T00:00:00.000Z")
+    }),
+    (error) => error instanceof ToolRuntimeError && error.code === "TOOL_OUTPUT_VALIDATION_FAILED"
+  );
+
+  assert.deepEqual(events.map((event) => event.type), ["TOOL_EXECUTION_REQUESTED", "TOOL_EXECUTION_REJECTED"]);
+  assert.equal(events[1].payload.code, "TOOL_OUTPUT_VALIDATION_FAILED");
+});
+
 test("tool runtime is idempotent and retries only typed retryable failures", async () => {
   const registry = createToolRegistry();
   let calls = 0;

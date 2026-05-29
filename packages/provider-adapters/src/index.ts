@@ -118,6 +118,7 @@ export interface ProviderSdkTextRequest extends ProviderSdkBaseRequest {
   readonly responseFormat: "TEXT" | "JSON_OBJECT";
   readonly maxOutputTokens?: number | undefined;
   readonly temperature?: number | undefined;
+  readonly anthropicVersion?: string | undefined;
 }
 
 export interface ProviderSdkTextResponse {
@@ -234,6 +235,13 @@ const mapMessages = (request: AiPromptRequest): readonly ProviderSdkMessage[] =>
   content: message.content,
   name: message.name,
 }));
+
+const anthropicVersionFor = (descriptor: ProviderDescriptor): string | undefined => {
+  const configuredVersion = descriptor.metadata?.["anthropicVersion"];
+  return descriptor.kind === "ANTHROPIC" && typeof configuredVersion === "string" && configuredVersion.trim().length > 0
+    ? configuredVersion
+    : undefined;
+};
 
 export const normalizeProviderAdapterError = (error: unknown, context: ProviderExecutionContext): ProviderRuntimeError => {
   if (error instanceof ProviderRuntimeError) {
@@ -504,6 +512,7 @@ export class ProviderTextGenerationAdapter {
       responseFormat: request.options.responseFormat,
       maxOutputTokens: request.options.maxOutputTokens,
       temperature: request.options.temperature,
+      anthropicVersion: anthropicVersionFor(this.descriptor),
       correlationId: context.correlationId,
     });
     const normalized = normalizeProviderTextResponse({
