@@ -253,6 +253,47 @@ test("replay-safe execution integrates idempotency, approval, workflow, and tele
   assert.equal(events.some((event) => event.type === "JOB_SUCCEEDED"), true);
 });
 
+
+
+test("replay-safe execution fails closed when approval assertion throws", async () => {
+  const calls = [];
+
+  await assert.rejects(
+    async () => executeReplaySafeJob({
+      job: baseJob,
+      lease: baseLease,
+      token: baseToken,
+      handler: { execute: () => { throw new Error("handler should not run without approval"); } },
+      ports: {
+        clock: { now: () => now },
+        idempotency: {
+          claim: (contract) => {
+            calls.push(["claim", contract.key]);
+            return { status: "CLAIMED" };
+          },
+          complete: () => {
+            calls.push(["complete"]);
+          }
+        },
+        approval: {
+          assertApproved: () => {
+            calls.push(["assertApproved"]);
+            throw new WorkerRuntimeError({
+              code: "WORKER_RUNTIME_APPROVAL_REQUIRED",
+              message: "Approval is required before job execution",
+              status: 409,
+              correlation
+            });
+          }
+        }
+      }
+    }),
+    (error) => error instanceof WorkerRuntimeError && error.code === "WORKER_RUNTIME_APPROVAL_REQUIRED"
+  );
+
+  assert.deepEqual(calls, [["claim", "tenant-1:job-1"], ["assertApproved"]]);
+});
+
 test("replay-safe execution skips duplicate idempotency claims", async () => {
   const result = await executeReplaySafeJob({
     job: { ...baseJob, approval: undefined, workflow: undefined },

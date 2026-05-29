@@ -198,6 +198,86 @@ test("execution runtime pauses for approval and resumes from a checkpoint snapsh
   assert.equal(resumed.snapshot.stepSnapshots.find((step) => step.stepId === "approve").state, "SUCCEEDED");
 });
 
+
+
+test("execution runtime dead-letters terminal TOOL step failures with tenant-safe metadata", async () => {
+  const events = [];
+  const runtime = createExecutionRuntime({
+    eventSink: { async emit(event) { events.push(event); } },
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+    toolOrchestrator: {
+      async executeTool() {
+        throw new ExecutionRuntimeError({
+          code: "EXECUTION_STEP_FAILED",
+          message: "Tool orchestration failed",
+          status: 502,
+          retryable: false,
+          correlation
+        });
+      }
+    }
+  });
+
+  const result = await runtime.executePlan({
+    context: createContext(),
+    plan: createPlan({
+      steps: [{
+        id: "enrich",
+        type: "TOOL",
+        tool: { toolName: "crm.lookupLead", toolVersion: "1.0.0", input: { leadId: "lead-1" } },
+        retryPolicy: { maxAttempts: 1, initialDelayMs: 25, maxDelayMs: 100, backoffMultiplier: 2, jitter: false }
+      }]
+    })
+  });
+
+  assert.equal(result.state, "DEAD_LETTERED");
+  assert.equal(result.deadLetter.tenantId, "tenant-1");
+  assert.equal(result.deadLetter.stepId, "enrich");
+  assert.equal(result.deadLetter.reason.code, "EXECUTION_STEP_FAILED");
+  assert.equal(result.stepResults[0].status, "FAILED");
+  assert.equal(result.stepResults[0].error.code, "EXECUTION_STEP_FAILED");
+  assert.deepEqual(events.map((event) => event.type), ["EXECUTION_STARTED", "STEP_STARTED", "STEP_FAILED", "EXECUTION_DEAD_LETTERED"]);
+});
+
+test("execution runtime dead-letters terminal PROVIDER step failures with tenant-safe metadata", async () => {
+  const events = [];
+  const runtime = createExecutionRuntime({
+    eventSink: { async emit(event) { events.push(event); } },
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+    providerOrchestrator: {
+      async executeProvider() {
+        throw new ExecutionRuntimeError({
+          code: "EXECUTION_STEP_FAILED",
+          message: "Provider orchestration failed",
+          status: 502,
+          retryable: false,
+          correlation
+        });
+      }
+    }
+  });
+
+  const result = await runtime.executePlan({
+    context: createContext(),
+    plan: createPlan({
+      steps: [{
+        id: "provider-normalize",
+        type: "PROVIDER",
+        provider: { providerId: "provider-1", capability: "TEXT_GENERATION", operation: "normalize", input: { draftId: "draft-1" } },
+        retryPolicy: { maxAttempts: 1, initialDelayMs: 25, maxDelayMs: 100, backoffMultiplier: 2, jitter: false }
+      }]
+    })
+  });
+
+  assert.equal(result.state, "DEAD_LETTERED");
+  assert.equal(result.deadLetter.tenantId, "tenant-1");
+  assert.equal(result.deadLetter.stepId, "provider-normalize");
+  assert.equal(result.deadLetter.reason.code, "EXECUTION_STEP_FAILED");
+  assert.equal(result.stepResults[0].status, "FAILED");
+  assert.equal(result.stepResults[0].error.code, "EXECUTION_STEP_FAILED");
+  assert.deepEqual(events.map((event) => event.type), ["EXECUTION_STARTED", "STEP_STARTED", "STEP_FAILED", "EXECUTION_DEAD_LETTERED"]);
+});
+
 test("execution retries typed retryable failures and dead-letters exhausted steps", async () => {
   const delays = [];
   let calls = 0;

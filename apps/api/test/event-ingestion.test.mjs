@@ -84,6 +84,51 @@ test("webhook ingestion normalizes, persists, enqueues, and propagates correlati
   assert.equal(idempotencyCalls[0][1].idempotencyKey, "tenant-1:META:meta-event-1");
 });
 
+
+
+test("webhook ingestion fails closed when idempotency reservation throws", async () => {
+  const calls = [];
+  const handler = createInboundWebhookIngestionHandler({
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+    createEventId: () => "evt-1",
+    idempotency: {
+      async reserve(input) {
+        calls.push(["reserve", input.idempotencyKey]);
+        throw new Error("idempotency store unavailable");
+      },
+      async markSucceeded() {
+        calls.push(["markSucceeded"]);
+      },
+      async markFailed() {
+        calls.push(["markFailed"]);
+      }
+    },
+    persistence: {
+      async persistInboundEvent() {
+        calls.push(["persistInboundEvent"]);
+      }
+    },
+    queue: {
+      async enqueueInboundEvent() {
+        calls.push(["enqueueInboundEvent"]);
+      }
+    }
+  });
+
+  await assert.rejects(
+    async () => handler({
+      headers: { "x-tenant-id": "tenant-1" },
+      id: "req-1",
+      correlationId: "corr-1",
+      body: createWebhookBody(),
+      log: { info() {}, error() {} }
+    }, createReply()),
+    /idempotency store unavailable/u
+  );
+
+  assert.deepEqual(calls, [["reserve", "tenant-1:META:meta-event-1"]]);
+});
+
 test("webhook ingestion fails closed when tenant header does not match event", async () => {
   const handler = createInboundWebhookIngestionHandler({
     idempotency: {

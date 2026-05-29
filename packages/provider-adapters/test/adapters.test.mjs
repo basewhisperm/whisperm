@@ -209,6 +209,48 @@ test('provider health checks propagate tenant-safe correlation and never expose 
 });
 
 
+
+
+test('AnthropicProviderAdapter forwards configured anthropicVersion to transport', async () => {
+  const adapter = new AnthropicProviderAdapter({
+    ...descriptor,
+    providerId: 'provider-anthropic-1',
+    kind: 'ANTHROPIC',
+    displayName: 'Tenant Anthropic adapter',
+    metadata: { anthropicVersion: '2023-06-01' },
+  }, createDependencies({
+    secretResolver: {
+      async resolveSecretReference(resolveRequest) {
+        assert.equal(resolveRequest.tenantId, 'tenant-1');
+        return { value: 'mock-secret-value' };
+      },
+    },
+    transport: {
+      async sendText(transportRequest) {
+        assert.equal(transportRequest.providerKind, 'ANTHROPIC');
+        assert.equal(transportRequest.providerId, 'provider-anthropic-1');
+        assert.equal(transportRequest.anthropicVersion, '2023-06-01');
+        return {
+          id: 'anthropic-response-1',
+          content: 'Hello from a mock Anthropic provider.',
+          finishReason: 'stop',
+          inputTokens: 8,
+          outputTokens: 5,
+        };
+      },
+    },
+  }));
+
+  const response = await adapter.generate(request, {
+    ...route,
+    providerId: 'provider-anthropic-1',
+    providerKind: 'ANTHROPIC',
+    model: 'mock-anthropic-model',
+  });
+
+  assert.equal(response.providerKind, 'ANTHROPIC');
+});
+
 test('Anthropic and Gemini adapter skeletons enforce descriptor kind compatibility', async () => {
   const anthropic = new AnthropicProviderAdapter({ ...descriptor, providerId: 'provider-anthropic-1', kind: 'ANTHROPIC', displayName: 'Tenant Anthropic adapter' }, createDependencies());
   const anthropicRoute = { ...route, providerId: 'provider-anthropic-1', providerKind: 'ANTHROPIC', model: 'mock-anthropic-model' };
