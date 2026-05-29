@@ -375,20 +375,27 @@ export interface LoadedModuleGraph {
 
 export const loadRuntimeModules = (modules: readonly RuntimeModule[]): LoadedModuleGraph => {
   const seenModules = new Set<string>();
+  const loadingModules = new Set<string>();
   const orderedModules: RuntimeModule[] = [];
   const registry = new ServiceRegistry();
 
-  const load = (module: RuntimeModule): void => {
+  const load = (module: RuntimeModule, path: readonly string[] = []): void => {
     if (!runtimeNamePattern.test(module.name)) {
       throw new ApplicationRuntimeError({ code: "RUNTIME_VALIDATION_FAILED", message: "Runtime module name is invalid", status: 400, details: { moduleName: module.name } });
+    }
+    if (loadingModules.has(module.name)) {
+      throw new ApplicationRuntimeError({ code: "RUNTIME_DEPENDENCY_CYCLE", message: "Runtime module import cycle detected", status: 409, details: { cycle: [...path, module.name].join(" -> ") } });
     }
     if (seenModules.has(module.name)) {
       throw new ApplicationRuntimeError({ code: "RUNTIME_DUPLICATE_MODULE", message: "Runtime module is already loaded", status: 409, details: { moduleName: module.name } });
     }
-    seenModules.add(module.name);
+
+    loadingModules.add(module.name);
     for (const importedModule of module.imports ?? []) {
-      load(importedModule);
+      load(importedModule, [...path, module.name]);
     }
+    loadingModules.delete(module.name);
+    seenModules.add(module.name);
     orderedModules.push(module);
     for (const service of module.services ?? []) {
       registry.register(service);

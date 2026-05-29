@@ -143,6 +143,13 @@ test("campaign lifecycle state machine enforces deterministic transitions", () =
 test("sequence, trigger, retry, quota, budget, approval, and validation helpers fail closed", () => {
   assert.equal(campaignSequenceContractSchema.parse(sequence).entryStepId, "step-1");
   assert.throws(() => campaignSequenceContractSchema.parse({ ...sequence, entryStepId: "missing" }), /entryStepId/u);
+  assert.throws(
+    () => campaignSequenceContractSchema.parse({
+      ...sequence,
+      steps: sequence.steps.map((step) => step.stepId === "step-2" ? { ...step, nextStepIds: ["step-1"] } : step)
+    }),
+    /acyclic/u
+  );
 
   const retry = campaignRetryPolicySchema.parse({
     retryPolicyId: "retry-1",

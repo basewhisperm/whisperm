@@ -196,6 +196,15 @@ test("quota and rate limit helpers fail closed with replay-safe enforcement deci
   const rateDecision = evaluateRateLimit({ policy: rateLimit, observedQuantity: 11, requestedQuantity: 2, evaluatedAt: now });
   assert.equal(rateDecision.allowed, false);
   assert.equal(rateDecision.limit, 12);
+
+  const sustainedDecision = evaluateRateLimit({
+    policy: { ...rateLimit, rateLimitId: "rate-2", burstLimit: undefined },
+    observedQuantity: 8,
+    requestedQuantity: 2,
+    evaluatedAt: now
+  });
+  assert.equal(sustainedDecision.allowed, true);
+  assert.equal(sustainedDecision.limit, 10);
 });
 
 test("billing cycle state machine rejects invalid transitions and stamps deterministic timestamps", () => {
