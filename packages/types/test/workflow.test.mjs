@@ -128,9 +128,10 @@ test("retry policy model is deterministic and bounded", () => {
   assert.equal(shouldRetryWorkflowStep(policy, 3), true);
   assert.equal(shouldRetryWorkflowStep(policy, 4), false);
 
-  assert.throws(() => {
-    calculateRetryDelayMs({ ...policy, jitter: true }, 1);
-  });
+  assert.throws(
+    () => calculateRetryDelayMs({ ...policy, jitter: true }, 1),
+    (error) => error instanceof WorkflowError && error.code === "WORKFLOW_DEFINITION_INVALID"
+  );
 });
 
 test("workflow tenant guard fails closed before execution on missing or mismatched tenant context", () => {

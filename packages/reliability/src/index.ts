@@ -96,10 +96,14 @@ export const calculateRollingWindowBurnRate = (
   }
 
   const aggregate = windows.reduce(
-    (acc, sample) => ({
-      totalRequests: acc.totalRequests + sample.totalRequests,
-      errorRequests: acc.errorRequests + sample.errorRequests,
-    }),
+    (acc, sample) => {
+      calculateErrorRate(sample.totalRequests, sample.errorRequests);
+
+      return {
+        totalRequests: acc.totalRequests + sample.totalRequests,
+        errorRequests: acc.errorRequests + sample.errorRequests,
+      };
+    },
     { totalRequests: 0, errorRequests: 0 },
   );
 
