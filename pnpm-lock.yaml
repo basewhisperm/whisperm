@@ -28,6 +28,12 @@ importers:
 
   apps/worker: {}
 
+  packages/provider-adapters:
+    dependencies:
+      '@whisperm/types':
+        specifier: workspace:*
+        version: link:../types
+
   packages/reliability: {}
 
   packages/sdk: {}
