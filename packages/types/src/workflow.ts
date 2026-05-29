@@ -128,6 +128,15 @@ export const defaultRetryPolicy = {
 } as const satisfies RetryPolicy;
 
 export const calculateRetryDelayMs = (policy: RetryPolicy, attempt: number): number => {
+  if ((policy as { readonly jitter?: unknown }).jitter === true) {
+    throw new WorkflowError({
+      code: "WORKFLOW_DEFINITION_INVALID",
+      message: "Retry policy jitter is not supported for deterministic workflow retries",
+      status: 400,
+      details: { jitter: true }
+    });
+  }
+
   const parsedPolicy = retryPolicySchema.parse(policy);
   if (!Number.isInteger(attempt) || attempt < 1) {
     throw new WorkflowError({
