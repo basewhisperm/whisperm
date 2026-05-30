@@ -64,6 +64,18 @@ importers:
         specifier: workspace:*
         version: link:../types
 
+  packages/publishing-runtime:
+    dependencies:
+      '@whisperm/repositories':
+        specifier: workspace:*
+        version: link:../repositories
+      '@whisperm/types':
+        specifier: workspace:*
+        version: link:../types
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
+
   packages/multi-agent-runtime:
     dependencies:
       '@whisperm/types':
