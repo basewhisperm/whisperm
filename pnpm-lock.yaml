@@ -26,7 +26,17 @@ importers:
 
   apps/web: {}
 
-  apps/worker: {}
+  apps/worker:
+    dependencies:
+      '@whisperm/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      '@whisperm/worker-runtime':
+        specifier: workspace:*
+        version: link:../../packages/worker-runtime
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   packages/approval-runtime:
     dependencies:
