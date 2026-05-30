@@ -36,6 +36,9 @@ import {
 import {
   inboundEventSchema,
   normalizeInboundEvent,
+  scoreRecomputationJobPayloadSchema,
+  scoreRecomputationQueueContract,
+  type ScoreRecomputationResult,
   type CorrelationMetadata,
   type InboundEvent,
   type NormalizedInboundEvent,
@@ -114,8 +117,16 @@ export interface EventIngestionServicePort {
   ): Promise<{ readonly id: string; readonly tenantId: string }> | { readonly id: string; readonly tenantId: string };
 }
 
+export interface ScoreRecomputationServicePort {
+  recomputeContactScore(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: z.output<typeof scoreRecomputationJobPayloadSchema>,
+  ): Promise<ScoreRecomputationResult> | ScoreRecomputationResult;
+}
+
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
+  readonly scoring?: ScoreRecomputationServicePort | undefined;
 }
 
 export interface QueueRegistration {
@@ -381,18 +392,57 @@ export const createEventIngestionHandler = (services: WorkerServices, clock: Wor
   },
 });
 
+
+export const createScoreRecomputationHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.scoring === undefined) {
+      throw new WorkerRuntimeError({
+        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        message: "Score recomputation service port is not configured",
+        status: 503,
+        retryable: true,
+        correlation: context.correlation,
+      });
+    }
+    const payload = scoreRecomputationJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({
+        code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION",
+        message: "Score recomputation job tenantId must match execution context",
+        status: 403,
+        correlation: context.correlation,
+      });
+    }
+    const result = await services.scoring.recomputeContactScore({ tenantId: context.tenantId, correlation: context.correlation }, payload);
+    return workerRuntimeMetadataSchema.parse({
+      tenantId: result.tenantId,
+      contactId: result.contactId,
+      leadScore: result.leadScore,
+      trajectoryScore: result.trajectoryScore,
+      trustBand: result.trustBand,
+      correlationId: result.correlation.correlationId,
+    });
+  },
+});
+
 export const createWorkerDefinitions = (input: {
   readonly tenantId: string;
   readonly services: WorkerServices;
   readonly clock?: WorkerClock | undefined;
 }): readonly RegisteredWorkerDefinition[] => {
-  const definitions: readonly RegisteredWorkerDefinition[] = [
+  const definitions: RegisteredWorkerDefinition[] = [
     {
       name: "event-ingestion-worker",
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "event.ingestion", deadLetterQueueName: "event.ingestion.dlq" }),
       jobTypes: ["event.ingestion"],
       handler: createEventIngestionHandler(input.services, input.clock),
     },
+    ...(input.services.scoring === undefined ? [] : [{
+      name: "score-recomputation-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: scoreRecomputationQueueContract.queueName, deadLetterQueueName: `${scoreRecomputationQueueContract.queueName}.dlq` }),
+      jobTypes: [scoreRecomputationQueueContract.jobType],
+      handler: createScoreRecomputationHandler(input.services),
+    }]),
     {
       name: "publish-worker",
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "publish", deadLetterQueueName: "publish.dlq" }),
