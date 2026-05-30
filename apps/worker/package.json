@@ -9,6 +9,6 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test test/smoke.test.js"
+    "test": "pnpm run build && node --test test/*.test.js"
   }
 }
