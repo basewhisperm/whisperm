@@ -1,0 +1,168 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  InMemoryQueueRuntime,
+  createWorkerApplication,
+} from '../dist/index.js';
+
+const fixedDate = new Date('2026-01-01T00:00:00.000Z');
+const correlation = { correlationId: 'corr-1', requestId: 'req-1' };
+const clock = { now: () => fixedDate };
+
+const createRuntimePorts = () => {
+  const completed = [];
+  return {
+    completed,
+    ports: {
+      idempotency: {
+        claim: () => ({ status: 'CLAIMED' }),
+        complete: (input) => { completed.push(input); },
+      },
+      clock,
+    },
+  };
+};
+
+const createJob = (overrides = {}) => ({
+  tenantId: 'tenant-1',
+  jobId: 'job-1',
+  queueName: 'event.ingestion',
+  jobType: 'event.ingestion',
+  version: 1,
+  payload: {
+    event: {
+      tenantId: 'tenant-1',
+      source: {
+        provider: 'WEB_FORM',
+        providerEventId: 'provider-event-1',
+        eventType: 'lead.created',
+      },
+      payload: { leadId: 'lead-1' },
+    },
+  },
+  correlation,
+  idempotency: {
+    tenantId: 'tenant-1',
+    scope: 'EXTERNAL_EVENT',
+    key: 'tenant-1:WEB_FORM:provider-event-1',
+    replaySafe: true,
+    conflictPolicy: 'SKIP_DUPLICATE',
+  },
+  scheduling: {
+    tenantId: 'tenant-1',
+    queueName: 'event.ingestion',
+    priority: 'NORMAL',
+  },
+  retryPolicy: {
+    tenantId: 'tenant-1',
+    maxAttempts: 1,
+    backoff: {
+      kind: 'NONE',
+      baseDelayMs: 0,
+      maxDelayMs: 0,
+      multiplier: 2,
+      jitter: false,
+    },
+    retryableErrorCodes: [],
+    nonRetryableErrorCodes: ['WORKER_RUNTIME_VALIDATION_FAILED'],
+    deadLetterAfterMaxAttempts: true,
+    replaySafe: true,
+  },
+  poisonPolicy: {
+    tenantId: 'tenant-1',
+    enabled: false,
+    maxValidationFailures: 1,
+    maxConsecutiveFailures: 3,
+    deadLetterOnPoison: true,
+  },
+  createdAt: fixedDate.toISOString(),
+  metadata: {},
+  ...overrides,
+});
+
+const createApp = (services, runtimePorts, queues = new InMemoryQueueRuntime()) => createWorkerApplication({
+  config: {
+    tenantId: 'tenant-1',
+    workerId: 'worker-1',
+    gracefulShutdownMs: 1000,
+    heartbeatIntervalMs: 5000,
+    runtimeVersion: 'test',
+    correlation,
+  },
+  services,
+  queues,
+  runtimePorts,
+  clock,
+  telemetry: {},
+  logger: { info() {}, warn() {}, error() {} },
+});
+
+test('registers event ingestion, publish, and scheduler workers on startup', async () => {
+  const queues = new InMemoryQueueRuntime();
+  const runtime = createRuntimePorts();
+  const app = createApp({ events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) } }, runtime.ports, queues);
+
+  const registrations = await app.start();
+
+  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'publish', 'scheduler']);
+  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'publish.dispatch', 'scheduler.tick']);
+  assert.equal(app.getReadiness().status, 'HEALTHY');
+  assert.equal(queues.isWorkerActive('event-ingestion-worker'), true);
+  assert.equal(queues.isWorkerActive('publish-worker'), true);
+  assert.equal(queues.isWorkerActive('scheduler-worker'), true);
+});
+
+test('event ingestion worker propagates tenant and correlation through DI service', async () => {
+  const calls = [];
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: {
+      ingest: async (context, input) => {
+        calls.push({ context, input });
+        return { id: 'ingestion-1', tenantId: input.tenantId };
+      },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({ job: createJob() });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(result.result.ingestionId, 'ingestion-1');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].context.tenantId, 'tenant-1');
+  assert.equal(calls[0].context.correlation.correlationId, 'corr-1');
+  assert.equal(calls[0].input.provider, 'WEB_FORM');
+  assert.equal(calls[0].input.correlationId, 'corr-1');
+  assert.equal(runtime.completed.length, 1);
+});
+
+test('invalid event payload is deterministically dead-lettered', async () => {
+  const queues = new InMemoryQueueRuntime();
+  const runtime = createRuntimePorts();
+  const app = createApp({ events: { ingest: async () => ({ id: 'never-called', tenantId: 'tenant-1' }) } }, runtime.ports, queues);
+  await app.start();
+
+  const result = await app.processJob({ job: createJob({ payload: { event: { tenantId: 'tenant-1' } } }) });
+
+  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(result.deadLetter.reason, 'NON_RETRYABLE_ERROR');
+  assert.equal(queues.getDeadLetters().length, 1);
+  assert.equal(queues.getDeadLetters()[0].job.tenantId, 'tenant-1');
+  assert.equal(queues.getDeadLetters()[0].error.code, 'WORKER_RUNTIME_VALIDATION_FAILED');
+});
+
+test('shutdown drains registered workers and reports stopped health', async () => {
+  const queues = new InMemoryQueueRuntime();
+  const runtime = createRuntimePorts();
+  const app = createApp({ events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) } }, runtime.ports, queues);
+  await app.start();
+
+  const shutdown = await app.stop('test complete');
+
+  assert.equal(shutdown.mode, 'DRAIN');
+  assert.equal(queues.isWorkerActive('event-ingestion-worker'), false);
+  assert.equal(queues.isWorkerActive('publish-worker'), false);
+  assert.equal(queues.isWorkerActive('scheduler-worker'), false);
+  assert.equal(app.getHealth().status, 'STOPPED');
+});
