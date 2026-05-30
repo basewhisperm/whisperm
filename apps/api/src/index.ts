@@ -39,3 +39,19 @@ export type {
 } from "./auth/types.js";
 export { correlationIdMiddleware } from "./http/correlation.js";
 export type { FastifyHookHandler, FastifyReplyLike, FastifyRequestLike, FastifyRouteHandler, RequestLogger } from "./http/fastify.js";
+
+export { ApiError, mapErrorToHttp } from "./errors.js";
+export type { ApiErrorCode, ApiErrorOptions, ErrorResponse } from "./errors.js";
+export { createApiServer } from "./server.js";
+export type {
+  ApiKeyAuthenticationInput,
+  ApiKeyAuthenticator,
+  ApiKeyPrincipal,
+  ApiServer,
+  ApiServerDependencies,
+  HmacVerificationInput,
+  HmacVerifier,
+  InjectOptions,
+  InjectResponse,
+  ReadinessCheck,
+} from "./server.js";
