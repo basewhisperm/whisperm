@@ -29,6 +29,17 @@ const createRepositories = (overrides = {}) => {
       async list(scope) { push("users", "list", [scope]); return page(); },
       async update(scope, id, input) { push("users", "update", [scope, id, input]); return { id, tenantId: scope.tenantId, email: input.email ?? "person@example.com", role: input.role ?? "MEMBER", isActive: input.isActive ?? true, createdAt: now, updatedAt: now }; }
     },
+    contacts: {
+      async create(scope, input) { push("contacts", "create", [scope, input]); return { id: "contact-1", tenantId: input.tenantId, externalId: input.externalId ?? null, email: input.email ?? null, phone: input.phone ?? null, firstName: input.firstName ?? null, lastName: input.lastName ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async findById(scope, id) { push("contacts", "findById", [scope, id]); return { id, tenantId: scope.tenantId, externalId: "ext-1", email: "lead@example.com", phone: "+15555550100", firstName: "Lead", lastName: "One", metadata: {}, createdAt: now, updatedAt: now }; },
+      async list(scope) { push("contacts", "list", [scope]); return page([{ id: "contact-1", tenantId: scope.tenantId, email: "lead@example.com", phone: null, firstName: null, lastName: null, externalId: null, metadata: {}, createdAt: now, updatedAt: now }]); },
+      async update(scope, id, input) { push("contacts", "update", [scope, id, input]); return { id, tenantId: scope.tenantId, externalId: input.externalId ?? null, email: input.email ?? "lead@example.com", phone: input.phone ?? null, firstName: input.firstName ?? "Updated", lastName: input.lastName ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async listLeadEvents(scope, contactId) { push("contacts", "listLeadEvents", [scope, contactId]); return page([
+        { id: "lead-event-1", tenantId: scope.tenantId, contactId, eventType: "lead.created", occurredAt: "2026-05-28T00:00:00.000Z", payload: {}, createdAt: now },
+        { id: "lead-event-2", tenantId: scope.tenantId, contactId, eventType: "email.clicked", occurredAt: "2026-05-27T00:00:00.000Z", payload: {}, createdAt: now },
+        { id: "lead-event-3", tenantId: scope.tenantId, contactId, eventType: "meeting.booked", occurredAt: "2026-05-15T00:00:00.000Z", payload: {}, createdAt: now }
+      ]); }
+    },
     campaigns: {
       async create(scope, input) { push("campaigns", "create", [scope, input]); return { id: "campaign-1", tenantId: input.tenantId, title: input.title, state: input.state ?? "DRAFT", contactId: null, createdByUserId: null, externalId: null, source: null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
       async findById(scope, id) { push("campaigns", "findById", [scope, id]); return { id, tenantId: scope.tenantId, title: "Campaign", state: "DRAFT", createdAt: now, updatedAt: now }; },
@@ -117,6 +128,17 @@ test("write services run audit and outbox hooks inside the transaction abstracti
 test("idempotent campaign publishing returns the existing job without duplicate side effects", async () => {
   const existingJob = { id: "publish-existing", tenantId: "tenant-a", target: "email", state: "QUEUED", attempts: 0, idempotencyKey: "publish-key", contentItemId: null, contentVariantId: null, externalId: null, scheduledAt: null, startedAt: null, finishedAt: null, errorMessage: null, metadata: {}, createdAt: now, updatedAt: now };
   const repositories = createRepositories({
+    contacts: {
+      async create(scope, input) { push("contacts", "create", [scope, input]); return { id: "contact-1", tenantId: input.tenantId, externalId: input.externalId ?? null, email: input.email ?? null, phone: input.phone ?? null, firstName: input.firstName ?? null, lastName: input.lastName ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async findById(scope, id) { push("contacts", "findById", [scope, id]); return { id, tenantId: scope.tenantId, externalId: "ext-1", email: "lead@example.com", phone: "+15555550100", firstName: "Lead", lastName: "One", metadata: {}, createdAt: now, updatedAt: now }; },
+      async list(scope) { push("contacts", "list", [scope]); return page([{ id: "contact-1", tenantId: scope.tenantId, email: "lead@example.com", phone: null, firstName: null, lastName: null, externalId: null, metadata: {}, createdAt: now, updatedAt: now }]); },
+      async update(scope, id, input) { push("contacts", "update", [scope, id, input]); return { id, tenantId: scope.tenantId, externalId: input.externalId ?? null, email: input.email ?? "lead@example.com", phone: input.phone ?? null, firstName: input.firstName ?? "Updated", lastName: input.lastName ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async listLeadEvents(scope, contactId) { push("contacts", "listLeadEvents", [scope, contactId]); return page([
+        { id: "lead-event-1", tenantId: scope.tenantId, contactId, eventType: "lead.created", occurredAt: "2026-05-28T00:00:00.000Z", payload: {}, createdAt: now },
+        { id: "lead-event-2", tenantId: scope.tenantId, contactId, eventType: "email.clicked", occurredAt: "2026-05-27T00:00:00.000Z", payload: {}, createdAt: now },
+        { id: "lead-event-3", tenantId: scope.tenantId, contactId, eventType: "meeting.booked", occurredAt: "2026-05-15T00:00:00.000Z", payload: {}, createdAt: now }
+      ]); }
+    },
     campaigns: {
       ...createRepositories().campaigns,
       async findPublishJobByIdempotencyKey(scope, key) { repositories.calls.push({ repo: "campaigns", method: "findPublishJobByIdempotencyKey", args: [scope, key] }); return existingJob; }
@@ -163,4 +185,95 @@ test("transaction manager failures are surfaced as typed transaction errors", as
     services.billing.recordUsage(context, { tenantId: "tenant-a", usageId: "usage-1", metric: "tokens", quantity: 10, occurredAt: now, idempotencyKey: "usage-key", correlation }),
     (error) => error instanceof ServiceError && error.code === "SERVICE_TRANSACTION_FAILED" && error.status === 500
   );
+});
+
+
+test("contact create success validates tenant and records side effects", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const contact = await services.contacts.create(context, { tenantId: "tenant-a", email: "new@example.com", firstName: "New" });
+
+  assert.equal(contact.tenantId, "tenant-a");
+  assert.equal(contact.email, "new@example.com");
+  assert.deepEqual(repositories.calls.find((call) => call.repo === "contacts" && call.method === "create").args[0], { tenantId: "tenant-a" });
+  assert.equal(repositories.calls.some((call) => call.repo === "events" && call.method === "appendOutbox" && call.args[1].eventType === "contact.created"), true);
+});
+
+test("contact update success is tenant-scoped and optimistic", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const contact = await services.contacts.update(context, "contact-1", { expectedUpdatedAt: now, firstName: "Updated" });
+
+  assert.equal(contact.firstName, "Updated");
+  assert.deepEqual(repositories.calls.find((call) => call.repo === "contacts" && call.method === "update").args, [{ tenantId: "tenant-a" }, "contact-1", { expectedUpdatedAt: now, firstName: "Updated" }]);
+});
+
+test("contact service rejects tenant mismatch before repository writes", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  await assert.rejects(
+    services.contacts.create(context, { tenantId: "tenant-b", email: "wrong@example.com" }),
+    (error) => error instanceof ServiceError && error.code === "SERVICE_TENANT_MISMATCH"
+  );
+  assert.equal(repositories.calls.some((call) => call.repo === "contacts" && call.method === "create"), false);
+});
+
+test("invalid contact payload is rejected before repository writes", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  await assert.rejects(
+    services.contacts.create(context, { tenantId: "tenant-a", email: "not-an-email" }),
+    (error) => error instanceof ServiceError && error.code === "SERVICE_VALIDATION_FAILED"
+  );
+  assert.equal(repositories.calls.some((call) => call.repo === "contacts" && call.method === "create"), false);
+});
+
+test("LeadScore calculation combines identity and weighted engagement deterministically", async () => {
+  const { computeLeadScore } = await import("../dist/index.js");
+  const score = computeLeadScore(
+    { id: "contact-1", tenantId: "tenant-a", email: "lead@example.com", phone: "+15555550100", externalId: "ext-1", createdAt: now, updatedAt: now },
+    [
+      { id: "event-1", tenantId: "tenant-a", contactId: "contact-1", eventType: "lead.created", occurredAt: now, payload: {}, createdAt: now },
+      { id: "event-2", tenantId: "tenant-a", contactId: "contact-1", eventType: "meeting.booked", occurredAt: now, payload: {}, createdAt: now }
+    ]
+  );
+
+  assert.deepEqual(score, { eventScore: 75, identityScore: 20, engagementScore: 55, eventCount: 2 });
+});
+
+test("TrajectoryScore calculation compares recent and previous seven-day windows", async () => {
+  const { computeTrajectoryScore } = await import("../dist/index.js");
+  const score = computeTrajectoryScore([
+    { id: "event-1", tenantId: "tenant-a", contactId: "contact-1", eventType: "meeting.booked", occurredAt: "2026-05-28T00:00:00.000Z", payload: {}, createdAt: now },
+    { id: "event-2", tenantId: "tenant-a", contactId: "contact-1", eventType: "email.opened", occurredAt: "2026-05-20T00:00:00.000Z", payload: {}, createdAt: now }
+  ], new Date("2026-05-29T00:00:00.000Z"));
+
+  assert.deepEqual(score, { score: 30, recentScore: 35, previousScore: 5, recentEventCount: 1, previousEventCount: 1 });
+});
+
+test("trustBand derivation maps combined lead and trajectory scores", async () => {
+  const { deriveTrustBand } = await import("../dist/index.js");
+
+  assert.equal(deriveTrustBand(80, 20), "HIGH");
+  assert.equal(deriveTrustBand(45, 0), "MEDIUM");
+  assert.equal(deriveTrustBand(20, -20), "LOW");
+});
+
+test("score recomputation is deterministic for the same contact, events, and clock", async () => {
+  const repositories = createRepositories();
+  const { ScoringService } = await import("../dist/index.js");
+  const scoring = new ScoringService(repositories, { now: () => new Date(now) });
+  const input = { tenantId: "tenant-a", contactId: "contact-1", reason: "test", requestedAt: now, correlation };
+
+  const first = await scoring.recomputeContactScore(context, input);
+  const second = await scoring.recomputeContactScore(context, input);
+
+  assert.deepEqual(first, second);
+  assert.equal(first.leadScore, 90);
+  assert.equal(first.trajectoryScore, 0);
+  assert.equal(first.trustBand, "HIGH");
 });
