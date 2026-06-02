@@ -55,3 +55,6 @@ export type {
   InjectResponse,
   ReadinessCheck,
 } from "./server.js";
+
+export { OAuthError, buildGoogleAuthorizationUrl, createGoogleOAuthHandler, createOAuthCallbackRouteHandler, createOAuthInitiateRouteHandler, generateOAuthState } from "./auth/oauth.js";
+export type { GoogleOAuthConfig, GoogleOAuthDependencies, GoogleOAuthHandler, GoogleUserInfo, OAuthCallbackResult, OAuthErrorCode, OAuthHttpClient, OAuthRouteResult, OAuthSessionService, OAuthSessionToken, OAuthStateStore, OAuthTenantRecord, OAuthTokenResponse, OAuthUserRecord, OAuthUserRepository } from "./auth/oauth.js";
