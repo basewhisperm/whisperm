@@ -45,7 +45,7 @@ const createDelegate = (name) => {
 
 const createClient = () => {
   const names = [
-    "tenant", "tenantUser", "contentItem", "contentVariant", "publishJob", "workflowExecution",
+    "tenant", "tenantUser", "contact", "leadEvent", "contentItem", "contentVariant", "publishJob", "workflowExecution",
     "workflowStepExecution", "eventIngestion", "outboxEvent", "inboxEvent", "idempotencyKey", "aiExecution", "auditLog"
   ];
   return Object.fromEntries(names.map((name) => [name, createDelegate(name)]));
@@ -123,6 +123,19 @@ test("factory wires all repository interfaces", () => {
   const repositories = createPrismaRepositories(createClient());
 
   assert.deepEqual(Object.keys(repositories).sort(), [
-    "approvals", "auditLogs", "billing", "campaigns", "events", "executions", "tenants", "users", "workflows"
+    "approvals", "auditLogs", "billing", "campaigns", "contacts", "events", "executions", "tenants", "users", "workflows"
   ].sort());
+});
+
+
+test("tenant-scoped contact reads include tenantId and lead events stay contact-scoped", async () => {
+  const prisma = createClient();
+  const { PrismaContactRepository } = await import("../dist/index.js");
+  const contacts = new PrismaContactRepository(prisma);
+
+  await contacts.findById({ tenantId: "tenant-a" }, "contact-1");
+  await contacts.listLeadEvents({ tenantId: "tenant-a" }, "contact-1");
+
+  assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", id: "contact-1" });
+  assert.deepEqual(prisma.leadEvent.calls[0].args.where, { tenantId: "tenant-a", contactId: "contact-1" });
 });

@@ -55,3 +55,5 @@ export type {
   InjectResponse,
   ReadinessCheck,
 } from "./server.js";
+
+export * from "./crm/contacts.js";

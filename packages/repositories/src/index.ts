@@ -63,6 +63,8 @@ interface PrismaDelegate {
 export interface PrismaPersistenceClient {
   readonly tenant: PrismaDelegate;
   readonly tenantUser: PrismaDelegate;
+  readonly contact: PrismaDelegate;
+  readonly leadEvent: PrismaDelegate;
   readonly contentItem: PrismaDelegate;
   readonly contentVariant: PrismaDelegate;
   readonly publishJob: PrismaDelegate;
@@ -126,6 +128,33 @@ export const userSchema = baseRecordSchema.extend({
 export type User = z.output<typeof userSchema>;
 export type CreateUserInput = TenantScoped & Pick<User, "email" | "role"> & Partial<Pick<User, "externalUserId" | "displayName" | "isActive">>;
 export type UpdateUserInput = Partial<Pick<User, "email" | "role" | "externalUserId" | "displayName" | "isActive">> & OptimisticLock;
+
+
+export const contactRecordSchema = baseRecordSchema.extend({
+  externalId: z.string().min(1).nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  phone: z.string().min(1).nullable().optional(),
+  firstName: z.string().min(1).nullable().optional(),
+  lastName: z.string().min(1).nullable().optional(),
+  metadata: metadataSchema.nullable().optional()
+}).required({ updatedAt: true }).strict();
+export type ContactRecord = z.output<typeof contactRecordSchema>;
+export type CreateContactInput = TenantScoped & Partial<Pick<ContactRecord, "externalId" | "email" | "phone" | "firstName" | "lastName" | "metadata">>;
+export type UpdateContactInput = Partial<Pick<ContactRecord, "externalId" | "email" | "phone" | "firstName" | "lastName" | "metadata">> & OptimisticLock;
+
+export const leadEventRecordSchema = z.object({
+  id: z.string().min(1),
+  tenantId: z.string().min(1),
+  contactId: z.string().min(1).nullable().optional(),
+  inboundEventId: z.string().min(1).nullable().optional(),
+  externalId: z.string().min(1).nullable().optional(),
+  eventType: z.string().min(1),
+  correlationId: z.string().min(1).nullable().optional(),
+  occurredAt: isoDateSchema,
+  payload: metadataSchema.nullable().optional(),
+  createdAt: isoDateSchema
+}).strict();
+export type LeadEventRecord = z.output<typeof leadEventRecordSchema>;
 
 export const campaignSchema = baseRecordSchema.extend({
   contactId: z.string().min(1).nullable().optional(),
@@ -334,6 +363,7 @@ export interface TenantRepository extends RepositoryTransactionRunner {
   update(id: string, input: UpdateTenantInput): Promise<Tenant>;
 }
 export interface UserRepository { create(context: TenantScoped, input: CreateUserInput): Promise<User>; findById(context: TenantScoped, id: string): Promise<User | null>; findByEmail(context: TenantScoped, email: string): Promise<User | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<User>>; update(context: TenantScoped, id: string, input: UpdateUserInput): Promise<User>; }
+export interface ContactRepository { create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord>; findById(context: TenantScoped, id: string): Promise<ContactRecord | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>>; update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord>; listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>>; }
 export interface CampaignRepository { create(context: TenantScoped, input: CreateCampaignInput): Promise<Campaign>; findById(context: TenantScoped, id: string): Promise<Campaign | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<Campaign>>; update(context: TenantScoped, id: string, input: UpdateCampaignInput): Promise<Campaign>; addVariant(context: TenantScoped, input: CreateCampaignVariantInput): Promise<CampaignVariant>; enqueuePublish(context: TenantScoped, input: CreatePublishJobInput): Promise<PublishJob>; findPublishJobByIdempotencyKey(context: TenantScoped, idempotencyKey: string): Promise<PublishJob | null>; }
 export interface WorkflowRepository { createExecution(context: TenantScoped, input: CreateWorkflowExecutionInput): Promise<WorkflowExecution>; findExecutionById(context: TenantScoped, id: string): Promise<WorkflowExecution | null>; findExecutionByRunId(context: TenantScoped, runId: string): Promise<WorkflowExecution | null>; updateExecution(context: TenantScoped, id: string, input: UpdateWorkflowExecutionInput): Promise<WorkflowExecution>; upsertStep(context: TenantScoped, input: UpsertWorkflowStepInput): Promise<WorkflowStepExecution>; listRunnableExecutions(context: TenantScoped, state: z.output<typeof workflowExecutionStateSchema>, page?: PageRequest): Promise<Page<WorkflowExecution>>; }
 export interface ApprovalRepository { createRequest(context: TenantScoped, input: CreateApprovalRequestInput): Promise<ApprovalRequestRecord>; recordDecision(context: TenantScoped, input: CreateApprovalDecisionInput): Promise<ApprovalDecisionRecord>; findRequestByApprovalId(context: TenantScoped, approvalId: string): Promise<ApprovalRequestRecord | null>; }
@@ -437,6 +467,16 @@ export class PrismaUserRepository implements UserRepository {
   async update(context: TenantScoped, id: string, input: UpdateUserInput): Promise<User> { ensureContext(context); return updateOptimistic(this.prisma.tenantUser, userSchema, context, id, input); }
 }
 
+
+export class PrismaContactRepository implements ContactRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+  async create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord> { ensureTenantInput(context, input); try { return parseRecord(contactRecordSchema, await this.prisma.contact.create({ data: dataWithDefined(input) })); } catch (error) { return mapPrismaError(error, "Contact already exists"); } }
+  async findById(context: TenantScoped, id: string): Promise<ContactRecord | null> { ensureContext(context); const result = await this.prisma.contact.findFirst({ where: byTenantId(context, id) }); return result === null ? null : parseRecord(contactRecordSchema, result); }
+  async list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>> { ensureContext(context); const args = pageArgs(page); const rows = await this.prisma.contact.findMany({ where: cursorWhere(context, args.cursor), take: args.take, orderBy: { id: "asc" } }); return paginate(rows.map((row) => parseRecord(contactRecordSchema, row)), args.take - 1); }
+  async update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord> { ensureContext(context); return updateOptimistic(this.prisma.contact, contactRecordSchema, context, id, input); }
+  async listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>> { ensureContext(context); const args = pageArgs(page); const rows = await this.prisma.leadEvent.findMany({ where: cursorWhere(context, args.cursor, { contactId }), take: args.take, orderBy: { id: "asc" } }); return paginate(rows.map((row) => parseRecord(leadEventRecordSchema, row)), args.take - 1); }
+}
+
 export class PrismaCampaignRepository implements CampaignRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
   async create(context: TenantScoped, input: CreateCampaignInput): Promise<Campaign> { ensureTenantInput(context, input); try { return parseRecord(campaignSchema, await this.prisma.contentItem.create({ data: dataWithDefined({ state: "DRAFT", ...input }) })); } catch (error) { return mapPrismaError(error, "Campaign already exists"); } }
@@ -502,6 +542,7 @@ export class PrismaAuditLogRepository implements AuditLogRepository {
 export interface PrismaRepositories {
   readonly tenants: TenantRepository;
   readonly users: UserRepository;
+  readonly contacts: ContactRepository;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -516,6 +557,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
   return {
     tenants: new PrismaTenantRepository(prisma),
     users: new PrismaUserRepository(prisma),
+    contacts: new PrismaContactRepository(prisma),
     campaigns: new PrismaCampaignRepository(prisma),
     workflows: new PrismaWorkflowRepository(prisma),
     approvals: new PrismaApprovalRepository(auditLogs),
