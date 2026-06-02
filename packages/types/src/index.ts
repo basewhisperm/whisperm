@@ -204,6 +204,7 @@ export * from "./workflow.js";
 export * from "./ai.js";
 export * from "./prompts.js";
 export * from "./planning.js";
+export * from "./crm.js";
 
 export * from "./tool-runtime.js";
 export * from "./retrieval.js";

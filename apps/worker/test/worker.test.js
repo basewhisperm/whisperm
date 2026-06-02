@@ -97,17 +97,18 @@ const createApp = (services, runtimePorts, queues = new InMemoryQueueRuntime()) 
   logger: { info() {}, warn() {}, error() {} },
 });
 
-test('registers event ingestion, publish, and scheduler workers on startup', async () => {
+test('registers event ingestion, score recomputation, publish, and scheduler workers on startup', async () => {
   const queues = new InMemoryQueueRuntime();
   const runtime = createRuntimePorts();
   const app = createApp({ events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) } }, runtime.ports, queues);
 
   const registrations = await app.start();
 
-  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'publish', 'scheduler']);
-  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'publish.dispatch', 'scheduler.tick']);
+  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'publish', 'scheduler']);
+  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'publish.dispatch', 'scheduler.tick']);
   assert.equal(app.getReadiness().status, 'HEALTHY');
   assert.equal(queues.isWorkerActive('event-ingestion-worker'), true);
+  assert.equal(queues.isWorkerActive('score-recomputation-worker'), true);
   assert.equal(queues.isWorkerActive('publish-worker'), true);
   assert.equal(queues.isWorkerActive('scheduler-worker'), true);
 });
@@ -162,7 +163,57 @@ test('shutdown drains registered workers and reports stopped health', async () =
 
   assert.equal(shutdown.mode, 'DRAIN');
   assert.equal(queues.isWorkerActive('event-ingestion-worker'), false);
+  assert.equal(queues.isWorkerActive('score-recomputation-worker'), false);
   assert.equal(queues.isWorkerActive('publish-worker'), false);
   assert.equal(queues.isWorkerActive('scheduler-worker'), false);
   assert.equal(app.getHealth().status, 'STOPPED');
+});
+
+
+test('score recomputation worker skips duplicate jobs idempotently', async () => {
+  const calls = [];
+  const runtime = {
+    completed: [],
+    ports: {
+      idempotency: {
+        claim: () => ({ status: 'DUPLICATE', previousResult: { tenantId: 'tenant-1', contactId: 'contact-1', leadScore: 90, trajectoryScore: 0, trustBand: 'HIGH', correlationId: 'corr-1' } }),
+        complete: (input) => { runtime.completed.push(input); },
+      },
+      clock,
+    },
+  };
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) },
+    scoring: {
+      recomputeContactScore: async (scoreContext, input) => {
+        calls.push({ scoreContext, input });
+        return {
+          tenantId: input.tenantId,
+          contactId: input.contactId,
+          leadScore: 90,
+          trajectoryScore: 0,
+          trustBand: 'HIGH',
+          leadScoreBreakdown: { eventScore: 90, identityScore: 20, engagementScore: 70, eventCount: 3 },
+          trajectoryScoreBreakdown: { score: 0, recentScore: 35, previousScore: 35, recentEventCount: 2, previousEventCount: 1 },
+          recomputedAt: fixedDate.toISOString(),
+          correlation,
+        };
+      },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'score-job-1',
+    queueName: 'crm.scoring',
+    jobType: 'crm.score.recompute',
+    payload: { tenantId: 'tenant-1', contactId: 'contact-1', reason: 'test', requestedAt: fixedDate.toISOString(), correlation },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'crm.score.recompute:tenant-1:contact-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'crm.scoring', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'DUPLICATE_SKIPPED');
+  assert.equal(calls.length, 0);
+  assert.equal(runtime.completed.length, 0);
+  assert.equal(result.result.trustBand, 'HIGH');
 });
