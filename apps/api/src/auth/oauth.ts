@@ -161,7 +161,7 @@ export const createGoogleOAuthHandler = (deps: GoogleOAuthDependencies) => {
     const { user, isNewUser } = await userRepository.upsertFromOAuth({
       externalUserId: rawUserInfo.sub,
       email: rawUserInfo.email,
-      displayName: rawUserInfo.name,
+      ...(rawUserInfo.name !== undefined && { displayName: rawUserInfo.name }),
     });
 
     if (!user.isActive) {
