@@ -1,4 +1,5 @@
 import { AuthError } from "./auth/errors.js";
+import { OAuthError } from "./auth/oauth.js";
 import { EventIngestionError } from "./events/errors.js";
 
 export type ApiErrorCode =
@@ -62,7 +63,7 @@ export interface ErrorResponse {
 }
 
 export const mapErrorToHttp = (error: unknown): { readonly statusCode: number; readonly payload: Omit<ErrorResponse, "meta"> } => {
-  if (error instanceof ApiError || error instanceof AuthError || error instanceof EventIngestionError) {
+  if (error instanceof ApiError || error instanceof AuthError || error instanceof EventIngestionError || error instanceof OAuthError) {
     return {
       statusCode: error.statusCode,
       payload: { ok: false, error: { code: error.code, message: error.message } },
