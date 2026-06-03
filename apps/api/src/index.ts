@@ -56,5 +56,14 @@ export type {
   ReadinessCheck,
 } from "./server.js";
 
-export { OAuthError, buildGoogleAuthorizationUrl, createGoogleOAuthHandler, createOAuthCallbackRouteHandler, createOAuthInitiateRouteHandler, generateOAuthState } from "./auth/oauth.js";
-export type { GoogleOAuthConfig, GoogleOAuthDependencies, GoogleOAuthHandler, GoogleUserInfo, OAuthCallbackResult, OAuthErrorCode, OAuthHttpClient, OAuthRouteResult, OAuthSessionService, OAuthSessionToken, OAuthStateStore, OAuthTenantRecord, OAuthTokenResponse, OAuthUserRecord, OAuthUserRepository } from "./auth/oauth.js";
+export { createStripeWebhookHandler } from "./webhooks/stripe.js";
+export type { StripeWebhookRequest } from "./webhooks/stripe.js";
+export type {
+  BillingEventIngestionReservation,
+  BillingEventIngestionStore,
+  BillingOutbox,
+  StripeWebhookDependencies,
+  SubscriptionStore,
+} from "./billing/contracts.js";
+export { createTrialEndsAt, createTrialGate, isTrialExpired } from "./billing/trial.js";
+export type { TrialGateSubscriptionReader } from "./billing/trial.js";

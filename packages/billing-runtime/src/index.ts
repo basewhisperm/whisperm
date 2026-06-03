@@ -772,3 +772,15 @@ export const buildBillingAuditTrail = (input: {
     correlation: input.correlation,
     metadata: input.metadata ?? {}
   });
+
+export {
+  createSubscriptionChangedEvent,
+  mapStripeStatus,
+  stripeSubscriptionStatusSchema,
+  stripeSubscriptionToSnapshot,
+} from "./providers/stripe.js";
+export type {
+  BillingSubscriptionSnapshot,
+  StripeSubscriptionStatus,
+  SubscriptionChangedEvent,
+} from "./providers/stripe.js";

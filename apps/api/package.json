@@ -12,6 +12,9 @@
     "test": "pnpm --filter @whisperm/types build && pnpm run build && node --test test/*.test.mjs test/*.test.js"
   },
   "dependencies": {
-    "@whisperm/types": "workspace:*"
+    "@whisperm/billing-runtime": "workspace:^",
+    "@whisperm/types": "workspace:*",
+    "fastify-raw-body": "^5.0.0",
+    "stripe": "^22.2.0"
   }
 }
