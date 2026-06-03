@@ -97,18 +97,19 @@ const createApp = (services, runtimePorts, queues = new InMemoryQueueRuntime()) 
   logger: { info() {}, warn() {}, error() {} },
 });
 
-test('registers event ingestion, score recomputation, publish, and scheduler workers on startup', async () => {
+test('registers event ingestion, score recomputation, notification, publish, and scheduler workers on startup', async () => {
   const queues = new InMemoryQueueRuntime();
   const runtime = createRuntimePorts();
   const app = createApp({ events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) } }, runtime.ports, queues);
 
   const registrations = await app.start();
 
-  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'publish', 'scheduler']);
-  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'publish.dispatch', 'scheduler.tick']);
+  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'publish', 'scheduler']);
+  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'publish.dispatch', 'scheduler.tick']);
   assert.equal(app.getReadiness().status, 'HEALTHY');
   assert.equal(queues.isWorkerActive('event-ingestion-worker'), true);
   assert.equal(queues.isWorkerActive('score-recomputation-worker'), true);
+  assert.equal(queues.isWorkerActive('notification-worker'), true);
   assert.equal(queues.isWorkerActive('publish-worker'), true);
   assert.equal(queues.isWorkerActive('scheduler-worker'), true);
 });

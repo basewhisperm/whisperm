@@ -14,6 +14,7 @@
   "dependencies": {
     "@whisperm/types": "workspace:*",
     "@whisperm/worker-runtime": "workspace:*",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "@whisperm/notification-runtime": "workspace:*"
   }
 }
