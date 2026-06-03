@@ -264,3 +264,31 @@ test("dead-letter contract preserves tenant-safe failure metadata without secret
   assert.equal(deadLetter.reason.code, "WORKFLOW_STEP_FAILED");
   assert.equal(deadLetter.nextAction, "MANUAL_REVIEW");
 });
+
+test("retry policy schema rejects jitter=true at parse time", () => {
+  assert.throws(
+    () =>
+      workflowDefinitionSchema.parse({
+        id: "wf-test",
+        tenantId: "tenant-1",
+        name: "Workflow",
+        version: 1,
+        initialStepId: "draft",
+        steps: [
+          {
+            id: "draft",
+            type: "TASK",
+            retryPolicy: {
+              kind: "EXPONENTIAL",
+              maxAttempts: 3,
+              initialDelayMs: 100,
+              maxDelayMs: 1000,
+              backoffMultiplier: 2,
+              jitter: true,
+            },
+          },
+        ],
+      }),
+    (error) => error?.name === "ZodError",
+  );
+});
