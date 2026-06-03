@@ -36,10 +36,7 @@ import {
 import {
   executeTrialReminderJob,
   trialReminderJobPayloadSchema,
-<<<<<<< HEAD
-=======
   type NotificationServicePort,
->>>>>>> origin/main
 } from "@whisperm/notification-runtime";
 import {
   inboundEventSchema,
@@ -130,22 +127,6 @@ export interface ScoreRecomputationServicePort {
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
     input: z.output<typeof scoreRecomputationJobPayloadSchema>,
   ): Promise<ScoreRecomputationResult> | ScoreRecomputationResult;
-}
-
-export interface NotificationServicePort {
-  sendTrialExpiryEmail(input: {
-    readonly workspace: {
-      readonly tenantId: string;
-      readonly workspaceId: string;
-      readonly workspaceName: string;
-    };
-    readonly recipient: {
-      readonly email: string;
-      readonly name?: string | undefined;
-    };
-    readonly trialEndsAt: string;
-    readonly marker: "D-3" | "D-1" | "D+0";
-  }): Promise<void> | void;
 }
 
 export interface WorkerServices {
@@ -473,10 +454,7 @@ export const createNotificationTrialReminderHandler = (services: WorkerServices)
   },
 });
 
-<<<<<<< HEAD
-=======
 
->>>>>>> origin/main
 export const createScoreRecomputationHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.scoring === undefined) {
