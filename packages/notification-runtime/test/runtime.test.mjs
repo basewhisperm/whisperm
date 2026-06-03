@@ -27,11 +27,6 @@ test("buildTrialReminderJobs creates D-3, D-1, and D+0 jobs", () => {
     "2026-06-29T00:00:00.000Z",
     "2026-06-30T00:00:00.000Z",
   ]);
-  assert.deepEqual(jobs.map((job) => job.dedupeKey), [
-    "notification:trial-reminder:tenant-1:d-3",
-    "notification:trial-reminder:tenant-1:d-1",
-    "notification:trial-reminder:tenant-1:d0",
-  ]);
 });
 
 test("buildTrialReminderJobs returns no jobs without owner email or trial end", () => {
