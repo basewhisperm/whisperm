@@ -89,6 +89,19 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
 
+  packages/notification-runtime:
+    dependencies:
+      '@whisperm/services':
+        specifier: workspace:*
+        version: link:../services
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+
   packages/provider-adapters:
     dependencies:
       '@whisperm/types':

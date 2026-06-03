@@ -346,7 +346,7 @@ export class TenantService {
       const tenantInput: CreateTenantInput = data.externalId === undefined ? { slug: data.slug, name: data.name } : { slug: data.slug, name: data.name, externalId: data.externalId };
       const tenant = tenantSchema.parse(await repositories.tenants.create(tenantInput));
       await appendAudit(repositories, { ...context, tenantId: tenant.id }, { action: "TENANT_CREATED", targetType: "TENANT", targetId: tenant.id, metadata: { slug: tenant.slug } });
-      await appendDomainEvent(repositories, { ...context, tenantId: tenant.id }, { aggregateType: "TENANT", aggregateId: tenant.id, eventType: "tenant.created", idempotencyKey: `tenant:${tenant.id}:created`, payload: { tenantId: tenant.id, slug: tenant.slug } });
+      await appendDomainEvent(repositories, { ...context, tenantId: tenant.id }, { aggregateType: "TENANT", aggregateId: tenant.id, eventType: "tenant.created", idempotencyKey: `tenant:${tenant.id}:created`, payload: { tenantId: tenant.id, workspaceId: tenant.id, workspaceName: tenant.name, slug: tenant.slug } });
       return tenant;
     });
   }
