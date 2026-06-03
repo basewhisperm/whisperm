@@ -345,3 +345,78 @@ test("contacts import route rejects fatal file errors before service call", asyn
   assert.equal(called, false);
 });
 
+
+test("kanban board route returns tenant scoped columns", async () => {
+  const calls = [];
+  const server = createApiServer({
+    ...createDependencies(),
+    deals: {
+      async board(context, pipelineId, pagination) { calls.push(["board", context, pipelineId, pagination]); return { pipeline: { id: pipelineId, name: "Sales" }, columns: [{ id: "stage-a", name: "Prospect", position: 1, deals: { items: [{ id: "deal-1", title: "Deal", contactName: "Ada", dealValue: "100", currency: "USD", owner: null, probability: 50, stageId: "stage-a", updatedAt: "2026-05-29T00:00:00.000Z" }], limit: 25 } }] }; },
+      async createCard() { assert.fail("unexpected create"); },
+      async moveStage() { assert.fail("unexpected move"); },
+      async detail() { assert.fail("unexpected detail"); }
+    }
+  });
+
+  const response = await server.inject({ method: "GET", url: "/pipelines/pipeline-a/board?limit=25&cursor[stage-a]=deal-25", headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-board" } });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().data.columns[0].deals.items[0].contactName, "Ada");
+  assert.deepEqual(calls[0][1].tenantId, "tenant-a");
+  assert.deepEqual(calls[0][3], { limit: 25, cursors: { "stage-a": "deal-25" } });
+});
+
+test("deal stage move route maps updatedAt optimistic lock", async () => {
+  const calls = [];
+  const server = createApiServer({
+    ...createDependencies(),
+    deals: {
+      async board() { assert.fail("unexpected board"); },
+      async createCard() { assert.fail("unexpected create"); },
+      async moveStage(context, dealId, input) { calls.push([context, dealId, input]); return { id: dealId, tenantId: context.tenantId, pipelineStageId: input.stageId, title: "Deal", currency: "USD", updatedAt: "2026-05-29T00:01:00.000Z" }; },
+      async detail() { assert.fail("unexpected detail"); }
+    }
+  });
+
+  const response = await server.inject({ method: "PATCH", url: "/deals/deal-1/stage", headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-move" }, payload: { stageId: "stage-new", updatedAt: "2026-05-29T00:00:00.000Z" } });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(calls[0][2], { stageId: "stage-new", expectedUpdatedAt: "2026-05-29T00:00:00.000Z" });
+});
+
+test("quick add route creates deal card", async () => {
+  const calls = [];
+  const server = createApiServer({
+    ...createDependencies(),
+    deals: {
+      async board() { assert.fail("unexpected board"); },
+      async createCard(context, input) { calls.push([context, input]); return { id: "deal-1", title: input.title, contactName: null, dealValue: input.value, currency: input.currency, owner: null, probability: input.probability, stageId: input.pipelineStageId, updatedAt: "2026-05-29T00:00:00.000Z" }; },
+      async moveStage() { assert.fail("unexpected move"); },
+      async detail() { assert.fail("unexpected detail"); }
+    }
+  });
+
+  const response = await server.inject({ method: "POST", url: "/deals", headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-create" }, payload: { stageId: "stage-a", contactId: "contact-1", title: "New Deal", dealValue: 100, currency: "USD", probability: 50 } });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.json().data.stageId, "stage-a");
+  assert.deepEqual(calls[0][1].tenantId, "tenant-a");
+});
+
+test("deal detail route returns deal contact and activity", async () => {
+  const server = createApiServer({
+    ...createDependencies(),
+    deals: {
+      async board() { assert.fail("unexpected board"); },
+      async createCard() { assert.fail("unexpected create"); },
+      async moveStage() { assert.fail("unexpected move"); },
+      async detail(context, dealId) { return { deal: { id: dealId, tenantId: context.tenantId, title: "Deal", stageId: "stage-a", currency: "USD", updatedAt: "2026-05-29T00:00:00.000Z" }, contact: { id: "contact-1", email: "lead@example.com" }, activity: [] }; }
+    }
+  });
+
+  const response = await server.inject({ method: "GET", url: "/deals/deal-1", headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-detail" } });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().data.contact.email, "lead@example.com");
+  assert.deepEqual(response.json().data.activity, []);
+});

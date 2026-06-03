@@ -43,6 +43,20 @@ const createRepositories = (overrides = {}) => {
         { id: "lead-event-3", tenantId: scope.tenantId, contactId, eventType: "meeting.booked", occurredAt: "2026-05-15T00:00:00.000Z", payload: {}, createdAt: now }
       ]); }
     },
+    deals: {
+      async create(workspaceId, input) { push("deals", "create", [workspaceId, input]); return { id: "deal-1", tenantId: workspaceId, contactId: input.contactId ?? null, pipelineId: "pipeline-a", pipelineStageId: input.pipelineStageId, ownerId: input.ownerId ?? null, externalId: input.externalId ?? null, title: input.title, value: input.value ?? null, currency: input.currency ?? "USD", probability: input.probability ?? null, closedAt: null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async list(workspaceId, filters) { push("deals", "list", [workspaceId, filters]); return []; },
+      async findById(workspaceId, dealId) { push("deals", "findById", [workspaceId, dealId]); return { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: "stage-a", ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: now }; },
+      async findBoardByPipeline(workspaceId, pipelineId, pagination) { push("deals", "findBoardByPipeline", [workspaceId, pipelineId, pagination]); return { pipeline: { id: pipelineId, name: "Sales" }, columns: [{ id: "stage-a", name: "Prospect", position: 1, color: "#64748B", deals: { items: [], limit: pagination?.limit ?? 25 } }] }; },
+      async updateStageWithOptimisticLock(workspaceId, dealId, stageId, expectedUpdatedAt) { push("deals", "updateStageWithOptimisticLock", [workspaceId, dealId, stageId, expectedUpdatedAt]); return { previousStageId: "stage-old", deal: { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: stageId, ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: "2026-05-29T00:01:00.000Z" } }; },
+      async findDetailById(workspaceId, dealId) { push("deals", "findDetailById", [workspaceId, dealId]); return { deal: { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: "stage-a", ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: now }, contact: { id: "contact-1", firstName: "Lead", lastName: "One", email: "lead@example.com" }, owner: null, activity: [] }; },
+      async updateStage(workspaceId, dealId, stageId) { push("deals", "updateStage", [workspaceId, dealId, stageId]); return { id: dealId, tenantId: workspaceId, pipelineId: "pipeline-a", pipelineStageId: stageId, title: "Deal", value: "100", currency: "USD", createdAt: now, updatedAt: now }; },
+      async findByContact(workspaceId, contactId) { push("deals", "findByContact", [workspaceId, contactId]); return []; }
+    },
+    activities: {
+      async create(scope, input) { push("activities", "create", [scope, input]); return { id: "activity-1", tenantId: scope.tenantId, contactId: input.contactId ?? null, dealId: input.dealId ?? null, createdById: input.createdById, type: input.type, note: input.note ?? null, occurredAt: input.occurredAt ?? now, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async listByDeal(scope, dealId) { push("activities", "listByDeal", [scope, dealId]); return page(); }
+    },
     campaigns: {
       async create(scope, input) { push("campaigns", "create", [scope, input]); return { id: "campaign-1", tenantId: input.tenantId, title: input.title, state: input.state ?? "DRAFT", contactId: null, createdByUserId: null, externalId: null, source: null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
       async findById(scope, id) { push("campaigns", "findById", [scope, id]); return { id, tenantId: scope.tenantId, title: "Campaign", state: "DRAFT", createdAt: now, updatedAt: now }; },
@@ -144,6 +158,20 @@ test("idempotent campaign publishing returns the existing job without duplicate 
         { id: "lead-event-2", tenantId: scope.tenantId, contactId, eventType: "email.clicked", occurredAt: "2026-05-27T00:00:00.000Z", payload: {}, createdAt: now },
         { id: "lead-event-3", tenantId: scope.tenantId, contactId, eventType: "meeting.booked", occurredAt: "2026-05-15T00:00:00.000Z", payload: {}, createdAt: now }
       ]); }
+    },
+    deals: {
+      async create(workspaceId, input) { push("deals", "create", [workspaceId, input]); return { id: "deal-1", tenantId: workspaceId, contactId: input.contactId ?? null, pipelineId: "pipeline-a", pipelineStageId: input.pipelineStageId, ownerId: input.ownerId ?? null, externalId: input.externalId ?? null, title: input.title, value: input.value ?? null, currency: input.currency ?? "USD", probability: input.probability ?? null, closedAt: null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async list(workspaceId, filters) { push("deals", "list", [workspaceId, filters]); return []; },
+      async findById(workspaceId, dealId) { push("deals", "findById", [workspaceId, dealId]); return { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: "stage-a", ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: now }; },
+      async findBoardByPipeline(workspaceId, pipelineId, pagination) { push("deals", "findBoardByPipeline", [workspaceId, pipelineId, pagination]); return { pipeline: { id: pipelineId, name: "Sales" }, columns: [{ id: "stage-a", name: "Prospect", position: 1, color: "#64748B", deals: { items: [], limit: pagination?.limit ?? 25 } }] }; },
+      async updateStageWithOptimisticLock(workspaceId, dealId, stageId, expectedUpdatedAt) { push("deals", "updateStageWithOptimisticLock", [workspaceId, dealId, stageId, expectedUpdatedAt]); return { previousStageId: "stage-old", deal: { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: stageId, ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: "2026-05-29T00:01:00.000Z" } }; },
+      async findDetailById(workspaceId, dealId) { push("deals", "findDetailById", [workspaceId, dealId]); return { deal: { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: "stage-a", ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: now }, contact: { id: "contact-1", firstName: "Lead", lastName: "One", email: "lead@example.com" }, owner: null, activity: [] }; },
+      async updateStage(workspaceId, dealId, stageId) { push("deals", "updateStage", [workspaceId, dealId, stageId]); return { id: dealId, tenantId: workspaceId, pipelineId: "pipeline-a", pipelineStageId: stageId, title: "Deal", value: "100", currency: "USD", createdAt: now, updatedAt: now }; },
+      async findByContact(workspaceId, contactId) { push("deals", "findByContact", [workspaceId, contactId]); return []; }
+    },
+    activities: {
+      async create(scope, input) { push("activities", "create", [scope, input]); return { id: "activity-1", tenantId: scope.tenantId, contactId: input.contactId ?? null, dealId: input.dealId ?? null, createdById: input.createdById, type: input.type, note: input.note ?? null, occurredAt: input.occurredAt ?? now, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async listByDeal(scope, dealId) { push("activities", "listByDeal", [scope, dealId]); return page(); }
     },
     campaigns: {
       ...createRepositories().campaigns,
@@ -399,4 +427,47 @@ test("contact CSV import rolls back through transaction manager on DB failure", 
     (error) => error instanceof ServiceError && error.code === "SERVICE_TRANSACTION_FAILED"
   );
   assert.equal(transactionStarted, true);
+});
+
+test("deal board delegates tenant-scoped bounded pagination", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const board = await services.deals.board(context, "pipeline-a", { limit: 25, cursors: { "stage-a": "deal-25" } });
+
+  assert.equal(board.pipeline.id, "pipeline-a");
+  assert.deepEqual(repositories.calls.find((call) => call.repo === "deals" && call.method === "findBoardByPipeline").args, ["tenant-a", "pipeline-a", { limit: 25, cursors: { "stage-a": "deal-25" } }]);
+});
+
+test("deal stage move is optimistic and records outbox plus activity transactionally", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const deal = await services.deals.moveStage(context, "deal-1", { stageId: "stage-new", expectedUpdatedAt: now });
+
+  assert.equal(deal.pipelineStageId, "stage-new");
+  assert.equal(repositories.calls.some((call) => call.repo === "events" && call.method === "appendOutbox" && call.args[1].eventType === "deal.stage_changed"), true);
+  assert.equal(repositories.calls.some((call) => call.repo === "activities" && call.method === "create"), true);
+  assert.deepEqual(repositories.calls.find((call) => call.repo === "deals" && call.method === "updateStageWithOptimisticLock").args, ["tenant-a", "deal-1", "stage-new", now]);
+});
+
+test("quick add deal creates card in requested stage", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const card = await services.deals.createCard(context, { tenantId: "tenant-a", pipelineStageId: "stage-a", contactId: "contact-1", title: "New Deal", value: 100, currency: "USD", probability: 60 });
+
+  assert.equal(card.stageId, "stage-a");
+  assert.equal(repositories.calls.some((call) => call.repo === "deals" && call.method === "create"), true);
+});
+
+test("deal detail returns deal contact and activity", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const detail = await services.deals.detail(context, "deal-1");
+
+  assert.equal(detail.deal.id, "deal-1");
+  assert.equal(detail.contact.email, "lead@example.com");
+  assert.deepEqual(detail.activity, []);
 });

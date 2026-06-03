@@ -51,6 +51,112 @@ export const updateContactRequestSchema = z.object({
 }).strict();
 export type UpdateContactRequest = z.output<typeof updateContactRequestSchema>;
 
+export const dealOwnerSchema = z.object({
+  id: idSchema,
+  displayName: idSchema.nullable().optional(),
+  email: z.string().email().nullable().optional(),
+}).strict();
+export type DealOwner = z.output<typeof dealOwnerSchema>;
+
+export const dealContactSummarySchema = z.object({
+  id: idSchema,
+  firstName: idSchema.nullable().optional(),
+  lastName: idSchema.nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  phone: idSchema.nullable().optional(),
+  company: idSchema.nullable().optional(),
+}).strict();
+export type DealContactSummary = z.output<typeof dealContactSummarySchema>;
+
+export const dealActivitySchema = z.object({
+  id: idSchema,
+  type: idSchema,
+  note: idSchema.nullable().optional(),
+  occurredAt: isoDateSchema,
+  createdById: idSchema,
+  metadata: metadataSchema.nullable().optional(),
+  createdAt: isoDateSchema,
+}).strict();
+export type DealActivity = z.output<typeof dealActivitySchema>;
+
+export const dealCardSchema = z.object({
+  id: idSchema,
+  title: idSchema,
+  contactName: idSchema.nullable().optional(),
+  dealValue: z.union([z.number(), z.string()]).nullable().optional(),
+  currency: z.string().min(3),
+  owner: dealOwnerSchema.nullable().optional(),
+  probability: z.number().int().min(0).max(100).nullable().optional(),
+  stageId: idSchema,
+  updatedAt: isoDateSchema,
+}).strict();
+export type DealCard = z.output<typeof dealCardSchema>;
+
+export const kanbanColumnPageSchema = z.object({
+  items: z.array(dealCardSchema),
+  nextCursor: idSchema.optional(),
+  limit: z.number().int().min(1).max(25),
+}).strict();
+export type KanbanColumnPage = z.output<typeof kanbanColumnPageSchema>;
+
+export const kanbanColumnSchema = z.object({
+  id: idSchema,
+  name: idSchema,
+  position: z.number().int().positive(),
+  color: idSchema.nullable().optional(),
+  deals: kanbanColumnPageSchema,
+}).strict();
+export type KanbanColumn = z.output<typeof kanbanColumnSchema>;
+
+export const pipelineBoardSchema = z.object({
+  pipeline: z.object({
+    id: idSchema,
+    name: idSchema,
+  }).strict(),
+  columns: z.array(kanbanColumnSchema),
+}).strict();
+export type PipelineBoard = z.output<typeof pipelineBoardSchema>;
+
+export const createDealRequestSchema = z.object({
+  stageId: idSchema,
+  contactId: idSchema.optional(),
+  title: idSchema,
+  dealValue: z.number().nonnegative(),
+  currency: z.string().min(3).max(3),
+  ownerId: idSchema.optional(),
+  probability: z.number().int().min(0).max(100),
+}).strict();
+export type CreateDealRequest = z.output<typeof createDealRequestSchema>;
+
+export const moveDealStageRequestSchema = z.object({
+  stageId: idSchema,
+  updatedAt: isoDateSchema,
+}).strict();
+export type MoveDealStageRequest = z.output<typeof moveDealStageRequestSchema>;
+
+export const dealDetailSchema = z.object({
+  deal: z.object({
+    id: idSchema,
+    tenantId: idSchema,
+    contactId: idSchema.nullable().optional(),
+    pipelineId: idSchema,
+    stageId: idSchema,
+    ownerId: idSchema.nullable().optional(),
+    title: idSchema,
+    dealValue: z.union([z.number(), z.string()]).nullable().optional(),
+    currency: z.string().min(3),
+    probability: z.number().int().min(0).max(100).nullable().optional(),
+    closedAt: isoDateSchema.nullable().optional(),
+    metadata: metadataSchema.nullable().optional(),
+    createdAt: isoDateSchema,
+    updatedAt: isoDateSchema,
+  }).strict(),
+  contact: dealContactSummarySchema.nullable().optional(),
+  owner: dealOwnerSchema.nullable().optional(),
+  activity: z.array(dealActivitySchema),
+}).strict();
+export type DealDetail = z.output<typeof dealDetailSchema>;
+
 export const leadEventSchema = z.object({
   id: idSchema,
   tenantId: idSchema,
