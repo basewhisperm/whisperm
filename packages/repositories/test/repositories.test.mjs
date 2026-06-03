@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   PersistenceError,
+  PrismaDealsRepository,
   PrismaEventRepository,
+  PrismaPipelineRepository,
   PrismaTenantRepository,
   PrismaUserRepository,
   createPrismaRepositories
@@ -43,6 +45,10 @@ const createDelegate = (name) => {
       calls.push({ name, method: "count", args });
       return 7;
     },
+    deleteMany: async (args) => {
+      calls.push({ name, method: "deleteMany", args });
+      return { count: 1 };
+    },
     upsert: async (args) => {
       calls.push({ name, method: "upsert", args });
       return { id: `${name}-id`, tenantId: args.create.tenantId, createdAt: now, updatedAt: now, ...args.create, ...args.update };
@@ -54,7 +60,8 @@ const createDelegate = (name) => {
 const createClient = () => {
   const names = [
     "tenant", "tenantUser", "contact", "leadEvent", "contentItem", "contentVariant", "publishJob", "workflowExecution",
-    "workflowStepExecution", "eventIngestion", "outboxEvent", "inboxEvent", "idempotencyKey", "aiExecution", "auditLog"
+    "workflowStepExecution", "eventIngestion", "outboxEvent", "inboxEvent", "idempotencyKey", "aiExecution", "auditLog",
+    "pipeline", "pipelineStage", "deal"
   ];
   return Object.fromEntries(names.map((name) => [name, createDelegate(name)]));
 };
@@ -131,7 +138,7 @@ test("factory wires all repository interfaces", () => {
   const repositories = createPrismaRepositories(createClient());
 
   assert.deepEqual(Object.keys(repositories).sort(), [
-    "approvals", "auditLogs", "billing", "campaigns", "contacts", "events", "executions", "tenants", "users", "workflows"
+    "approvals", "auditLogs", "billing", "campaigns", "contacts", "deals", "events", "executions", "pipelines", "tenants", "users", "workflows"
   ].sort());
 });
 
@@ -164,4 +171,159 @@ test("contact bulk import repository methods are tenant-scoped", async () => {
   assert.deepEqual(prisma.contact.calls[0].args.data, [{ tenantId: "tenant-a", email: "new@example.com", stage: "QUALIFIED" }]);
   assert.deepEqual(prisma.contact.calls[1].args.where, { tenantId: "tenant-a" });
   assert.deepEqual(prisma.contact.calls[2].args.where, { tenantId: "tenant-a", email: { in: ["existing@example.com"] } });
+});
+
+
+test("pipeline_seed_creates_one_default_pipeline_per_workspace", async () => {
+  const { seedDefaultPipelines } = await import("../../../prisma/pipeline-seed.mjs");
+  const prisma = createClient();
+  prisma.tenant.findMany = async (args) => {
+    prisma.tenant.calls.push({ name: "tenant", method: "findMany", args });
+    return [{ id: "tenant-a" }, { id: "tenant-b" }];
+  };
+  const result = await seedDefaultPipelines(prisma);
+
+  assert.equal(result.pipelines, 2);
+  assert.equal(prisma.pipeline.calls.filter((call) => call.method === "upsert").length, 2);
+  assert.deepEqual(prisma.pipeline.calls[0].args.where, { tenantId_defaultKey: { tenantId: "tenant-a", defaultKey: "default" } });
+  assert.deepEqual(prisma.pipeline.calls[1].args.where, { tenantId_defaultKey: { tenantId: "tenant-b", defaultKey: "default" } });
+});
+
+test("pipeline_seed_creates_five_default_stages", async () => {
+  const { defaultPipelineStages, seedDefaultPipelines } = await import("../../../prisma/pipeline-seed.mjs");
+  const prisma = createClient();
+  await seedDefaultPipelines(prisma, { workspaces: [{ id: "tenant-a" }] });
+
+  const upserts = prisma.pipelineStage.calls.filter((call) => call.method === "upsert");
+  assert.equal(upserts.length, 5);
+  assert.deepEqual(upserts.map((call) => call.args.create.name), ["Prospect", "Qualified", "Proposal", "Engagement", "Renewal"]);
+  assert.deepEqual(upserts.map((call) => call.args.create.position), [1, 2, 3, 4, 5]);
+  assert.deepEqual(defaultPipelineStages.map((stage) => stage.color), ["#64748B", "#2563EB", "#7C3AED", "#16A34A", "#F59E0B"]);
+});
+
+test("pipeline_seed_is_idempotent", async () => {
+  const { seedDefaultPipelines } = await import("../../../prisma/pipeline-seed.mjs");
+  const prisma = createClient();
+  await seedDefaultPipelines(prisma, { workspaces: [{ id: "tenant-a" }] });
+  await seedDefaultPipelines(prisma, { workspaces: [{ id: "tenant-a" }] });
+
+  const pipelineUpserts = prisma.pipeline.calls.filter((call) => call.method === "upsert");
+  const stageUpserts = prisma.pipelineStage.calls.filter((call) => call.method === "upsert");
+  assert.equal(pipelineUpserts.length, 2);
+  assert.equal(stageUpserts.length, 10);
+  assert.deepEqual(new Set(pipelineUpserts.map((call) => JSON.stringify(call.args.where))).size, 1);
+  assert.deepEqual(new Set(stageUpserts.map((call) => JSON.stringify(call.args.where))).size, 5);
+});
+
+test("findByWorkspace_is_tenant_scoped", async () => {
+  const prisma = createClient();
+  prisma.pipeline.findFirst = async (args) => {
+    prisma.pipeline.calls.push({ name: "pipeline", method: "findFirst", args });
+    return { id: "pipeline-a", tenantId: "tenant-a", name: "Default Pipeline", isDefault: true, defaultKey: "default", createdAt: now, updatedAt: now };
+  };
+  prisma.pipelineStage.findMany = async (args) => {
+    prisma.pipelineStage.calls.push({ name: "pipelineStage", method: "findMany", args });
+    return [{ id: "stage-a", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Prospect", position: 1, color: "#64748B", createdAt: now, updatedAt: now }];
+  };
+  const pipelines = new PrismaPipelineRepository(prisma);
+
+  const pipeline = await pipelines.findByWorkspace("tenant-a");
+
+  assert.equal(pipeline.id, "pipeline-a");
+  assert.deepEqual(prisma.pipeline.calls[0].args.where, { tenantId: "tenant-a", isDefault: true });
+  assert.deepEqual(prisma.pipelineStage.calls[0].args.where, { tenantId: "tenant-a", pipelineId: "pipeline-a" });
+});
+
+test("updateStages_is_tenant_scoped", async () => {
+  const prisma = createClient();
+  const txClient = createClient();
+  prisma.$transaction = async (work) => work(txClient);
+  txClient.pipeline.findFirst = async (args) => {
+    txClient.pipeline.calls.push({ name: "pipeline", method: "findFirst", args });
+    return { id: "pipeline-a", tenantId: "tenant-a", name: "Default Pipeline", isDefault: true, defaultKey: "default", createdAt: now, updatedAt: now };
+  };
+  txClient.pipelineStage.findMany = async (args) => {
+    txClient.pipelineStage.calls.push({ name: "pipelineStage", method: "findMany", args });
+    if (args.orderBy !== undefined) return [{ id: "stage-a", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Prospect", position: 1, color: "#64748B", createdAt: now, updatedAt: now }];
+    return [{ id: "stage-a", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Prospect", position: 1, color: "#64748B", createdAt: now, updatedAt: now }];
+  };
+  const pipelines = new PrismaPipelineRepository(prisma);
+
+  await pipelines.updateStages("tenant-a", "pipeline-a", [{ id: "stage-a", name: "Prospect", color: "#64748B" }]);
+
+  assert.deepEqual(txClient.pipeline.calls[0].args.where, { tenantId: "tenant-a", id: "pipeline-a" });
+  assert.deepEqual(txClient.pipelineStage.calls.find((call) => call.method === "updateMany").args.where, { tenantId: "tenant-a", pipelineId: "pipeline-a", id: "stage-a" });
+});
+
+test("deal_create_is_tenant_scoped", async () => {
+  const prisma = createClient();
+  prisma.pipelineStage.findFirst = async (args) => {
+    prisma.pipelineStage.calls.push({ name: "pipelineStage", method: "findFirst", args });
+    return { id: "stage-a", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Prospect", position: 1, color: "#64748B", createdAt: now, updatedAt: now };
+  };
+  prisma.contact.findFirst = async (args) => {
+    prisma.contact.calls.push({ name: "contact", method: "findFirst", args });
+    return { id: "contact-a", tenantId: "tenant-a", email: "lead@example.com", stage: "PROSPECT", createdAt: now, updatedAt: now };
+  };
+  const deals = new PrismaDealsRepository(prisma);
+
+  await deals.create("tenant-a", { tenantId: "tenant-a", title: "Deal A", contactId: "contact-a", pipelineStageId: "stage-a" });
+
+  assert.deepEqual(prisma.pipelineStage.calls[0].args.where, { tenantId: "tenant-a", id: "stage-a" });
+  assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", id: "contact-a" });
+  assert.deepEqual(prisma.deal.calls[0].args.data, { currency: "USD", tenantId: "tenant-a", title: "Deal A", contactId: "contact-a", pipelineStageId: "stage-a", pipelineId: "pipeline-a" });
+});
+
+test("deal_create_rejects_cross_tenant_contact_or_stage", async () => {
+  const prisma = createClient();
+  const deals = new PrismaDealsRepository(prisma);
+
+  await assert.rejects(
+    deals.create("tenant-a", { tenantId: "tenant-a", title: "Deal A", contactId: "contact-b", pipelineStageId: "stage-b" }),
+    (error) => error instanceof PersistenceError && error.code === "PERSISTENCE_NOT_FOUND"
+  );
+  assert.deepEqual(prisma.pipelineStage.calls[0].args.where, { tenantId: "tenant-a", id: "stage-b" });
+  assert.equal(prisma.deal.calls.length, 0);
+});
+
+test("deal_list_is_tenant_scoped", async () => {
+  const prisma = createClient();
+  const deals = new PrismaDealsRepository(prisma);
+
+  await deals.list("tenant-a", { pipelineStageId: "stage-a" });
+
+  assert.deepEqual(prisma.deal.calls[0].args.where, { pipelineStageId: "stage-a", tenantId: "tenant-a" });
+});
+
+test("deal_updateStage_is_tenant_scoped", async () => {
+  const prisma = createClient();
+  prisma.pipelineStage.findFirst = async (args) => {
+    prisma.pipelineStage.calls.push({ name: "pipelineStage", method: "findFirst", args });
+    return { id: "stage-a", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Qualified", position: 2, color: "#2563EB", createdAt: now, updatedAt: now };
+  };
+  prisma.deal.findFirst = async (args) => {
+    prisma.deal.calls.push({ name: "deal", method: "findFirst", args });
+    return { id: "deal-a", tenantId: "tenant-a", title: "Deal A", pipelineId: "pipeline-a", pipelineStageId: "stage-a", currency: "USD", createdAt: now, updatedAt: now };
+  };
+  const deals = new PrismaDealsRepository(prisma);
+
+  await deals.updateStage("tenant-a", "deal-a", "stage-a");
+
+  assert.deepEqual(prisma.pipelineStage.calls[0].args.where, { tenantId: "tenant-a", id: "stage-a" });
+  assert.deepEqual(prisma.deal.calls[0].args.where, { tenantId: "tenant-a", id: "deal-a" });
+  assert.deepEqual(prisma.deal.calls[0].args.data, { pipelineId: "pipeline-a", pipelineStageId: "stage-a" });
+});
+
+test("deal_findByContact_is_tenant_scoped", async () => {
+  const prisma = createClient();
+  prisma.contact.findFirst = async (args) => {
+    prisma.contact.calls.push({ name: "contact", method: "findFirst", args });
+    return { id: "contact-a", tenantId: "tenant-a", email: "lead@example.com", stage: "PROSPECT", createdAt: now, updatedAt: now };
+  };
+  const deals = new PrismaDealsRepository(prisma);
+
+  await deals.findByContact("tenant-a", "contact-a");
+
+  assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", id: "contact-a" });
+  assert.deepEqual(prisma.deal.calls[0].args.where, { tenantId: "tenant-a", contactId: "contact-a" });
 });
