@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildScoreRecomputationIdempotencyKey,
+  contactStageSchema,
   createContactRequestSchema,
   scoreRecomputationJobPayloadSchema,
   scoreRecomputationQueueContract,
@@ -13,7 +14,10 @@ const now = "2026-05-29T00:00:00.000Z";
 const correlation = { correlationId: "corr-1" };
 
 test("contact create contract requires tenant and a stable identifier", () => {
-  assert.equal(createContactRequestSchema.parse({ tenantId: "tenant-a", email: "lead@example.com" }).email, "lead@example.com");
+  const contact = createContactRequestSchema.parse({ tenantId: "tenant-a", email: "lead@example.com" });
+  assert.equal(contact.email, "lead@example.com");
+  assert.equal(contact.stage, "PROSPECT");
+  assert.equal(contactStageSchema.parse("QUALIFIED"), "QUALIFIED");
   assert.throws(() => createContactRequestSchema.parse({ tenantId: "tenant-a", firstName: "Lead" }));
 });
 

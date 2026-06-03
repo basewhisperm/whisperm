@@ -35,6 +35,14 @@ const createDelegate = (name) => {
       calls.push({ name, method: "updateMany", args });
       return { count: 1 };
     },
+    createMany: async (args) => {
+      calls.push({ name, method: "createMany", args });
+      return { count: args.data.length };
+    },
+    count: async (args) => {
+      calls.push({ name, method: "count", args });
+      return 7;
+    },
     upsert: async (args) => {
       calls.push({ name, method: "upsert", args });
       return { id: `${name}-id`, tenantId: args.create.tenantId, createdAt: now, updatedAt: now, ...args.create, ...args.update };
@@ -138,4 +146,22 @@ test("tenant-scoped contact reads include tenantId and lead events stay contact-
 
   assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", id: "contact-1" });
   assert.deepEqual(prisma.leadEvent.calls[0].args.where, { tenantId: "tenant-a", contactId: "contact-1" });
+});
+
+test("contact bulk import repository methods are tenant-scoped", async () => {
+  const prisma = createClient();
+  prisma.contact.findMany = async (args) => {
+    prisma.contact.calls.push({ name: "contact", method: "findMany", args });
+    return [{ id: "contact-1", tenantId: "tenant-a", email: "existing@example.com", stage: "PROSPECT", createdAt: now, updatedAt: now }];
+  };
+  const { PrismaContactRepository } = await import("../dist/index.js");
+  const contacts = new PrismaContactRepository(prisma);
+
+  await contacts.createMany({ tenantId: "tenant-a" }, [{ tenantId: "tenant-a", email: "new@example.com", stage: "QUALIFIED" }]);
+  await contacts.count({ tenantId: "tenant-a" });
+  await contacts.findByEmails({ tenantId: "tenant-a" }, ["existing@example.com"]);
+
+  assert.deepEqual(prisma.contact.calls[0].args.data, [{ tenantId: "tenant-a", email: "new@example.com", stage: "QUALIFIED" }]);
+  assert.deepEqual(prisma.contact.calls[1].args.where, { tenantId: "tenant-a" });
+  assert.deepEqual(prisma.contact.calls[2].args.where, { tenantId: "tenant-a", email: { in: ["existing@example.com"] } });
 });

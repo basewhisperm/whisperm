@@ -275,3 +275,73 @@ test("stripe webhook route verifies signature and reaches billing dependencies",
   assert.equal(calls.outbox.length, 1);
 });
 
+
+const multipartCsvPayload = (csv, boundary = "whisperm-boundary") => ({
+  boundary,
+  payload: [
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="file"; filename="contacts.csv"',
+    "Content-Type: text/csv",
+    "",
+    csv,
+    `--${boundary}--`,
+    ""
+  ].join("\r\n")
+});
+
+test("contacts import route parses multipart CSV and preserves tenant context", async () => {
+  const imports = [];
+  const contacts = {
+    async create() { throw new Error("not used"); },
+    async update() { throw new Error("not used"); },
+    async get() { throw new Error("not used"); },
+    async list() { throw new Error("not used"); },
+    async importCsvRows(context, input) {
+      imports.push({ context, input });
+      return { imported: input.rows.length, skipped: 0, errors: [] };
+    }
+  };
+  const server = createApiServer(createDependencies({ contacts }));
+  const multipart = multipartCsvPayload("email,stage,firstName\nPerson@Example.COM,PROSPECT,Person");
+
+  const response = await server.inject({
+    method: "POST",
+    url: "/contacts/import",
+    headers: {
+      "content-type": `multipart/form-data; boundary=${multipart.boundary}`,
+      "x-tenant-id": "tenant-1",
+      "x-correlation-id": "corr-import"
+    },
+    payload: multipart.payload
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { imported: 1, skipped: 0, errors: [] });
+  assert.equal(imports[0].context.tenantId, "tenant-1");
+  assert.equal(imports[0].context.correlation.correlationId, "corr-import");
+  assert.deepEqual(imports[0].input.rows, [{ email: "Person@Example.COM", firstName: "Person", lastName: undefined, phone: undefined, externalId: undefined, stage: "PROSPECT" }]);
+});
+
+test("contacts import route rejects fatal file errors before service call", async () => {
+  let called = false;
+  const contacts = {
+    async create() { throw new Error("not used"); },
+    async update() { throw new Error("not used"); },
+    async get() { throw new Error("not used"); },
+    async list() { throw new Error("not used"); },
+    async importCsvRows() { called = true; return { imported: 0, skipped: 0, errors: [] }; }
+  };
+  const server = createApiServer(createDependencies({ contacts }));
+
+  const response = await server.inject({
+    method: "POST",
+    url: "/contacts/import",
+    headers: { "content-type": "application/json", "x-tenant-id": "tenant-1", "x-correlation-id": "corr-import" },
+    payload: "{}"
+  });
+
+  assert.equal(response.statusCode, 415);
+  assert.equal(response.json().error.code, "REQUEST_CONTENT_TYPE_INVALID");
+  assert.equal(called, false);
+});
+

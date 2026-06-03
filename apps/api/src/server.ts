@@ -4,6 +4,7 @@ import { inboundWebhookRequestSchema } from "@whisperm/types";
 
 import { ApiError, mapErrorToHttp } from "./errors.js";
 import type { StripeWebhookDependencies } from "./billing/contracts.js";
+import { createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
@@ -46,6 +47,7 @@ export interface StripeWebhookServerConfig extends StripeWebhookDependencies {
 }
 
 export interface ApiServerDependencies extends InboundWebhookIngestionDependencies {
+  readonly contacts?: ContactRouteDependencies["contacts"] | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
@@ -245,6 +247,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
       stripeSecretKey: dependencies.stripeWebhook.stripeSecretKey,
       stripeWebhookSecret: dependencies.stripeWebhook.stripeWebhookSecret,
     });
+  const contactImportHandler = dependencies.contacts === undefined ? undefined : createContactImportHandler({ contacts: dependencies.contacts });
   let server: Server | undefined;
 
   const inject = async (options: InjectOptions): Promise<InjectResponse> => {
@@ -259,7 +262,8 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
     };
 
     try {
-      request.body = parseJsonPayload(rawBody);
+      const contentType = firstHeaderValue(request.headers, "content-type")?.toLowerCase() ?? "";
+      request.body = contentType.startsWith("multipart/form-data") ? undefined : parseJsonPayload(rawBody);
       correlationIdMiddleware()(request, reply);
       requestLoggingMiddleware(request);
 
@@ -275,6 +279,15 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           throw new ApiError({ code: "READY_CHECK_FAILED", message: "API service is not ready", cause });
         }
         reply.send({ ok: true, data: { status: "ready" }, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+
+      if (options.method === "POST" && options.url === "/contacts/import") {
+        if (contactImportHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "CONTACT_IMPORT_NOT_CONFIGURED", message: "Contact import is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        await contactImportHandler(request, reply);
         return reply.toInjectResponse();
       }
 
