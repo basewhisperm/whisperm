@@ -9,6 +9,7 @@ export type ApiErrorCode =
   | "HMAC_SIGNATURE_INVALID"
   | "TENANT_CONTEXT_MISMATCH"
   | "REQUEST_BODY_INVALID"
+  | "REQUEST_CONTENT_TYPE_INVALID"
   | "READY_CHECK_FAILED"
   | "INTERNAL_SERVER_ERROR";
 
@@ -19,6 +20,7 @@ const statusByCode: Record<ApiErrorCode, number> = {
   HMAC_SIGNATURE_INVALID: 401,
   TENANT_CONTEXT_MISMATCH: 403,
   REQUEST_BODY_INVALID: 400,
+  REQUEST_CONTENT_TYPE_INVALID: 415,
   READY_CHECK_FAILED: 503,
   INTERNAL_SERVER_ERROR: 500,
 };
@@ -68,6 +70,16 @@ export const mapErrorToHttp = (error: unknown): { readonly statusCode: number; r
       statusCode: error.statusCode,
       payload: { ok: false, error: { code: error.code, message: error.message } },
     };
+  }
+
+  if (typeof error === "object" && error !== null && "status" in error && "code" in error && "message" in error) {
+    const serviceError = error as { readonly status: unknown; readonly code: unknown; readonly message: unknown };
+    if (typeof serviceError.status === "number" && typeof serviceError.code === "string" && typeof serviceError.message === "string") {
+      return {
+        statusCode: serviceError.status,
+        payload: { ok: false, error: { code: serviceError.code, message: serviceError.message } },
+      };
+    }
   }
 
   return {

@@ -5,6 +5,9 @@ import { persistenceCorrelationMetadataSchema } from "./persistence.js";
 const idSchema = z.string().min(1);
 const isoDateSchema = z.string().datetime();
 const metadataSchema = z.record(z.string(), z.unknown());
+export const contactStageValues = ["PROSPECT", "QUALIFIED", "PROPOSAL", "ENGAGEMENT", "RENEWAL", "INACTIVE"] as const;
+export const contactStageSchema = z.enum(contactStageValues);
+export type ContactStage = z.output<typeof contactStageSchema>;
 
 export const contactSchema = z.object({
   id: idSchema,
@@ -14,6 +17,7 @@ export const contactSchema = z.object({
   phone: idSchema.nullable().optional(),
   firstName: idSchema.nullable().optional(),
   lastName: idSchema.nullable().optional(),
+  stage: contactStageSchema.default("PROSPECT"),
   metadata: metadataSchema.nullable().optional(),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema,
@@ -27,6 +31,7 @@ export const createContactRequestSchema = z.object({
   phone: idSchema.nullable().optional(),
   firstName: idSchema.nullable().optional(),
   lastName: idSchema.nullable().optional(),
+  stage: contactStageSchema.default("PROSPECT"),
   metadata: metadataSchema.nullable().optional(),
 }).strict().refine((contact) => contact.email !== undefined || contact.phone !== undefined || contact.externalId !== undefined, {
   message: "Contact create requires at least one stable identifier",
@@ -40,6 +45,7 @@ export const updateContactRequestSchema = z.object({
   phone: idSchema.nullable().optional(),
   firstName: idSchema.nullable().optional(),
   lastName: idSchema.nullable().optional(),
+  stage: contactStageSchema.optional(),
   metadata: metadataSchema.nullable().optional(),
   expectedUpdatedAt: isoDateSchema,
 }).strict();

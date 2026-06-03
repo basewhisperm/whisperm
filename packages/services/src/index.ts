@@ -75,6 +75,8 @@ import {
 import {
   assertTenantScope,
   buildScoreRecomputationIdempotencyKey,
+  contactStageSchema,
+  type ContactStage,
   scoreRecomputationJobPayloadSchema,
   scoreRecomputationResultSchema,
   type ScoreRecomputationJobPayload,
@@ -107,6 +109,7 @@ export const serviceErrorCodeValues = [
   "SERVICE_IDEMPOTENCY_CONFLICT",
   "SERVICE_TRANSACTION_FAILED",
   "SERVICE_REPOSITORY_FAILED",
+  "SERVICE_PLAN_LIMIT_EXCEEDED",
 ] as const;
 export const serviceErrorCodeSchema = z.enum(serviceErrorCodeValues);
 export type ServiceErrorCode = z.output<typeof serviceErrorCodeSchema>;
@@ -182,8 +185,13 @@ export interface ServiceTransactionManager {
   run<TResult>(context: ServiceContext, work: TransactionalServiceWork<TResult>): Promise<TResult>;
 }
 
+export interface ContactPlanReader {
+  findCurrentPlan(context: TenantScoped): Promise<{ readonly plan: string } | null>;
+}
+
 export interface ServiceDependencies extends ServiceRepositories {
   readonly transactions?: ServiceTransactionManager | undefined;
+  readonly contactPlans?: ContactPlanReader | undefined;
 }
 
 export interface DomainEventInput {
@@ -407,8 +415,95 @@ export class UserService {
 }
 
 
-const createContactInputSchema = z.object({ tenantId: idSchema, externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: idSchema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), metadata: metadataSchema.nullable().optional() }).strict().refine((contact) => contact.email !== undefined || contact.phone !== undefined || contact.externalId !== undefined, { message: "Contact create requires at least one stable identifier", path: ["email"] });
-const updateContactInputSchema = z.object({ externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: idSchema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), metadata: metadataSchema.nullable().optional() }).merge(optimisticLockSchema).strict();
+export interface ContactImportRow {
+  readonly email?: string | undefined;
+  readonly firstName?: string | undefined;
+  readonly lastName?: string | undefined;
+  readonly phone?: string | undefined;
+  readonly externalId?: string | undefined;
+  readonly stage?: string | undefined;
+  readonly metadata?: JsonObject | undefined;
+}
+
+export interface ContactImportRowError {
+  readonly row: number;
+  readonly field: string;
+  readonly reason: string;
+}
+
+export interface ContactImportRequest {
+  readonly tenantId: string;
+  readonly rows: readonly ContactImportRow[];
+}
+
+export interface ContactImportResult {
+  readonly imported: number;
+  readonly skipped: number;
+  readonly errors: readonly ContactImportRowError[];
+}
+
+const contactImportBatchSize = 500;
+const starterContactLimit = 50;
+const contactImportRowSchema = z.object({
+  email: z.string().trim().min(1, "Email is required").email(),
+  firstName: idSchema.optional(),
+  lastName: idSchema.optional(),
+  phone: idSchema.optional(),
+  externalId: idSchema.optional(),
+  stage: contactStageSchema,
+  metadata: metadataSchema.optional(),
+}).strict();
+type ValidContactImportRow = z.output<typeof contactImportRowSchema>;
+
+const normalizeOptionalText = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+};
+
+const normalizeImportRow = (row: ContactImportRow): ContactImportRow => ({
+  email: normalizeOptionalText(row.email)?.toLowerCase(),
+  firstName: normalizeOptionalText(row.firstName),
+  lastName: normalizeOptionalText(row.lastName),
+  phone: normalizeOptionalText(row.phone),
+  externalId: normalizeOptionalText(row.externalId),
+  stage: normalizeOptionalText(row.stage),
+  metadata: row.metadata,
+});
+
+const validationErrorForRow = (rowNumber: number, input: ContactImportRow, error: z.ZodError): ContactImportRowError => {
+  const stageIssue = error.issues.find((issue) => issue.path[0] === "stage");
+  if (stageIssue !== undefined) {
+    return { row: rowNumber, field: "stage", reason: input.stage === undefined || input.stage.trim().length === 0 ? "Stage is required" : "Stage must match a supported contact stage" };
+  }
+  const emailIssue = error.issues.find((issue) => issue.path[0] === "email");
+  if (emailIssue !== undefined) {
+    return { row: rowNumber, field: "email", reason: input.email === undefined || input.email.trim().length === 0 ? "Email is required" : "Email must be valid" };
+  }
+  const firstIssue = error.issues[0];
+  return { row: rowNumber, field: String(firstIssue?.path[0] ?? "row"), reason: firstIssue?.message ?? "Row is invalid" };
+};
+
+const toCreateContactInput = (tenantId: string, row: ValidContactImportRow): CreateContactInput => exactInput({
+  tenantId,
+  email: row.email,
+  firstName: row.firstName,
+  lastName: row.lastName,
+  phone: row.phone,
+  externalId: row.externalId,
+  stage: row.stage as ContactStage,
+  metadata: row.metadata,
+});
+
+const chunk = <TItem>(items: readonly TItem[], size: number): readonly (readonly TItem[])[] => {
+  const chunks: TItem[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+};
+
+const createContactInputSchema = z.object({ tenantId: idSchema, externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: idSchema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), stage: contactStageSchema.default("PROSPECT"), metadata: metadataSchema.nullable().optional() }).strict().refine((contact) => contact.email !== undefined || contact.phone !== undefined || contact.externalId !== undefined, { message: "Contact create requires at least one stable identifier", path: ["email"] });
+const updateContactInputSchema = z.object({ externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: idSchema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), stage: contactStageSchema.optional(), metadata: metadataSchema.nullable().optional() }).merge(optimisticLockSchema).strict();
 
 export class ContactService {
   constructor(private readonly deps: ServiceDependencies) {}
@@ -422,6 +517,70 @@ export class ContactService {
       await appendDomainEvent(repositories, context, { aggregateType: "CONTACT", aggregateId: contact.id, eventType: "contact.created", idempotencyKey: `contact:${contact.id}:created`, payload: { tenantId: contact.tenantId, contactId: contact.id } });
       return contact;
     });
+  }
+
+
+  async importCsvRows(contextInput: ServiceContext, input: ContactImportRequest): Promise<ContactImportResult> {
+    const context = ensureContext(contextInput);
+    const tenantInput = ensureTenantInput(context, { tenantId: input.tenantId });
+    const errors: ContactImportRowError[] = [];
+    const validRows: ValidContactImportRow[] = [];
+    const seenEmails = new Set<string>();
+
+    for (const [index, rawRow] of input.rows.entries()) {
+      const rowNumber = index + 2;
+      const normalized = normalizeImportRow(rawRow);
+      const parsed = contactImportRowSchema.safeParse(normalized);
+      if (!parsed.success) {
+        errors.push(validationErrorForRow(rowNumber, normalized, parsed.error));
+        continue;
+      }
+      if (seenEmails.has(parsed.data.email)) {
+        errors.push({ row: rowNumber, field: "email", reason: "Duplicate email in uploaded CSV" });
+        continue;
+      }
+      seenEmails.add(parsed.data.email);
+      validRows.push(parsed.data);
+    }
+
+    const existing = await this.deps.contacts.findByEmails(contextToTenantScope(context), validRows.map((row) => row.email));
+    const existingEmails = new Set(existing.flatMap((contact) => contact.email === undefined || contact.email === null ? [] : [contact.email.toLowerCase()]));
+    const insertRows: ValidContactImportRow[] = [];
+    for (const row of validRows) {
+      if (existingEmails.has(row.email)) {
+        errors.push({ row: input.rows.findIndex((candidate) => normalizeOptionalText(candidate.email)?.toLowerCase() === row.email) + 2, field: "email", reason: "Email already exists in workspace" });
+        continue;
+      }
+      insertRows.push(row);
+    }
+
+    const plan = await this.deps.contactPlans?.findCurrentPlan(tenantInput);
+    if (plan?.plan === "STARTER") {
+      const currentCount = await this.deps.contacts.count(contextToTenantScope(context));
+      if (currentCount + insertRows.length > starterContactLimit) {
+        throw new ServiceError({
+          code: "SERVICE_PLAN_LIMIT_EXCEEDED",
+          message: "Starter plan contact limit exceeded",
+          status: 402,
+          details: { limit: starterContactLimit, currentCount, requestedImportCount: insertRows.length },
+          correlation: context.correlation,
+        });
+      }
+    }
+
+    const imported = await runWrite(this.deps, context, async (repositories) => {
+      let inserted = 0;
+      for (const batch of chunk(insertRows.map((row) => toCreateContactInput(context.tenantId, row)), contactImportBatchSize)) {
+        inserted += await repositories.contacts.createMany(contextToTenantScope(context), batch);
+      }
+      if (inserted > 0) {
+        await appendAudit(repositories, context, { action: "CONTACTS_IMPORTED", targetType: "CONTACT_IMPORT", metadata: { imported: inserted, skipped: input.rows.length - inserted } });
+        await appendDomainEvent(repositories, context, { aggregateType: "CONTACT_IMPORT", aggregateId: context.correlation.correlationId, eventType: "contacts.imported", idempotencyKey: `contacts-import:${context.tenantId}:${context.correlation.correlationId}`, payload: { tenantId: context.tenantId, imported: inserted } });
+      }
+      return inserted;
+    });
+
+    return { imported, skipped: input.rows.length - imported, errors: errors.sort((left, right) => left.row - right.row) };
   }
 
   async update(contextInput: ServiceContext, contactId: string, input: UpdateContactInput): Promise<ContactRecord> {

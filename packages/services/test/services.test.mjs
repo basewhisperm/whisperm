@@ -30,10 +30,13 @@ const createRepositories = (overrides = {}) => {
       async update(scope, id, input) { push("users", "update", [scope, id, input]); return { id, tenantId: scope.tenantId, email: input.email ?? "person@example.com", role: input.role ?? "MEMBER", isActive: input.isActive ?? true, createdAt: now, updatedAt: now }; }
     },
     contacts: {
-      async create(scope, input) { push("contacts", "create", [scope, input]); return { id: "contact-1", tenantId: input.tenantId, externalId: input.externalId ?? null, email: input.email ?? null, phone: input.phone ?? null, firstName: input.firstName ?? null, lastName: input.lastName ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
-      async findById(scope, id) { push("contacts", "findById", [scope, id]); return { id, tenantId: scope.tenantId, externalId: "ext-1", email: "lead@example.com", phone: "+15555550100", firstName: "Lead", lastName: "One", metadata: {}, createdAt: now, updatedAt: now }; },
+      async create(scope, input) { push("contacts", "create", [scope, input]); return { id: "contact-1", tenantId: input.tenantId, externalId: input.externalId ?? null, email: input.email ?? null, phone: input.phone ?? null, firstName: input.firstName ?? null, lastName: input.lastName ?? null, stage: input.stage ?? "PROSPECT", metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async createMany(scope, inputs) { push("contacts", "createMany", [scope, inputs]); return inputs.length; },
+      async count(scope) { push("contacts", "count", [scope]); return 0; },
+      async findById(scope, id) { push("contacts", "findById", [scope, id]); return { id, tenantId: scope.tenantId, externalId: "ext-1", email: "lead@example.com", phone: "+15555550100", firstName: "Lead", lastName: "One", stage: "PROSPECT", metadata: {}, createdAt: now, updatedAt: now }; },
+      async findByEmails(scope, emails) { push("contacts", "findByEmails", [scope, emails]); return []; },
       async list(scope) { push("contacts", "list", [scope]); return page([{ id: "contact-1", tenantId: scope.tenantId, email: "lead@example.com", phone: null, firstName: null, lastName: null, externalId: null, metadata: {}, createdAt: now, updatedAt: now }]); },
-      async update(scope, id, input) { push("contacts", "update", [scope, id, input]); return { id, tenantId: scope.tenantId, externalId: input.externalId ?? null, email: input.email ?? "lead@example.com", phone: input.phone ?? null, firstName: input.firstName ?? "Updated", lastName: input.lastName ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async update(scope, id, input) { push("contacts", "update", [scope, id, input]); return { id, tenantId: scope.tenantId, externalId: input.externalId ?? null, email: input.email ?? "lead@example.com", phone: input.phone ?? null, firstName: input.firstName ?? "Updated", lastName: input.lastName ?? null, stage: input.stage ?? "PROSPECT", metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
       async listLeadEvents(scope, contactId) { push("contacts", "listLeadEvents", [scope, contactId]); return page([
         { id: "lead-event-1", tenantId: scope.tenantId, contactId, eventType: "lead.created", occurredAt: "2026-05-28T00:00:00.000Z", payload: {}, createdAt: now },
         { id: "lead-event-2", tenantId: scope.tenantId, contactId, eventType: "email.clicked", occurredAt: "2026-05-27T00:00:00.000Z", payload: {}, createdAt: now },
@@ -129,10 +132,13 @@ test("idempotent campaign publishing returns the existing job without duplicate 
   const existingJob = { id: "publish-existing", tenantId: "tenant-a", target: "email", state: "QUEUED", attempts: 0, idempotencyKey: "publish-key", contentItemId: null, contentVariantId: null, externalId: null, scheduledAt: null, startedAt: null, finishedAt: null, errorMessage: null, metadata: {}, createdAt: now, updatedAt: now };
   const repositories = createRepositories({
     contacts: {
-      async create(scope, input) { push("contacts", "create", [scope, input]); return { id: "contact-1", tenantId: input.tenantId, externalId: input.externalId ?? null, email: input.email ?? null, phone: input.phone ?? null, firstName: input.firstName ?? null, lastName: input.lastName ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
-      async findById(scope, id) { push("contacts", "findById", [scope, id]); return { id, tenantId: scope.tenantId, externalId: "ext-1", email: "lead@example.com", phone: "+15555550100", firstName: "Lead", lastName: "One", metadata: {}, createdAt: now, updatedAt: now }; },
+      async create(scope, input) { push("contacts", "create", [scope, input]); return { id: "contact-1", tenantId: input.tenantId, externalId: input.externalId ?? null, email: input.email ?? null, phone: input.phone ?? null, firstName: input.firstName ?? null, lastName: input.lastName ?? null, stage: input.stage ?? "PROSPECT", metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async createMany(scope, inputs) { push("contacts", "createMany", [scope, inputs]); return inputs.length; },
+      async count(scope) { push("contacts", "count", [scope]); return 0; },
+      async findById(scope, id) { push("contacts", "findById", [scope, id]); return { id, tenantId: scope.tenantId, externalId: "ext-1", email: "lead@example.com", phone: "+15555550100", firstName: "Lead", lastName: "One", stage: "PROSPECT", metadata: {}, createdAt: now, updatedAt: now }; },
+      async findByEmails(scope, emails) { push("contacts", "findByEmails", [scope, emails]); return []; },
       async list(scope) { push("contacts", "list", [scope]); return page([{ id: "contact-1", tenantId: scope.tenantId, email: "lead@example.com", phone: null, firstName: null, lastName: null, externalId: null, metadata: {}, createdAt: now, updatedAt: now }]); },
-      async update(scope, id, input) { push("contacts", "update", [scope, id, input]); return { id, tenantId: scope.tenantId, externalId: input.externalId ?? null, email: input.email ?? "lead@example.com", phone: input.phone ?? null, firstName: input.firstName ?? "Updated", lastName: input.lastName ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
+      async update(scope, id, input) { push("contacts", "update", [scope, id, input]); return { id, tenantId: scope.tenantId, externalId: input.externalId ?? null, email: input.email ?? "lead@example.com", phone: input.phone ?? null, firstName: input.firstName ?? "Updated", lastName: input.lastName ?? null, stage: input.stage ?? "PROSPECT", metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
       async listLeadEvents(scope, contactId) { push("contacts", "listLeadEvents", [scope, contactId]); return page([
         { id: "lead-event-1", tenantId: scope.tenantId, contactId, eventType: "lead.created", occurredAt: "2026-05-28T00:00:00.000Z", payload: {}, createdAt: now },
         { id: "lead-event-2", tenantId: scope.tenantId, contactId, eventType: "email.clicked", occurredAt: "2026-05-27T00:00:00.000Z", payload: {}, createdAt: now },
@@ -276,4 +282,121 @@ test("score recomputation is deterministic for the same contact, events, and clo
   assert.equal(first.leadScore, 90);
   assert.equal(first.trajectoryScore, 0);
   assert.equal(first.trustBand, "HIGH");
+});
+
+test("contact CSV import inserts 100 valid normalized rows", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices({ ...repositories, contactPlans: { async findCurrentPlan() { return { plan: "GROWTH" }; } } });
+  const rows = Array.from({ length: 100 }, (_, index) => ({ email: ` Person${index}@Example.COM `, stage: "PROSPECT", firstName: `Person${index}` }));
+
+  const result = await services.contacts.importCsvRows(context, { tenantId: "tenant-a", rows });
+
+  assert.deepEqual(result, { imported: 100, skipped: 0, errors: [] });
+  const createMany = repositories.calls.find((call) => call.repo === "contacts" && call.method === "createMany");
+  assert.equal(createMany.args[1].length, 100);
+  assert.equal(createMany.args[1][0].email, "person0@example.com");
+});
+
+test("contact CSV import skips existing and uploaded duplicate emails", async () => {
+  const base = createRepositories();
+  const repositories = createRepositories({
+    contacts: {
+      ...base.contacts,
+      async findByEmails(scope, emails) {
+        repositories.calls.push({ repo: "contacts", method: "findByEmails", args: [scope, emails] });
+        return [{ id: "contact-existing", tenantId: scope.tenantId, email: "existing@example.com", stage: "PROSPECT", createdAt: now, updatedAt: now }];
+      }
+    }
+  });
+  const services = createWhispeRMServices({ ...repositories, contactPlans: { async findCurrentPlan() { return { plan: "GROWTH" }; } } });
+
+  const result = await services.contacts.importCsvRows(context, { tenantId: "tenant-a", rows: [
+    { email: "existing@example.com", stage: "PROSPECT" },
+    { email: "new@example.com", stage: "QUALIFIED" },
+    { email: "NEW@example.com", stage: "QUALIFIED" }
+  ] });
+
+  assert.equal(result.imported, 1);
+  assert.equal(result.skipped, 2);
+  assert.deepEqual(result.errors.map((error) => error.reason), ["Email already exists in workspace", "Duplicate email in uploaded CSV"]);
+});
+
+test("contact CSV import returns row errors for missing field, invalid email, and invalid stage", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices({ ...repositories, contactPlans: { async findCurrentPlan() { return { plan: "GROWTH" }; } } });
+
+  const result = await services.contacts.importCsvRows(context, { tenantId: "tenant-a", rows: [
+    { email: "", stage: "PROSPECT" },
+    { email: "not-an-email", stage: "PROSPECT" },
+    { email: "valid@example.com", stage: "BAD" }
+  ] });
+
+  assert.equal(result.imported, 0);
+  assert.equal(result.skipped, 3);
+  assert.deepEqual(result.errors, [
+    { row: 2, field: "email", reason: "Email is required" },
+    { row: 3, field: "email", reason: "Email must be valid" },
+    { row: 4, field: "stage", reason: "Stage must match a supported contact stage" }
+  ]);
+});
+
+test("contact CSV import enforces Starter plan limit before writes", async () => {
+  const base = createRepositories();
+  const repositories = createRepositories({
+    contacts: {
+      ...base.contacts,
+      async count(scope) { repositories.calls.push({ repo: "contacts", method: "count", args: [scope] }); return 49; }
+    }
+  });
+  const services = createWhispeRMServices({ ...repositories, contactPlans: { async findCurrentPlan() { return { plan: "STARTER" }; } } });
+
+  await assert.rejects(
+    services.contacts.importCsvRows(context, { tenantId: "tenant-a", rows: [
+      { email: "one@example.com", stage: "PROSPECT" },
+      { email: "two@example.com", stage: "PROSPECT" }
+    ] }),
+    (error) => error instanceof ServiceError && error.code === "SERVICE_PLAN_LIMIT_EXCEEDED" && error.status === 402
+  );
+  assert.equal(repositories.calls.some((call) => call.repo === "contacts" && call.method === "createMany"), false);
+});
+
+test("contact CSV import batches inserts in 500-row chunks", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices({ ...repositories, contactPlans: { async findCurrentPlan() { return { plan: "GROWTH" }; } } });
+  const rows = Array.from({ length: 1001 }, (_, index) => ({ email: `batch-${index}@example.com`, stage: "PROSPECT" }));
+
+  const result = await services.contacts.importCsvRows(context, { tenantId: "tenant-a", rows });
+
+  assert.equal(result.imported, 1001);
+  assert.deepEqual(repositories.calls.filter((call) => call.repo === "contacts" && call.method === "createMany").map((call) => call.args[1].length), [500, 500, 1]);
+});
+
+test("contact CSV import rolls back through transaction manager on DB failure", async () => {
+  const base = createRepositories();
+  const repositories = createRepositories({
+    contacts: {
+      ...base.contacts,
+      async createMany(scope, inputs) {
+        repositories.calls.push({ repo: "contacts", method: "createMany", args: [scope, inputs] });
+        throw new Error("insert failed");
+      }
+    }
+  });
+  let transactionStarted = false;
+  const services = createWhispeRMServices({
+    ...repositories,
+    contactPlans: { async findCurrentPlan() { return { plan: "GROWTH" }; } },
+    transactions: {
+      async run(txContext, work) {
+        transactionStarted = true;
+        return work(repositories);
+      }
+    }
+  });
+
+  await assert.rejects(
+    services.contacts.importCsvRows(context, { tenantId: "tenant-a", rows: [{ email: "rollback@example.com", stage: "PROSPECT" }] }),
+    (error) => error instanceof ServiceError && error.code === "SERVICE_TRANSACTION_FAILED"
+  );
+  assert.equal(transactionStarted, true);
 });
