@@ -132,6 +132,46 @@ enum TraceSpanStatus {
   ERROR
   UNSET
 }
+enum ContactStage {
+  PROSPECT
+  QUALIFIED
+  PROPOSAL
+  ENGAGEMENT
+  RENEWAL
+  INACTIVE
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  TASK
+  NOTE
+}
+
+enum DealStage {
+  PROSPECT
+  QUALIFIED
+  PROPOSAL
+  ENGAGEMENT
+  RENEWAL
+}
+
+enum SubscriptionPlan {
+  STARTER
+  GROWTH
+  PRO
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+
 
 model Tenant {
   id         String   @id @default(uuid()) @db.Uuid
@@ -169,6 +209,10 @@ model Tenant {
   distributedLocks       DistributedLock[]
   outboxEvents           OutboxEvent[]
   inboxEvents            InboxEvent[]
+  deals                  Deal[]
+  activities             Activity[]
+  pipelines              Pipeline[]
+  subscriptions          Subscription[]
 }
 
 model TenantUser {
@@ -182,8 +226,11 @@ model TenantUser {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contentItems ContentItem[]
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentItems    ContentItem[]
+  ownedContacts   Contact[]     @relation("ContactOwner")
+  ownedDeals      Deal[]        @relation("DealOwner")
+  activities      Activity[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, email])
@@ -193,21 +240,29 @@ model TenantUser {
 }
 
 model Contact {
-  id         String   @id @default(uuid()) @db.Uuid
-  tenantId   String   @db.Uuid
-  externalId String?
-  email      String?
-  phone      String?
-  firstName  String?
-  lastName   String?
-  metadata   Json?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          String       @id @default(uuid()) @db.Uuid
+  tenantId    String       @db.Uuid
+  externalId  String?
+  email       String?
+  phone       String?
+  firstName   String?
+  lastName    String?
+  company     String?
+  stage       ContactStage @default(PROSPECT)
+  source      String?
+  ownerId     String?      @db.Uuid
+  lastTouchAt DateTime?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner         TenantUser?    @relation("ContactOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
   contentItems  ContentItem[]
   inboundEvents InboundEvent[]
   leadEvents    LeadEvent[]
+  deals         Deal[]
+  activities    Activity[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, externalId])
@@ -215,6 +270,9 @@ model Contact {
   @@index([tenantId, email])
   @@index([tenantId, phone])
   @@index([tenantId, externalId])
+  @@index([tenantId, stage])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, lastTouchAt])
 }
 
 model ContentItem {
@@ -467,6 +525,116 @@ model PublishJob {
   @@index([tenantId, state, scheduledAt])
 }
 
+
+
+// CRM product models — expand-only, tenant-scoped, rollback-safe.
+// No migration generation from this file.
+
+model Pipeline {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  name      String
+  isDefault Boolean  @default(false)
+  stages    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deals  Deal[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId])
+  @@index([tenantId, isDefault])
+}
+
+model Deal {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @db.Uuid
+  contactId  String?   @db.Uuid
+  pipelineId String?   @db.Uuid
+  ownerId    String?   @db.Uuid
+  externalId String?
+  title      String
+  value      Decimal?  @db.Decimal(18, 4)
+  currency   String    @default("USD")
+  stage      DealStage @default(PROSPECT)
+  probability Int?
+  closedAt   DateTime?
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact    Contact?    @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  pipeline   Pipeline?   @relation(fields: [tenantId, pipelineId], references: [tenantId, id], onDelete: Restrict)
+  owner      TenantUser? @relation("DealOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
+  activities Activity[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, pipelineId])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, stage])
+  @@index([tenantId, stage, closedAt])
+  @@index([tenantId, externalId])
+}
+
+model Activity {
+  id          String       @id @default(uuid()) @db.Uuid
+  tenantId    String       @db.Uuid
+  contactId   String?      @db.Uuid
+  dealId      String?      @db.Uuid
+  createdById String       @db.Uuid
+  type        ActivityType
+  note        String?
+  occurredAt  DateTime     @default(now())
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact   Contact?    @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  deal      Deal?       @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+  createdBy TenantUser  @relation(fields: [tenantId, createdById], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@index([tenantId])
+  @@index([tenantId, contactId, occurredAt])
+  @@index([tenantId, dealId, occurredAt])
+  @@index([tenantId, createdById])
+  @@index([tenantId, type, occurredAt])
+}
+
+model Subscription {
+  id                     String             @id @default(uuid()) @db.Uuid
+  tenantId               String             @db.Uuid
+  plan                   SubscriptionPlan   @default(STARTER)
+  status                 SubscriptionStatus @default(TRIALING)
+  stripeCustomerId       String?
+  stripeSubscriptionId   String?
+  paystackCustomerId     String?
+  paystackSubscriptionId String?
+  currency               String             @default("USD")
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  trialEndsAt            DateTime?
+  canceledAt             DateTime?
+  metadata               Json?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, stripeCustomerId])
+  @@unique([tenantId, paystackCustomerId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, plan, status])
+  @@index([tenantId, trialEndsAt])
+}
 
 // Persistence foundation models below are additive and tenant-scoped. They are
 // organized as expand-only schema primitives so generated migrations can be

@@ -12,6 +12,12 @@ import {
   type BillingRepository,
   type BillingUsageRecord,
   billingUsageRecordSchema,
+  type ContactRepository,
+  type ContactRecord,
+  contactRecordSchema,
+  type CreateContactInput,
+  type UpdateContactInput,
+  type LeadEventRecord,
   type Campaign,
   campaignSchema,
   type CampaignRepository,
@@ -68,6 +74,13 @@ import {
 } from "@whisperm/repositories";
 import {
   assertTenantScope,
+  buildScoreRecomputationIdempotencyKey,
+  scoreRecomputationJobPayloadSchema,
+  scoreRecomputationResultSchema,
+  type ScoreRecomputationJobPayload,
+  type ScoreRecomputationResult,
+  trustBandSchema,
+  type TrustBand,
   type PersistenceCorrelationMetadata,
   persistenceCorrelationMetadataSchema,
   type TenantScoped,
@@ -153,6 +166,7 @@ export class ServiceError extends Error {
 export interface ServiceRepositories {
   readonly tenants: TenantRepository;
   readonly users: UserRepository;
+  readonly contacts: ContactRepository;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -389,6 +403,117 @@ export class UserService {
   async findById(contextInput: ServiceContext, userId: string): Promise<User | null> {
     const context = ensureContext(contextInput);
     return userSchema.nullable().parse(await this.deps.users.findById(contextToTenantScope(context), idSchema.parse(userId)));
+  }
+}
+
+
+const createContactInputSchema = z.object({ tenantId: idSchema, externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: idSchema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), metadata: metadataSchema.nullable().optional() }).strict().refine((contact) => contact.email !== undefined || contact.phone !== undefined || contact.externalId !== undefined, { message: "Contact create requires at least one stable identifier", path: ["email"] });
+const updateContactInputSchema = z.object({ externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: idSchema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), metadata: metadataSchema.nullable().optional() }).merge(optimisticLockSchema).strict();
+
+export class ContactService {
+  constructor(private readonly deps: ServiceDependencies) {}
+
+  async create(contextInput: ServiceContext, input: CreateContactInput): Promise<ContactRecord> {
+    const context = ensureContext(contextInput);
+    const data = ensureTenantInput(context, exactInput(parseContract(createContactInputSchema, input, context.correlation)));
+    return runWrite(this.deps, context, async (repositories) => {
+      const contact = contactRecordSchema.parse(await repositories.contacts.create(contextToTenantScope(context), data as CreateContactInput));
+      await appendAudit(repositories, context, { action: "CONTACT_CREATED", targetType: "CONTACT", targetId: contact.id });
+      await appendDomainEvent(repositories, context, { aggregateType: "CONTACT", aggregateId: contact.id, eventType: "contact.created", idempotencyKey: `contact:${contact.id}:created`, payload: { tenantId: contact.tenantId, contactId: contact.id } });
+      return contact;
+    });
+  }
+
+  async update(contextInput: ServiceContext, contactId: string, input: UpdateContactInput): Promise<ContactRecord> {
+    const context = ensureContext(contextInput);
+    const data = exactInput(parseContract(updateContactInputSchema, input, context.correlation));
+    if (!nonEmptyPartial(data)) {
+      throw new ServiceError({ code: "SERVICE_VALIDATION_FAILED", message: "Contact update must include at least one field", status: 400, correlation: context.correlation });
+    }
+    return runWrite(this.deps, context, async (repositories) => {
+      const contact = contactRecordSchema.parse(await repositories.contacts.update(contextToTenantScope(context), idSchema.parse(contactId), data as UpdateContactInput));
+      await appendAudit(repositories, context, { action: "CONTACT_UPDATED", targetType: "CONTACT", targetId: contact.id });
+      await appendDomainEvent(repositories, context, { aggregateType: "CONTACT", aggregateId: contact.id, eventType: "contact.updated", idempotencyKey: `contact:${contact.id}:updated:${contact.updatedAt}`, payload: { tenantId: contact.tenantId, contactId: contact.id } });
+      return contact;
+    });
+  }
+
+  async get(contextInput: ServiceContext, contactId: string): Promise<ContactRecord> {
+    const context = ensureContext(contextInput);
+    return contactRecordSchema.parse(ensureFound(await this.deps.contacts.findById(contextToTenantScope(context), idSchema.parse(contactId)), context, "CONTACT", contactId));
+  }
+
+  async list(contextInput: ServiceContext, page?: PageRequest): Promise<Page<ContactRecord>> {
+    const context = ensureContext(contextInput);
+    return this.deps.contacts.list(contextToTenantScope(context), page);
+  }
+}
+
+const scoreWeights: Readonly<Record<string, number>> = {
+  "lead.created": 20,
+  "contact.created": 10,
+  "email.opened": 5,
+  "email.clicked": 15,
+  "form.submitted": 25,
+  "meeting.booked": 35,
+  "reply.received": 30,
+  "unsubscribe": -40,
+  "spam.complaint": -60,
+};
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+const eventWeight = (event: Pick<LeadEventRecord, "eventType">): number => scoreWeights[event.eventType] ?? 1;
+const eventTotal = (events: readonly LeadEventRecord[]): number => events.reduce((total, event) => total + eventWeight(event), 0);
+
+export const computeLeadScore = (contact: ContactRecord, events: readonly LeadEventRecord[]): ScoreRecomputationResult["leadScoreBreakdown"] => {
+  const identityScore = clamp((contact.email === undefined || contact.email === null ? 0 : 10) + (contact.phone === undefined || contact.phone === null ? 0 : 5) + (contact.externalId === undefined || contact.externalId === null ? 0 : 5), 0, 20);
+  const engagementScore = clamp(eventTotal(events), 0, 80);
+  return { eventScore: clamp(identityScore + engagementScore, 0, 100), identityScore, engagementScore, eventCount: events.length };
+};
+
+export const computeTrajectoryScore = (events: readonly LeadEventRecord[], asOf: Date): ScoreRecomputationResult["trajectoryScoreBreakdown"] => {
+  const recentStart = asOf.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const previousStart = asOf.getTime() - 14 * 24 * 60 * 60 * 1000;
+  const recent = events.filter((event) => Date.parse(event.occurredAt) >= recentStart && Date.parse(event.occurredAt) <= asOf.getTime());
+  const previous = events.filter((event) => Date.parse(event.occurredAt) >= previousStart && Date.parse(event.occurredAt) < recentStart);
+  const recentScore = Math.max(0, eventTotal(recent));
+  const previousScore = Math.max(0, eventTotal(previous));
+  return { score: clamp(recentScore - previousScore, -100, 100), recentScore, previousScore, recentEventCount: recent.length, previousEventCount: previous.length };
+};
+
+export const deriveTrustBand = (leadScore: number, trajectoryScore: number): TrustBand => {
+  const combined = clamp(leadScore + Math.trunc(trajectoryScore / 4), 0, 100);
+  return trustBandSchema.parse(combined >= 70 ? "HIGH" : combined >= 40 ? "MEDIUM" : "LOW");
+};
+
+export class ScoringService {
+  constructor(private readonly deps: ServiceDependencies, private readonly clock: { readonly now: () => Date } = { now: () => new Date() }) {}
+
+  async recomputeContactScore(contextInput: ServiceContext, input: ScoreRecomputationJobPayload): Promise<ScoreRecomputationResult> {
+    const context = ensureContext(contextInput);
+    const data = ensureTenantInput(context, exactInput(parseContract(scoreRecomputationJobPayloadSchema, input, context.correlation)));
+    const contact = contactRecordSchema.parse(ensureFound(await this.deps.contacts.findById(contextToTenantScope(context), data.contactId), context, "CONTACT", data.contactId));
+    const events = (await this.deps.contacts.listLeadEvents(contextToTenantScope(context), contact.id, { limit: 100 })).items;
+    const recomputedAt = this.clock.now();
+    const leadBreakdown = computeLeadScore(contact, events);
+    const trajectoryBreakdown = computeTrajectoryScore(events, recomputedAt);
+    const result = scoreRecomputationResultSchema.parse({
+      tenantId: context.tenantId,
+      contactId: contact.id,
+      leadScore: leadBreakdown.eventScore,
+      trajectoryScore: trajectoryBreakdown.score,
+      trustBand: deriveTrustBand(leadBreakdown.eventScore, trajectoryBreakdown.score),
+      leadScoreBreakdown: leadBreakdown,
+      trajectoryScoreBreakdown: trajectoryBreakdown,
+      recomputedAt: recomputedAt.toISOString(),
+      correlation: context.correlation,
+    });
+    await appendAudit(this.deps, context, { action: "CONTACT_SCORE_RECOMPUTED", targetType: "CONTACT", targetId: contact.id, metadata: { leadScore: result.leadScore, trajectoryScore: result.trajectoryScore, trustBand: result.trustBand, reason: data.reason } });
+    return result;
+  }
+
+  buildRecomputationIdempotencyKey(input: Pick<ScoreRecomputationJobPayload, "tenantId" | "contactId">): string {
+    return buildScoreRecomputationIdempotencyKey(input);
   }
 }
 
@@ -657,6 +782,8 @@ export class AuditService {
 export interface WhispeRMServices {
   readonly tenants: TenantService;
   readonly users: UserService;
+  readonly contacts: ContactService;
+  readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
   readonly workflows: WorkflowService;
   readonly approvals: ApprovalService;
@@ -669,6 +796,8 @@ export interface WhispeRMServices {
 export const createWhispeRMServices = (dependencies: ServiceDependencies): WhispeRMServices => ({
   tenants: new TenantService(dependencies),
   users: new UserService(dependencies),
+  contacts: new ContactService(dependencies),
+  scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
   workflows: new WorkflowService(dependencies),
   approvals: new ApprovalService(dependencies),

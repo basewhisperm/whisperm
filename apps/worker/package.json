@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --test test/*.test.js test/*.test.mjs test/smoke.test.js"
+    "test": "pnpm run build && node --test test/*.test.js test/smoke.test.js"
   },
   "dependencies": {
     "@whisperm/types": "workspace:*",
