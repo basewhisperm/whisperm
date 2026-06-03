@@ -36,6 +36,10 @@ import {
 import {
   executeTrialReminderJob,
   trialReminderJobPayloadSchema,
+<<<<<<< HEAD
+=======
+  type NotificationServicePort,
+>>>>>>> origin/main
 } from "@whisperm/notification-runtime";
 import {
   inboundEventSchema,
@@ -469,6 +473,10 @@ export const createNotificationTrialReminderHandler = (services: WorkerServices)
   },
 });
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/main
 export const createScoreRecomputationHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.scoring === undefined) {

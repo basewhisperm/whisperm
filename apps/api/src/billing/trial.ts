@@ -18,10 +18,28 @@ export const createTrialGate = (
   reader: TrialGateSubscriptionReader,
   now: () => Date = () => new Date(),
 ) => async (tenantId: string): Promise<"allowed" | "payment_required"> => {
+  const evaluatedAt = now();
   const subscription = await reader.findActiveOrTrialingSubscription({
     tenantId,
-    now: now(),
+    now: evaluatedAt,
   });
 
-  return subscription === null ? "payment_required" : "allowed";
+  if (subscription === null) {
+    return "payment_required";
+  }
+
+  if (subscription.status === "ACTIVE") {
+    return "allowed";
+  }
+
+  if (
+    subscription.status === "TRIALING" &&
+    subscription.trialEndsAt !== undefined &&
+    subscription.trialEndsAt !== null &&
+    !isTrialExpired(subscription.trialEndsAt, evaluatedAt)
+  ) {
+    return "allowed";
+  }
+
+  return "payment_required";
 };

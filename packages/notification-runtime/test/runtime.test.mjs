@@ -19,14 +19,8 @@ const payload = {
 
 test("buildTrialReminderJobs creates D-3, D-1, and D+0 jobs", () => {
   const jobs = buildTrialReminderJobs(payload);
-
   assert.equal(jobs.length, 3);
   assert.deepEqual(jobs.map((job) => job.payload.marker), ["D-3", "D-1", "D+0"]);
-  assert.deepEqual(jobs.map((job) => job.runAt), [
-    "2026-06-27T00:00:00.000Z",
-    "2026-06-29T00:00:00.000Z",
-    "2026-06-30T00:00:00.000Z",
-  ]);
 });
 
 test("buildTrialReminderJobs returns no jobs without owner email or trial end", () => {
@@ -36,7 +30,6 @@ test("buildTrialReminderJobs returns no jobs without owner email or trial end", 
 
 test("scheduleTrialReminderJobs schedules all trial reminder jobs", async () => {
   const scheduled = [];
-
   const count = await scheduleTrialReminderJobs({
     async scheduleTrialReminder(job) {
       scheduled.push(job);

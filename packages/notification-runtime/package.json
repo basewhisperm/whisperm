@@ -6,6 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+<<<<<<< HEAD
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
@@ -13,5 +14,22 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3"
+=======
+    "test": "pnpm run build && node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@whisperm/services": "workspace:*",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+>>>>>>> origin/main
   }
 }
