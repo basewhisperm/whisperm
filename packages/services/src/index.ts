@@ -13,9 +13,12 @@ import {
   type BillingUsageRecord,
   billingUsageRecordSchema,
   type ContactRepository,
+  type ActivityRepository,
   type ContactRecord,
   contactRecordSchema,
   type CreateContactInput,
+  type CreateActivityInput,
+  type CreateDealInput,
   type UpdateContactInput,
   type LeadEventRecord,
   type Campaign,
@@ -36,6 +39,14 @@ import {
   type CreateTenantInput,
   type CreateUserInput,
   type CreateWorkflowExecutionInput,
+  type DealCardRecord,
+  dealCardRecordSchema,
+  type DealDetailRecord,
+  type DealRecord,
+  dealRecordSchema,
+  type DealsRepository,
+  type BoardPaginationRequest,
+  type PipelineBoardRecord,
   type EventIngestion,
   eventIngestionSchema,
   type EventRepository,
@@ -170,6 +181,8 @@ export interface ServiceRepositories {
   readonly tenants: TenantRepository;
   readonly users: UserRepository;
   readonly contacts: ContactRepository;
+  readonly deals: DealsRepository;
+  readonly activities: ActivityRepository;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -921,6 +934,78 @@ export class BillingService {
   }
 }
 
+
+const boardPageInputSchema = z.object({ limit: z.number().int().min(1).max(25).optional(), cursors: z.record(idSchema, idSchema.optional()).optional() }).strict();
+const createDealInputSchema = z.object({ tenantId: idSchema, pipelineStageId: idSchema, contactId: idSchema.nullable().optional(), ownerId: idSchema.nullable().optional(), externalId: idSchema.nullable().optional(), title: idSchema, value: z.union([z.number(), z.string()]).nullable().optional(), currency: z.string().min(3).max(3).optional(), probability: z.number().int().min(0).max(100).nullable().optional(), closedAt: isoDateSchema.nullable().optional(), metadata: metadataSchema.nullable().optional() }).strict();
+const moveDealStageInputSchema = z.object({ stageId: idSchema, expectedUpdatedAt: isoDateSchema }).strict();
+
+const dealToCard = (deal: DealRecord): DealCardRecord => dealCardRecordSchema.parse({
+  id: deal.id,
+  title: deal.title,
+  contactName: undefined,
+  dealValue: deal.value,
+  currency: deal.currency,
+  owner: undefined,
+  probability: deal.probability,
+  stageId: deal.pipelineStageId,
+  updatedAt: deal.updatedAt,
+});
+
+export class DealService {
+  constructor(private readonly deps: ServiceDependencies) {}
+
+  async board(contextInput: ServiceContext, pipelineId: string, paginationInput?: { readonly limit?: number; readonly cursors?: Readonly<Record<string, string | undefined>> }): Promise<PipelineBoardRecord> {
+    const context = ensureContext(contextInput);
+    const pagination = withoutUndefined(exactInput(parseContract(boardPageInputSchema, paginationInput ?? {}, context.correlation))) as BoardPaginationRequest;
+    const board = await this.deps.deals.findBoardByPipeline(context.tenantId, idSchema.parse(pipelineId), pagination);
+    return ensureFound(board, context, "PIPELINE", pipelineId);
+  }
+
+  async create(contextInput: ServiceContext, input: CreateDealInput): Promise<DealRecord> {
+    const context = ensureContext(contextInput);
+    const data = ensureTenantInput(context, exactInput(parseContract(createDealInputSchema, input, context.correlation)));
+    return runWrite(this.deps, context, async (repositories) => {
+      const deal = dealRecordSchema.parse(await repositories.deals.create(context.tenantId, data as CreateDealInput));
+      await appendAudit(repositories, context, { action: "DEAL_CREATED", targetType: "DEAL", targetId: deal.id, metadata: { pipelineId: deal.pipelineId, stageId: deal.pipelineStageId } });
+      await appendDomainEvent(repositories, context, { aggregateType: "DEAL", aggregateId: deal.id, eventType: "deal.created", idempotencyKey: `deal:${deal.id}:created`, payload: { tenantId: deal.tenantId, dealId: deal.id, pipelineId: deal.pipelineId, stageId: deal.pipelineStageId } });
+      return deal;
+    });
+  }
+
+  async createCard(contextInput: ServiceContext, input: CreateDealInput): Promise<DealCardRecord> {
+    const deal = await this.create(contextInput, input);
+    return dealToCard(deal);
+  }
+
+  async moveStage(contextInput: ServiceContext, dealId: string, input: { readonly stageId: string; readonly expectedUpdatedAt: string }): Promise<DealRecord> {
+    const context = ensureContext(contextInput);
+    const data = exactInput(parseContract(moveDealStageInputSchema, input, context.correlation));
+    return runWrite(this.deps, context, async (repositories) => {
+      const result = await repositories.deals.updateStageWithOptimisticLock(context.tenantId, idSchema.parse(dealId), data.stageId, data.expectedUpdatedAt);
+      const occurredAt = new Date().toISOString();
+      await appendDomainEvent(repositories, context, {
+        aggregateType: "DEAL",
+        aggregateId: result.deal.id,
+        eventType: "deal.stage_changed",
+        idempotencyKey: `deal:${result.deal.id}:stage_changed:${result.deal.updatedAt}`,
+        payload: { workspaceId: context.tenantId, tenantId: context.tenantId, dealId: result.deal.id, previousStageId: result.previousStageId, newStageId: result.deal.pipelineStageId, changedBy: context.actorId, occurredAt },
+      });
+      if (context.actorId !== undefined) {
+        const activityInput: CreateActivityInput = { tenantId: context.tenantId, dealId: result.deal.id, contactId: result.deal.contactId, createdById: context.actorId, type: "NOTE", note: "Deal stage changed", occurredAt, metadata: { previousStageId: result.previousStageId, newStageId: result.deal.pipelineStageId } };
+        await repositories.activities.create(contextToTenantScope(context), activityInput);
+      }
+      await appendAudit(repositories, context, { action: "DEAL_STAGE_CHANGED", targetType: "DEAL", targetId: result.deal.id, metadata: { previousStageId: result.previousStageId, newStageId: result.deal.pipelineStageId } });
+      return result.deal;
+    });
+  }
+
+  async detail(contextInput: ServiceContext, dealId: string): Promise<DealDetailRecord> {
+    const context = ensureContext(contextInput);
+    const detail = await this.deps.deals.findDetailById(context.tenantId, idSchema.parse(dealId));
+    return ensureFound(detail, context, "DEAL", dealId);
+  }
+}
+
 const auditInputSchema = z.object({ tenantId: idSchema, action: idSchema, targetType: idSchema, correlationId: idSchema, actorId: idSchema.nullable().optional(), targetId: idSchema.nullable().optional(), requestId: idSchema.nullable().optional(), metadata: metadataSchema.nullable().optional(), occurredAt: isoDateSchema.optional() }).strict();
 
 export class AuditService {
@@ -942,6 +1027,7 @@ export interface WhispeRMServices {
   readonly tenants: TenantService;
   readonly users: UserService;
   readonly contacts: ContactService;
+  readonly deals: DealService;
   readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
   readonly workflows: WorkflowService;
@@ -956,6 +1042,7 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   tenants: new TenantService(dependencies),
   users: new UserService(dependencies),
   contacts: new ContactService(dependencies),
+  deals: new DealService(dependencies),
   scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
   workflows: new WorkflowService(dependencies),

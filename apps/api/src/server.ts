@@ -5,6 +5,7 @@ import { inboundWebhookRequestSchema } from "@whisperm/types";
 import { ApiError, mapErrorToHttp } from "./errors.js";
 import type { StripeWebhookDependencies } from "./billing/contracts.js";
 import { createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
+import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
@@ -48,6 +49,7 @@ export interface StripeWebhookServerConfig extends StripeWebhookDependencies {
 
 export interface ApiServerDependencies extends InboundWebhookIngestionDependencies {
   readonly contacts?: ContactRouteDependencies["contacts"] | undefined;
+  readonly deals?: DealRouteDependencies["deals"] | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
@@ -56,7 +58,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
 }
 
 export interface InjectOptions {
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PATCH";
   readonly url: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly payload?: unknown;
@@ -79,6 +81,7 @@ interface MutableRequest extends FastifyRequestLike {
   method: string;
   url: string;
   params?: Readonly<Record<string, string>>;
+  query?: Readonly<Record<string, string | undefined>>;
   rawBody?: string;
   sdkApiKey?: ApiKeyPrincipal;
 }
@@ -209,6 +212,28 @@ const parseSdkEventsRoute = (method: string, url: string): Readonly<Record<strin
   return { tenantId: decodeURIComponent(match[1] ?? "") };
 };
 
+
+interface ParsedUrl {
+  readonly pathname: string;
+  readonly query: Readonly<Record<string, string | undefined>>;
+}
+
+const parseUrl = (url: string): ParsedUrl => {
+  const parsed = new URL(url, "http://localhost");
+  return { pathname: parsed.pathname, query: Object.fromEntries(parsed.searchParams.entries()) };
+};
+
+const parseCrmRoute = (method: string, pathname: string): { readonly name: "pipelineBoard" | "dealCreate" | "dealMoveStage" | "dealDetail"; readonly params: Readonly<Record<string, string>> } | null => {
+  if (method === "POST" && pathname === "/deals") return { name: "dealCreate", params: {} };
+  const pipelineBoard = /^\/pipelines\/([^/?#]+)\/board\/?$/u.exec(pathname);
+  if (method === "GET" && pipelineBoard !== null) return { name: "pipelineBoard", params: { pipelineId: decodeURIComponent(pipelineBoard[1] ?? "") } };
+  const dealMove = /^\/deals\/([^/?#]+)\/stage\/?$/u.exec(pathname);
+  if (method === "PATCH" && dealMove !== null) return { name: "dealMoveStage", params: { dealId: decodeURIComponent(dealMove[1] ?? "") } };
+  const dealDetail = /^\/deals\/([^/?#]+)\/?$/u.exec(pathname);
+  if (method === "GET" && dealDetail !== null) return { name: "dealDetail", params: { dealId: decodeURIComponent(dealDetail[1] ?? "") } };
+  return null;
+};
+
 const normalizeHeaders = (headers: InjectOptions["headers"]): Readonly<Record<string, string>> => {
   const entries = Object.entries(headers ?? {}).map(([name, value]) => [name.toLowerCase(), value] as const);
   return Object.fromEntries(entries);
@@ -248,6 +273,10 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
       stripeWebhookSecret: dependencies.stripeWebhook.stripeWebhookSecret,
     });
   const contactImportHandler = dependencies.contacts === undefined ? undefined : createContactImportHandler({ contacts: dependencies.contacts });
+  const pipelineBoardHandler = dependencies.deals === undefined ? undefined : createPipelineBoardHandler({ deals: dependencies.deals });
+  const dealCreateHandler = dependencies.deals === undefined ? undefined : createDealCreateHandler({ deals: dependencies.deals });
+  const dealStageMoveHandler = dependencies.deals === undefined ? undefined : createDealStageMoveHandler({ deals: dependencies.deals });
+  const dealDetailHandler = dependencies.deals === undefined ? undefined : createDealDetailHandler({ deals: dependencies.deals });
   let server: Server | undefined;
 
   const inject = async (options: InjectOptions): Promise<InjectResponse> => {
@@ -262,17 +291,18 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
     };
 
     try {
+      const parsedUrl = parseUrl(options.url);
       const contentType = firstHeaderValue(request.headers, "content-type")?.toLowerCase() ?? "";
       request.body = contentType.startsWith("multipart/form-data") ? undefined : parseJsonPayload(rawBody);
       correlationIdMiddleware()(request, reply);
       requestLoggingMiddleware(request);
 
-      if (options.method === "GET" && options.url === "/healthz") {
+      if (options.method === "GET" && parsedUrl.pathname === "/healthz") {
         reply.send({ ok: true, data: { status: "ok" }, meta: { correlationId: request.correlationId } });
         return reply.toInjectResponse();
       }
 
-      if (options.method === "GET" && options.url === "/readyz") {
+      if (options.method === "GET" && parsedUrl.pathname === "/readyz") {
         try {
           await dependencies.readiness?.check();
         } catch (cause) {
@@ -282,7 +312,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         return reply.toInjectResponse();
       }
 
-      if (options.method === "POST" && options.url === "/contacts/import") {
+      if (options.method === "POST" && parsedUrl.pathname === "/contacts/import") {
         if (contactImportHandler === undefined) {
           reply.code(503).send({ ok: false, error: { code: "CONTACT_IMPORT_NOT_CONFIGURED", message: "Contact import is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
@@ -291,12 +321,27 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         return reply.toInjectResponse();
       }
 
-      if (options.method === "POST" && options.url === "/webhooks/stripe") {
+      if (options.method === "POST" && parsedUrl.pathname === "/webhooks/stripe") {
         if (stripeWebhookHandler === undefined) {
           reply.code(503).send({ ok: false, error: { code: "STRIPE_WEBHOOK_NOT_CONFIGURED", message: "Stripe webhook is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
         }
         await stripeWebhookHandler(request, reply);
+        return reply.toInjectResponse();
+      }
+
+      const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
+      if (crmRoute !== null) {
+        if (dependencies.deals === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "DEALS_NOT_CONFIGURED", message: "Deals API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        request.params = crmRoute.params;
+        request.query = parsedUrl.query;
+        if (crmRoute.name === "pipelineBoard" && pipelineBoardHandler !== undefined) await pipelineBoardHandler(request, reply);
+        if (crmRoute.name === "dealCreate" && dealCreateHandler !== undefined) await dealCreateHandler(request, reply);
+        if (crmRoute.name === "dealMoveStage" && dealStageMoveHandler !== undefined) await dealStageMoveHandler(request, reply);
+        if (crmRoute.name === "dealDetail" && dealDetailHandler !== undefined) await dealDetailHandler(request, reply);
         return reply.toInjectResponse();
       }
 
@@ -330,7 +375,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
     async listen(options) {
       server = createServer(async (incomingRequest: IncomingMessage, outgoingResponse: ServerResponse) => {
         const result = await inject({
-          method: incomingRequest.method === "POST" ? "POST" : "GET",
+          method: incomingRequest.method === "POST" ? "POST" : incomingRequest.method === "PATCH" ? "PATCH" : "GET",
           url: incomingRequest.url ?? "/",
           headers: Object.fromEntries(Object.entries(incomingRequest.headers).flatMap(([name, value]) => {
             if (typeof value === "string") {

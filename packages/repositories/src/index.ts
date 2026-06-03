@@ -83,6 +83,7 @@ export interface PrismaPersistenceClient {
   readonly pipeline: PrismaDelegate;
   readonly pipelineStage: PrismaDelegate;
   readonly deal: PrismaDelegate;
+  readonly activity: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
 
@@ -186,6 +187,55 @@ export const dealRecordSchema = baseRecordSchema.extend({
 export type DealRecord = z.output<typeof dealRecordSchema>;
 export type CreateDealInput = TenantScoped & Pick<DealRecord, "title" | "pipelineStageId"> & Partial<Pick<DealRecord, "contactId" | "ownerId" | "externalId" | "value" | "currency" | "probability" | "closedAt" | "metadata">>;
 export type DealFilters = Partial<Pick<DealRecord, "contactId" | "pipelineId" | "pipelineStageId">>;
+
+export const dealOwnerRecordSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1).nullable().optional(),
+  email: z.string().email().nullable().optional()
+}).passthrough();
+export type DealOwnerRecord = z.output<typeof dealOwnerRecordSchema>;
+
+export const dealContactRecordSchema = z.object({
+  id: z.string().min(1),
+  firstName: z.string().min(1).nullable().optional(),
+  lastName: z.string().min(1).nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  phone: z.string().min(1).nullable().optional(),
+  company: z.string().min(1).nullable().optional()
+}).passthrough();
+export type DealContactRecord = z.output<typeof dealContactRecordSchema>;
+
+export const activityRecordSchema = baseRecordSchema.extend({
+  contactId: z.string().min(1).nullable().optional(),
+  dealId: z.string().min(1).nullable().optional(),
+  createdById: z.string().min(1),
+  type: z.enum(["CALL", "EMAIL", "MEETING", "TASK", "NOTE"]),
+  note: z.string().min(1).nullable().optional(),
+  occurredAt: isoDateSchema,
+  metadata: metadataSchema.nullable().optional()
+}).required({ updatedAt: true }).strict();
+export type ActivityRecord = z.output<typeof activityRecordSchema>;
+export type CreateActivityInput = TenantScoped & Pick<ActivityRecord, "createdById" | "type"> & Partial<Pick<ActivityRecord, "contactId" | "dealId" | "note" | "occurredAt" | "metadata">>;
+
+export const dealCardRecordSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  contactName: z.string().min(1).nullable().optional(),
+  dealValue: decimalLikeSchema.nullable().optional(),
+  currency: z.string().min(3),
+  owner: dealOwnerRecordSchema.nullable().optional(),
+  probability: z.number().int().min(0).max(100).nullable().optional(),
+  stageId: z.string().min(1),
+  updatedAt: isoDateSchema
+}).strict();
+export type DealCardRecord = z.output<typeof dealCardRecordSchema>;
+
+export interface BoardColumnPageRecord { readonly items: readonly DealCardRecord[]; readonly nextCursor?: string | undefined; readonly limit: number; }
+export interface BoardColumnRecord { readonly id: string; readonly name: string; readonly position: number; readonly color?: string | null | undefined; readonly deals: BoardColumnPageRecord; }
+export interface PipelineBoardRecord { readonly pipeline: { readonly id: string; readonly name: string }; readonly columns: readonly BoardColumnRecord[]; }
+export interface BoardPaginationRequest { readonly limit?: number; readonly cursors?: Readonly<Record<string, string | undefined>>; }
+
+export interface DealDetailRecord { readonly deal: DealRecord; readonly contact?: DealContactRecord | null | undefined; readonly owner?: DealOwnerRecord | null | undefined; readonly activity: readonly ActivityRecord[]; }
 
 export const leadEventRecordSchema = z.object({
   id: z.string().min(1),
@@ -410,7 +460,8 @@ export interface TenantRepository extends RepositoryTransactionRunner {
 export interface UserRepository { create(context: TenantScoped, input: CreateUserInput): Promise<User>; findById(context: TenantScoped, id: string): Promise<User | null>; findByEmail(context: TenantScoped, email: string): Promise<User | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<User>>; update(context: TenantScoped, id: string, input: UpdateUserInput): Promise<User>; }
 export interface ContactRepository { create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord>; createMany(context: TenantScoped, inputs: readonly CreateContactInput[]): Promise<number>; count(context: TenantScoped): Promise<number>; findById(context: TenantScoped, id: string): Promise<ContactRecord | null>; findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]>; list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>>; update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord>; listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>>; }
 export interface PipelineRepository { findByWorkspace(workspaceId: string): Promise<PipelineRecord | null>; updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord>; }
-export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
+export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
+export interface ActivityRepository { create(context: TenantScoped, input: CreateActivityInput): Promise<ActivityRecord>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
 export interface CampaignRepository { create(context: TenantScoped, input: CreateCampaignInput): Promise<Campaign>; findById(context: TenantScoped, id: string): Promise<Campaign | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<Campaign>>; update(context: TenantScoped, id: string, input: UpdateCampaignInput): Promise<Campaign>; addVariant(context: TenantScoped, input: CreateCampaignVariantInput): Promise<CampaignVariant>; enqueuePublish(context: TenantScoped, input: CreatePublishJobInput): Promise<PublishJob>; findPublishJobByIdempotencyKey(context: TenantScoped, idempotencyKey: string): Promise<PublishJob | null>; }
 export interface WorkflowRepository { createExecution(context: TenantScoped, input: CreateWorkflowExecutionInput): Promise<WorkflowExecution>; findExecutionById(context: TenantScoped, id: string): Promise<WorkflowExecution | null>; findExecutionByRunId(context: TenantScoped, runId: string): Promise<WorkflowExecution | null>; updateExecution(context: TenantScoped, id: string, input: UpdateWorkflowExecutionInput): Promise<WorkflowExecution>; upsertStep(context: TenantScoped, input: UpsertWorkflowStepInput): Promise<WorkflowStepExecution>; listRunnableExecutions(context: TenantScoped, state: z.output<typeof workflowExecutionStateSchema>, page?: PageRequest): Promise<Page<WorkflowExecution>>; }
 export interface ApprovalRepository { createRequest(context: TenantScoped, input: CreateApprovalRequestInput): Promise<ApprovalRequestRecord>; recordDecision(context: TenantScoped, input: CreateApprovalDecisionInput): Promise<ApprovalDecisionRecord>; findRequestByApprovalId(context: TenantScoped, approvalId: string): Promise<ApprovalRequestRecord | null>; }
@@ -595,6 +646,7 @@ export class PrismaDealsRepository implements DealsRepository {
     ensureTenantInput(context, input);
     const stage = await this.findStage(context, input.pipelineStageId);
     if (input.contactId !== undefined && input.contactId !== null) await this.ensureContact(context, input.contactId);
+    if (input.ownerId !== undefined && input.ownerId !== null) await this.ensureOwner(context, input.ownerId);
     try {
       return parseRecord(dealRecordSchema, await this.prisma.deal.create({ data: dataWithDefined({ currency: "USD", ...input, pipelineId: stage.pipelineId, pipelineStageId: stage.id }) }));
     } catch (error) { return mapPrismaError(error, "Deal already exists"); }
@@ -604,6 +656,66 @@ export class PrismaDealsRepository implements DealsRepository {
     ensureContext(context);
     const rows = await this.prisma.deal.findMany({ where: withTenant(context, dataWithDefined(filters)), orderBy: { id: "asc" } });
     return rows.map((row) => parseRecord(dealRecordSchema, row));
+  }
+  async findById(workspaceId: string, dealId: string): Promise<DealRecord | null> {
+    const context = workspaceContext(workspaceId);
+    ensureContext(context);
+    const row = await this.prisma.deal.findFirst({ where: byTenantId(context, dealId) });
+    return row === null ? null : parseRecord(dealRecordSchema, row);
+  }
+  async findBoardByPipeline(workspaceId: string, pipelineId: string, pagination: BoardPaginationRequest = {}): Promise<PipelineBoardRecord | null> {
+    const context = workspaceContext(workspaceId);
+    ensureContext(context);
+    const pipeline = await this.prisma.pipeline.findFirst({ where: byTenantId(context, pipelineId) });
+    if (pipeline === null) return null;
+    const parsedPipeline = parseRecord(pipelineRecordSchema.omit({ stages: true }), pipeline);
+    const stages = (await this.prisma.pipelineStage.findMany({ where: withTenant(context, { pipelineId }), orderBy: { position: "asc" } }))
+      .map((stage) => parseRecord(pipelineStageRecordSchema, stage));
+    const limit = Math.min(Math.max(pagination.limit ?? 25, 1), 25);
+    const columns = await Promise.all(stages.map(async (stage): Promise<BoardColumnRecord> => {
+      const cursor = pagination.cursors?.[stage.id];
+      const rows = await this.prisma.deal.findMany({
+        where: cursorWhere(context, cursor, { pipelineId, pipelineStageId: stage.id }),
+        take: limit + 1,
+        orderBy: { id: "asc" },
+      });
+      const deals = rows.map((row) => parseRecord(dealRecordSchema, row));
+      const page = paginate(deals, limit);
+      const cards = await this.toCards(context, page.items);
+      return { id: stage.id, name: stage.name, position: stage.position, color: stage.color, deals: { items: cards, nextCursor: page.nextCursor, limit } };
+    }));
+    return { pipeline: { id: parsedPipeline.id, name: parsedPipeline.name }, columns };
+  }
+  async updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }> {
+    const context = workspaceContext(workspaceId);
+    ensureContext(context);
+    const current = await this.findById(workspaceId, dealId);
+    const currentDeal = current ?? notFound("Deal not found", { dealId });
+    const stage = await this.findStage(context, stageId);
+    if (stage.pipelineId !== currentDeal.pipelineId) {
+      throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Pipeline stage not found", status: 404, details: { stageId } });
+    }
+    const result = await this.prisma.deal.updateMany({
+      where: { tenantId: context.tenantId, id: dealId, updatedAt: new Date(expectedUpdatedAt) },
+      data: { pipelineStageId: stage.id },
+    });
+    if (result.count !== 1) {
+      throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Optimistic lock conflict", status: 409, details: { dealId } });
+    }
+    const row = await this.prisma.deal.findFirst({ where: byTenantId(context, dealId) });
+    if (row === null) notFound("Deal not found", { dealId });
+    return { deal: parseRecord(dealRecordSchema, row), previousStageId: currentDeal.pipelineStageId };
+  }
+  async findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null> {
+    const context = workspaceContext(workspaceId);
+    const deal = await this.findById(workspaceId, dealId);
+    if (deal === null) return null;
+    const [contact, owner, activityPage] = await Promise.all([
+      deal.contactId === undefined || deal.contactId === null ? Promise.resolve(null) : this.findContact(context, deal.contactId),
+      deal.ownerId === undefined || deal.ownerId === null ? Promise.resolve(null) : this.findOwner(context, deal.ownerId),
+      this.listActivities(context, deal.id),
+    ]);
+    return { deal, contact, owner, activity: activityPage.items };
   }
   async updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord> {
     const context = workspaceContext(workspaceId);
@@ -622,6 +734,28 @@ export class PrismaDealsRepository implements DealsRepository {
     const rows = await this.prisma.deal.findMany({ where: withTenant(context, { contactId }), orderBy: { id: "asc" } });
     return rows.map((row) => parseRecord(dealRecordSchema, row));
   }
+  private async toCards(context: TenantScoped, deals: readonly DealRecord[]): Promise<readonly DealCardRecord[]> {
+    const contactIds = [...new Set(deals.flatMap((deal) => deal.contactId === undefined || deal.contactId === null ? [] : [deal.contactId]))];
+    const ownerIds = [...new Set(deals.flatMap((deal) => deal.ownerId === undefined || deal.ownerId === null ? [] : [deal.ownerId]))];
+    const [contacts, owners] = await Promise.all([
+      contactIds.length === 0 ? Promise.resolve([]) : this.prisma.contact.findMany({ where: withTenant(context, { id: { in: contactIds } }) }),
+      ownerIds.length === 0 ? Promise.resolve([]) : this.prisma.tenantUser.findMany({ where: withTenant(context, { id: { in: ownerIds } }) }),
+    ]);
+    const contactById = new Map(contacts.map((contact) => {
+      const parsed = parseRecord(dealContactRecordSchema, contact);
+      return [parsed.id, parsed] as const;
+    }));
+    const ownerById = new Map(owners.map((owner) => {
+      const parsed = parseRecord(dealOwnerRecordSchema, owner);
+      return [parsed.id, parsed] as const;
+    }));
+    return deals.map((deal) => {
+      const contact = deal.contactId === undefined || deal.contactId === null ? undefined : contactById.get(deal.contactId);
+      const contactName = contact === undefined ? undefined : [contact.firstName, contact.lastName].filter((value) => value !== undefined && value !== null && value.length > 0).join(" ") || contact.email || contact.company || undefined;
+      const owner = deal.ownerId === undefined || deal.ownerId === null ? undefined : ownerById.get(deal.ownerId);
+      return dealCardRecordSchema.parse({ id: deal.id, title: deal.title, contactName, dealValue: deal.value, currency: deal.currency, owner, probability: deal.probability, stageId: deal.pipelineStageId, updatedAt: deal.updatedAt });
+    });
+  }
   private async findStage(context: TenantScoped, stageId: string): Promise<PipelineStageRecord> {
     const row = await this.prisma.pipelineStage.findFirst({ where: byTenantId(context, stageId) });
     if (row === null) notFound("Pipeline stage not found", { stageId });
@@ -630,6 +764,36 @@ export class PrismaDealsRepository implements DealsRepository {
   private async ensureContact(context: TenantScoped, contactId: string): Promise<void> {
     const contact = await this.prisma.contact.findFirst({ where: byTenantId(context, contactId) });
     if (contact === null) notFound("Contact not found", { contactId });
+  }
+  private async ensureOwner(context: TenantScoped, ownerId: string): Promise<void> {
+    const owner = await this.prisma.tenantUser.findFirst({ where: byTenantId(context, ownerId) });
+    if (owner === null) notFound("Owner not found", { ownerId });
+  }
+  private async findContact(context: TenantScoped, contactId: string): Promise<DealContactRecord | null> {
+    const contact = await this.prisma.contact.findFirst({ where: byTenantId(context, contactId) });
+    return contact === null ? null : parseRecord(dealContactRecordSchema, contact);
+  }
+  private async findOwner(context: TenantScoped, ownerId: string): Promise<DealOwnerRecord | null> {
+    const owner = await this.prisma.tenantUser.findFirst({ where: byTenantId(context, ownerId) });
+    return owner === null ? null : parseRecord(dealOwnerRecordSchema, owner);
+  }
+  private async listActivities(context: TenantScoped, dealId: string): Promise<Page<ActivityRecord>> {
+    const rows = await this.prisma.activity.findMany({ where: withTenant(context, { dealId }), take: 51, orderBy: { id: "asc" } });
+    return paginate(rows.map((row) => parseRecord(activityRecordSchema, row)), 50);
+  }
+}
+
+export class PrismaActivityRepository implements ActivityRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+  async create(context: TenantScoped, input: CreateActivityInput): Promise<ActivityRecord> {
+    ensureTenantInput(context, input);
+    return parseRecord(activityRecordSchema, await this.prisma.activity.create({ data: dataWithDefined({ occurredAt: new Date(), ...input }) }));
+  }
+  async listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>> {
+    ensureContext(context);
+    const args = pageArgs(page);
+    const rows = await this.prisma.activity.findMany({ where: cursorWhere(context, args.cursor, { dealId }), take: args.take, orderBy: { id: "asc" } });
+    return paginate(rows.map((row) => parseRecord(activityRecordSchema, row)), args.take - 1);
   }
 }
 
@@ -708,6 +872,7 @@ export interface PrismaRepositories {
   readonly events: EventRepository;
   readonly billing: BillingRepository;
   readonly auditLogs: AuditLogRepository;
+  readonly activities: ActivityRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -718,6 +883,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     contacts: new PrismaContactRepository(prisma),
     pipelines: new PrismaPipelineRepository(prisma),
     deals: new PrismaDealsRepository(prisma),
+    activities: new PrismaActivityRepository(prisma),
     campaigns: new PrismaCampaignRepository(prisma),
     workflows: new PrismaWorkflowRepository(prisma),
     approvals: new PrismaApprovalRepository(auditLogs),

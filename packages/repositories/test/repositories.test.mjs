@@ -61,7 +61,7 @@ const createClient = () => {
   const names = [
     "tenant", "tenantUser", "contact", "leadEvent", "contentItem", "contentVariant", "publishJob", "workflowExecution",
     "workflowStepExecution", "eventIngestion", "outboxEvent", "inboxEvent", "idempotencyKey", "aiExecution", "auditLog",
-    "pipeline", "pipelineStage", "deal"
+    "pipeline", "pipelineStage", "deal", "activity"
   ];
   return Object.fromEntries(names.map((name) => [name, createDelegate(name)]));
 };
@@ -138,7 +138,7 @@ test("factory wires all repository interfaces", () => {
   const repositories = createPrismaRepositories(createClient());
 
   assert.deepEqual(Object.keys(repositories).sort(), [
-    "approvals", "auditLogs", "billing", "campaigns", "contacts", "deals", "events", "executions", "pipelines", "tenants", "users", "workflows"
+    "activities", "approvals", "auditLogs", "billing", "campaigns", "contacts", "deals", "events", "executions", "pipelines", "tenants", "users", "workflows"
   ].sort());
 });
 
@@ -326,4 +326,62 @@ test("deal_findByContact_is_tenant_scoped", async () => {
 
   assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", id: "contact-a" });
   assert.deepEqual(prisma.deal.calls[0].args.where, { tenantId: "tenant-a", contactId: "contact-a" });
+});
+
+test("board query returns tenant-scoped columns with paginated deal cards", async () => {
+  const prisma = createClient();
+  prisma.pipeline.findFirst = async (args) => {
+    prisma.pipeline.calls.push({ name: "pipeline", method: "findFirst", args });
+    return { id: "pipeline-a", tenantId: "tenant-a", name: "Sales", isDefault: true, defaultKey: "default", createdAt: now, updatedAt: now };
+  };
+  prisma.pipelineStage.findMany = async (args) => {
+    prisma.pipelineStage.calls.push({ name: "pipelineStage", method: "findMany", args });
+    return [{ id: "stage-a", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Prospect", position: 1, color: "#64748B", createdAt: now, updatedAt: now }];
+  };
+  prisma.deal.findMany = async (args) => {
+    prisma.deal.calls.push({ name: "deal", method: "findMany", args });
+    return Array.from({ length: 26 }, (_, index) => ({ id: `deal-${String(index).padStart(2, "0")}`, tenantId: "tenant-a", pipelineId: "pipeline-a", pipelineStageId: "stage-a", contactId: "contact-1", ownerId: "owner-1", title: `Deal ${index}`, value: "100.00", currency: "USD", probability: 50, createdAt: now, updatedAt: now }));
+  };
+  prisma.contact.findMany = async (args) => {
+    prisma.contact.calls.push({ name: "contact", method: "findMany", args });
+    return [{ id: "contact-1", tenantId: "tenant-a", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", phone: null, company: "Analytical", createdAt: now, updatedAt: now }];
+  };
+  prisma.tenantUser.findMany = async (args) => {
+    prisma.tenantUser.calls.push({ name: "tenantUser", method: "findMany", args });
+    return [{ id: "owner-1", tenantId: "tenant-a", email: "owner@example.com", displayName: "Owner One", role: "MEMBER", isActive: true, createdAt: now, updatedAt: now }];
+  };
+  const deals = new PrismaDealsRepository(prisma);
+
+  const board = await deals.findBoardByPipeline("tenant-a", "pipeline-a", { limit: 25 });
+
+  assert.equal(board.columns[0].deals.items.length, 25);
+  assert.equal(board.columns[0].deals.nextCursor, "deal-24");
+  assert.equal(board.columns[0].deals.items[0].contactName, "Ada Lovelace");
+  assert.deepEqual(prisma.pipeline.calls[0].args.where, { tenantId: "tenant-a", id: "pipeline-a" });
+  assert.deepEqual(prisma.deal.calls[0].args.where, { tenantId: "tenant-a", pipelineId: "pipeline-a", pipelineStageId: "stage-a" });
+  assert.equal(prisma.contact.calls.length, 1);
+  assert.equal(prisma.tenantUser.calls.length, 1);
+});
+
+test("stage move uses tenant scoped optimistic lock and rejects stale updates", async () => {
+  const prisma = createClient();
+  prisma.deal.findFirst = async (args) => {
+    prisma.deal.calls.push({ name: "deal", method: "findFirst", args });
+    return { id: "deal-1", tenantId: "tenant-a", pipelineId: "pipeline-a", pipelineStageId: "stage-old", title: "Deal", value: "100", currency: "USD", createdAt: now, updatedAt: now };
+  };
+  prisma.pipelineStage.findFirst = async (args) => {
+    prisma.pipelineStage.calls.push({ name: "pipelineStage", method: "findFirst", args });
+    return { id: "stage-new", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Qualified", position: 2, color: "#2563EB", createdAt: now, updatedAt: now };
+  };
+  prisma.deal.updateMany = async (args) => {
+    prisma.deal.calls.push({ name: "deal", method: "updateMany", args });
+    return { count: 0 };
+  };
+  const deals = new PrismaDealsRepository(prisma);
+
+  await assert.rejects(
+    deals.updateStageWithOptimisticLock("tenant-a", "deal-1", "stage-new", now),
+    (error) => error instanceof PersistenceError && error.status === 409
+  );
+  assert.deepEqual(prisma.deal.calls.find((call) => call.method === "updateMany").args.where, { tenantId: "tenant-a", id: "deal-1", updatedAt: new Date(now) });
 });

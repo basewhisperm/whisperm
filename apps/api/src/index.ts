@@ -56,6 +56,8 @@ export type {
   ReadinessCheck,
 } from "./server.js";
 
+export { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler } from "./crm/deals.js";
+export type { DealRouteContext, DealRouteDependencies, DealServicePort } from "./crm/deals.js";
 export { createStripeWebhookHandler } from "./webhooks/stripe.js";
 export type { StripeWebhookRequest } from "./webhooks/stripe.js";
 export type {
