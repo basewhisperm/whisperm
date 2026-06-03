@@ -213,6 +213,7 @@ model Tenant {
   deals                  Deal[]
   activities             Activity[]
   pipelines              Pipeline[]
+  pipelineStages         PipelineStage[]
   subscriptions          Subscription[]
 }
 
@@ -532,53 +533,79 @@ model PublishJob {
 // No migration generation from this file.
 
 model Pipeline {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @db.Uuid
-  name      String
-  isDefault Boolean  @default(false)
-  stages    Json
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  name       String
+  isDefault  Boolean  @default(false)
+  defaultKey String?  @default("default")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stages PipelineStage[]
   deals  Deal[]
 
   @@unique([tenantId, id])
+  @@unique([tenantId, defaultKey])
   @@index([tenantId])
   @@index([tenantId, isDefault])
 }
 
-model Deal {
-  id         String    @id @default(uuid()) @db.Uuid
-  tenantId   String    @db.Uuid
-  contactId  String?   @db.Uuid
-  pipelineId String?   @db.Uuid
-  ownerId    String?   @db.Uuid
-  externalId String?
-  title      String
-  value      Decimal?  @db.Decimal(18, 4)
-  currency   String    @default("USD")
-  stage      DealStage @default(PROSPECT)
-  probability Int?
-  closedAt   DateTime?
-  metadata   Json?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+model PipelineStage {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  pipelineId String   @db.Uuid
+  name       String
+  position   Int
+  color      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contact    Contact?    @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
-  pipeline   Pipeline?   @relation(fields: [tenantId, pipelineId], references: [tenantId, id], onDelete: Restrict)
-  owner      TenantUser? @relation("DealOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
-  activities Activity[]
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pipeline Pipeline @relation(fields: [tenantId, pipelineId], references: [tenantId, id], onDelete: Cascade)
+  deals    Deal[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, pipelineId, id])
+  @@unique([tenantId, pipelineId, name])
+  @@unique([tenantId, pipelineId, position])
+  @@index([tenantId])
+  @@index([tenantId, pipelineId])
+  @@index([tenantId, pipelineId, position])
+}
+
+model Deal {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  contactId       String?  @db.Uuid
+  pipelineId      String   @db.Uuid
+  pipelineStageId String   @db.Uuid
+  ownerId         String?  @db.Uuid
+  externalId      String?
+  title           String
+  value           Decimal? @db.Decimal(18, 4)
+  currency        String   @default("USD")
+  probability     Int?
+  closedAt        DateTime?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact       Contact?      @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  pipeline      Pipeline      @relation(fields: [tenantId, pipelineId], references: [tenantId, id], onDelete: Restrict)
+  pipelineStage PipelineStage @relation(fields: [tenantId, pipelineId, pipelineStageId], references: [tenantId, pipelineId, id], onDelete: Restrict)
+  owner         TenantUser?   @relation("DealOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
+  activities    Activity[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, externalId])
   @@index([tenantId])
   @@index([tenantId, contactId])
   @@index([tenantId, pipelineId])
+  @@index([tenantId, pipelineStageId])
   @@index([tenantId, ownerId])
-  @@index([tenantId, stage])
-  @@index([tenantId, stage, closedAt])
+  @@index([tenantId, pipelineId, pipelineStageId])
   @@index([tenantId, externalId])
 }
 
