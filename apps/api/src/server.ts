@@ -3,9 +3,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { inboundWebhookRequestSchema } from "@whisperm/types";
 
 import { ApiError, mapErrorToHttp } from "./errors.js";
+import type { StripeWebhookDependencies } from "./billing/contracts.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
+import { createStripeWebhookHandler } from "./webhooks/stripe.js";
 
 export interface ApiKeyAuthenticationInput {
   readonly apiKey: string;
@@ -38,11 +40,17 @@ export interface ReadinessCheck {
   check(): Promise<void>;
 }
 
+export interface StripeWebhookServerConfig extends StripeWebhookDependencies {
+  readonly stripeSecretKey: string;
+  readonly stripeWebhookSecret: string;
+}
+
 export interface ApiServerDependencies extends InboundWebhookIngestionDependencies {
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
   readonly logger?: RequestLogger;
+  readonly stripeWebhook?: StripeWebhookServerConfig;
 }
 
 export interface InjectOptions {
@@ -231,6 +239,12 @@ const sendMappedError = (reply: MemoryReply, correlationId: string | undefined, 
 
 export const createApiServer = (dependencies: ApiServerDependencies): ApiServer => {
   const ingestionHandler = createInboundWebhookIngestionHandler(dependencies);
+  const stripeWebhookHandler = dependencies.stripeWebhook === undefined
+    ? undefined
+    : createStripeWebhookHandler(dependencies.stripeWebhook, {
+      stripeSecretKey: dependencies.stripeWebhook.stripeSecretKey,
+      stripeWebhookSecret: dependencies.stripeWebhook.stripeWebhookSecret,
+    });
   let server: Server | undefined;
 
   const inject = async (options: InjectOptions): Promise<InjectResponse> => {
@@ -261,6 +275,15 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           throw new ApiError({ code: "READY_CHECK_FAILED", message: "API service is not ready", cause });
         }
         reply.send({ ok: true, data: { status: "ready" }, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+
+      if (options.method === "POST" && options.url === "/webhooks/stripe") {
+        if (stripeWebhookHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "STRIPE_WEBHOOK_NOT_CONFIGURED", message: "Stripe webhook is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        await stripeWebhookHandler(request, reply);
         return reply.toInjectResponse();
       }
 

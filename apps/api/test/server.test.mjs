@@ -201,3 +201,77 @@ test("queue enqueue failure maps to deterministic retryable HTTP response and ma
   assert.equal(response.json().error.code, "EVENT_QUEUE_ENQUEUE_FAILED");
   assert.equal(dependencies.idempotencyCalls.at(-1)[0], "markFailed");
 });
+
+
+test("stripe webhook route verifies signature and reaches billing dependencies", async () => {
+  const Stripe = (await import("stripe")).default;
+  const stripeWebhookSecret = "whsec_test_secret";
+  const calls = { reservations: [], subscriptions: [], outbox: [] };
+
+  const server = createApiServer({
+    ...createDependencies(),
+    stripeWebhook: {
+      stripeSecretKey: "sk_test_123",
+      stripeWebhookSecret,
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      billingEventIngestion: {
+        async reserve(input) {
+          calls.reservations.push(input);
+          return "reserved";
+        },
+      },
+      subscriptions: {
+        async upsertSubscription(snapshot) {
+          calls.subscriptions.push(snapshot);
+        },
+      },
+      outbox: {
+        async publishSubscriptionChanged(event) {
+          calls.outbox.push(event);
+        },
+      },
+    },
+  });
+
+  const payload = JSON.stringify({
+    id: "evt_server_route",
+    object: "event",
+    api_version: "2026-05-27.dahlia",
+    created: 1767225600,
+    data: {
+      object: {
+        id: "sub_server_route",
+        object: "subscription",
+        customer: "cus_server_route",
+        status: "active",
+        metadata: { tenantId: "tenant-1" },
+        cancel_at_period_end: false,
+        current_period_start: 1767225600,
+        current_period_end: 1769904000,
+        trial_end: null,
+      },
+    },
+    livemode: false,
+    pending_webhooks: 1,
+    request: null,
+    type: "customer.subscription.created",
+  });
+
+  const signature = Stripe.webhooks.generateTestHeaderString({
+    payload,
+    secret: stripeWebhookSecret,
+  });
+
+  const response = await server.inject({
+    method: "POST",
+    url: "/webhooks/stripe",
+    headers: { "stripe-signature": signature },
+    payload,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(calls.reservations.length, 1);
+  assert.equal(calls.subscriptions.length, 1);
+  assert.equal(calls.outbox.length, 1);
+});
+
