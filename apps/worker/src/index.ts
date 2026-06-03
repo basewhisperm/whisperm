@@ -34,6 +34,11 @@ import {
   type WorkerTelemetryHooks,
 } from "@whisperm/worker-runtime";
 import {
+  executeTrialReminderJob,
+  trialReminderJobPayloadSchema,
+  type NotificationServicePort,
+} from "@whisperm/notification-runtime";
+import {
   inboundEventSchema,
   normalizeInboundEvent,
   scoreRecomputationJobPayloadSchema,
@@ -127,6 +132,7 @@ export interface ScoreRecomputationServicePort {
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
   readonly scoring?: ScoreRecomputationServicePort | undefined;
+  readonly notifications?: NotificationServicePort | undefined;
 }
 
 export interface QueueRegistration {
@@ -226,6 +232,16 @@ export const createBootstrapOnlyWorkerServices = (): WorkerServices => ({
       throw new WorkerRuntimeError({
         code: "WORKER_RUNTIME_VALIDATION_FAILED",
         message: "Score recomputation service port is not configured for this worker process",
+        status: 503,
+        retryable: true,
+      });
+    },
+  },
+  notifications: {
+    sendTrialExpiryEmail: async () => {
+      throw new WorkerRuntimeError({
+        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        message: "Notification service port is not configured for this worker process",
         status: 503,
         retryable: true,
       });
@@ -403,6 +419,42 @@ export const createEventIngestionHandler = (services: WorkerServices, clock: Wor
 });
 
 
+export const createNotificationTrialReminderHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.notifications === undefined) {
+      throw new WorkerRuntimeError({
+        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        message: "Notification service port is not configured",
+        status: 503,
+        retryable: true,
+        correlation: context.correlation,
+      });
+    }
+
+    const payload = trialReminderJobPayloadSchema.parse(context.job.payload);
+
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({
+        code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION",
+        message: "Notification job tenantId must match execution context",
+        status: 403,
+        correlation: context.correlation,
+      });
+    }
+
+    await executeTrialReminderJob(services.notifications, payload);
+
+    return workerRuntimeMetadataSchema.parse({
+      tenantId: payload.tenantId,
+      workspaceId: payload.workspaceId,
+      marker: payload.marker,
+      recipientEmail: payload.recipientEmail,
+      correlationId: context.correlation.correlationId,
+    });
+  },
+});
+
+
 export const createScoreRecomputationHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.scoring === undefined) {
@@ -452,6 +504,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: scoreRecomputationQueueContract.queueName, deadLetterQueueName: `${scoreRecomputationQueueContract.queueName}.dlq` }),
       jobTypes: [scoreRecomputationQueueContract.jobType],
       handler: createScoreRecomputationHandler(input.services),
+    },
+    {
+      name: "notification-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: "notification", deadLetterQueueName: "notification.dlq" }),
+      jobTypes: ["notification.trial_reminder"],
+      handler: createNotificationTrialReminderHandler(input.services),
     },
     {
       name: "publish-worker",

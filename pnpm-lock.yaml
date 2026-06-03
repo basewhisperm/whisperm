@@ -37,6 +37,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@whisperm/notification-runtime':
+        specifier: workspace:*
+        version: link:../../packages/notification-runtime
       '@whisperm/types':
         specifier: workspace:*
         version: link:../../packages/types
