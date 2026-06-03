@@ -97,7 +97,7 @@ const createApp = (services, runtimePorts, queues = new InMemoryQueueRuntime()) 
   logger: { info() {}, warn() {}, error() {} },
 });
 
-test('registers event ingestion, score recomputation, publish, and scheduler workers on startup', async () => {
+test('registers event ingestion, score recomputation, notification, publish, and scheduler workers on startup', async () => {
   const queues = new InMemoryQueueRuntime();
   const runtime = createRuntimePorts();
   const app = createApp({ events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) } }, runtime.ports, queues);
