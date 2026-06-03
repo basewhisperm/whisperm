@@ -710,3 +710,13 @@ export class ProviderModelExecutionRuntime {
     return response;
   }
 }
+
+export {
+  ResendEmailProvider,
+  createResendEmailProviderFromEnv,
+} from "./email/resend-provider.js";
+export type {
+  EmailMessage,
+  EmailProvider,
+  ResendEmailProviderOptions,
+} from "./email/resend-provider.js";

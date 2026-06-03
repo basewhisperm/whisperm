@@ -806,3 +806,28 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   billing: new BillingService(dependencies),
   audit: new AuditService(dependencies),
 });
+
+export { NotificationService } from "./notifications/notification-service.js";
+export type {
+  NotificationRecipient,
+  SendMonthlyPipelineDigestInput,
+  SendTeamInviteInput,
+  SendTrialEmailInput,
+  SendWeeklyIdleContactDigestInput,
+  SendWorkspaceEmailInput,
+  WorkspaceNotificationContext,
+} from "./notifications/notification-service.js";
+export {
+  monthlyPipelineDigestEmail,
+  teamInviteEmail,
+  trialExpiryEmail,
+  weeklyIdleContactDigestEmail,
+  welcomeEmail,
+} from "./notifications/email-templates.js";
+export type {
+  IdleContactDigestInput,
+  PipelineDigestInput,
+  TeamInviteEmailInput,
+  TrialEmailInput,
+  WorkspaceEmailInput,
+} from "./notifications/email-templates.js";

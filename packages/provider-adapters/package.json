@@ -12,7 +12,8 @@
     "test": "pnpm --filter @whisperm/types build && pnpm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@whisperm/types": "workspace:*"
+    "@whisperm/types": "workspace:*",
+    "resend": "^6.12.4"
   },
   "exports": {
     ".": {
