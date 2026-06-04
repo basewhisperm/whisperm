@@ -16,7 +16,8 @@ export type ApiErrorCode =
   | "READY_CHECK_FAILED"
   | "INTERNAL_SERVER_ERROR"
   | "REPORTS_PLAN_REQUIRED"
-  | "TRIAL_EXPIRED";
+  | "TRIAL_EXPIRED"
+  | "RATE_LIMITED";
 
 const statusByCode: Record<ApiErrorCode, number> = {
   API_KEY_MISSING: 401,
