@@ -6,9 +6,9 @@ import {
 } from "@tabler/icons-react";
 
 const navigationItems = [
-  { label: "Dashboard", icon: IconLayoutDashboard },
-  { label: "Contacts", icon: IconUsers },
-  { label: "Settings", icon: IconSettings },
+  { label: "Dashboard", href: "/", icon: IconLayoutDashboard },
+  { label: "Contacts", href: "/contacts", icon: IconUsers },
+  { label: "Settings", href: "/settings", icon: IconSettings },
 ] as const;
 
 export function Sidebar() {
@@ -21,7 +21,7 @@ export function Sidebar() {
       <div className="px-4 py-4">
         <div className="rounded-2xl border-hairline border-ivory/15 bg-ivory/10 p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <IconBuildingCommunity aria-hidden className="size-4" stroke={1.8} />
+            <IconBuildingCommunity aria-hidden="true" className="size-4" stroke={1.8} />
             Workspace
           </div>
           <p className="mt-1 text-xs text-ivory/70">Switcher slot</p>
@@ -38,11 +38,11 @@ export function Sidebar() {
 
             return (
               <a
-                className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-ivory/78 transition hover:bg-ivory/10 hover:text-ivory"
-                href="#"
+                className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-ivory/78 transition hover:bg-ivory/10 hover:text-ivory focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-midnight"
+                href={item.href}
                 key={item.label}
               >
-                <Icon aria-hidden className="size-4" stroke={1.8} />
+                <Icon aria-hidden="true" className="size-4 shrink-0" stroke={1.8} />
                 {item.label}
               </a>
             );

@@ -19,6 +19,10 @@ const config = {
         mist: "var(--color-mist)",
         growth: "var(--color-growth)",
         ivory: "var(--color-ivory)",
+        health: {
+          amber: "var(--color-health-amber)",
+          red: "var(--color-health-red)",
+        },
         muted: {
           DEFAULT: "var(--color-muted)",
           foreground: "var(--color-muted-foreground)",
@@ -26,6 +30,7 @@ const config = {
         primary: {
           DEFAULT: "var(--color-primary)",
           foreground: "var(--color-primary-foreground)",
+          hover: "var(--color-primary-hover)",
         },
         secondary: {
           DEFAULT: "var(--color-secondary)",
