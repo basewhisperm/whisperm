@@ -18,11 +18,11 @@ export function TopBar() {
 
         <div className="flex items-center gap-2">
           <div className="hidden items-center gap-2 rounded-full border-hairline bg-muted px-3 py-2 text-sm text-muted-foreground sm:flex">
-            <IconSearch aria-hidden className="size-4" stroke={1.8} />
+            <IconSearch aria-hidden="true" className="size-4" stroke={1.8} />
             {t("common.searchSlot")}
           </div>
-          <Button aria-label={t("common.notifications")} size="icon" variant="secondary">
-            <IconBell aria-hidden className="size-4" stroke={1.8} />
+          <Button aria-label="Notifications" size="icon" variant="secondary">
+            <IconBell aria-hidden="true" className="size-4" stroke={1.8} />
           </Button>
           <Button>{t("common.newRecord")}</Button>
         </div>
