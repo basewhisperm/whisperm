@@ -171,3 +171,35 @@ test("digest emails send when workspace toggle is enabled or unset", async () =>
 
   assert.equal(sent.length, 2);
 });
+
+test("weekly follow-up digest skips workspaces with reminders disabled", async () => {
+  const calls = [];
+  const result = await (await import("../dist/index.js")).runWeeklyFollowUpDigest({
+    async listWorkspacesForFollowUpDigest() {
+      return [
+        { tenantId: "tenant-on", workspaceId: "workspace-on", workspaceName: "Enabled", followUpReminderEnabled: true },
+        { tenantId: "tenant-off", workspaceId: "workspace-off", workspaceName: "Disabled", followUpReminderEnabled: false },
+      ];
+    },
+    async listOwnerAndAdminRecipients(context) {
+      calls.push(`recipients:${context.tenantId}`);
+      return [{ email: "owner@example.com", name: "Owner" }];
+    },
+    async listIdleContactsForFollowUpDigest(context, cutoff) {
+      calls.push(`idle:${context.tenantId}:${cutoff.toISOString()}`);
+      return [{ id: "contact-idle", lastTouchAt: "2026-05-01T00:00:00.000Z" }];
+    },
+  }, {
+    async sendWeeklyIdleContactDigest(input) {
+      calls.push(`send:${input.workspace.tenantId}:${input.recipient.email}:${input.idleContactCount}`);
+      return "sent";
+    },
+  }, new Date("2026-06-15T12:00:00.000Z"));
+
+  assert.deepEqual(result, { workspaceCount: 2, skippedWorkspaceCount: 1, digestCount: 1 });
+  assert.deepEqual(calls, [
+    "idle:tenant-on:2026-06-08T12:00:00.000Z",
+    "recipients:tenant-on",
+    "send:tenant-on:owner@example.com:1",
+  ]);
+});

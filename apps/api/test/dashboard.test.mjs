@@ -183,3 +183,60 @@ test("dashboard aggregation uses a bounded number of read-model calls for 200 co
   assert.equal(response.json().data.healthPanel.length, 200);
   assert.deepEqual(calls.sort(), ["countActiveContacts", "listContactsForHealth", "listLatestActivities", "sumOpenPipelineValue", "sumWonValueForPeriod"].sort());
 });
+
+test("healthPanel recomputes health per request from lastTouchAt", async () => {
+  const readModel = createReadModel({
+    async listContactsForHealth() {
+      return [{ id: "contact-1", firstName: "Client", lastTouchAt: "2026-06-07T12:00:00.000Z", healthStatus: "green", fillPct: 100 }];
+    },
+  });
+  const service = createDashboardService(readModel, () => now);
+
+  const first = await service.get({ tenantId: "tenant-a", actorId: "user-a", correlation: { correlationId: "corr-1" } });
+  const second = await createDashboardService(readModel, () => new Date("2026-06-23T12:00:00.000Z")).get({ tenantId: "tenant-a", actorId: "user-a", correlation: { correlationId: "corr-2" } });
+
+  assert.equal(first.healthPanel[0].status, "amber");
+  assert.equal(first.healthPanel[0].fillPct, 69);
+  assert.equal(second.healthPanel[0].status, "red");
+  assert.equal(second.healthPanel[0].fillPct, 32);
+});
+
+test("followUpReminderEnabled false suppresses followUpAlerts", async () => {
+  const readModel = createReadModel({
+    async getFollowUpReminderEnabled(context) {
+      assert.equal(context.tenantId, "tenant-a");
+      return false;
+    },
+    async listContactsForHealth() {
+      return [{ id: "old", firstName: "Old", lastTouchAt: "2026-06-01T12:00:00.000Z" }];
+    },
+    async listContactsForFollowUpAlerts() {
+      assert.fail("alert contacts should not be queried when reminders are disabled");
+    },
+  });
+  const server = createApiServer(baseDependencies(createDashboardService(readModel, () => now)));
+
+  const response = await dashboardRequest(server);
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().data.followUpAlerts, []);
+});
+
+test("followUpAlerts uses workspace-scoped idle contact query cutoff", async () => {
+  const readModel = createReadModel({
+    async listContactsForHealth() {
+      return [];
+    },
+    async listContactsForFollowUpAlerts(context, cutoff) {
+      assert.equal(context.tenantId, "tenant-a");
+      assert.equal(cutoff.toISOString(), "2026-06-08T12:00:00.000Z");
+      return [{ id: "old", firstName: "Old", lastTouchAt: "2026-06-01T12:00:00.000Z" }];
+    },
+  });
+  const server = createApiServer(baseDependencies(createDashboardService(readModel, () => now)));
+
+  const response = await dashboardRequest(server);
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().data.followUpAlerts.map((item) => item.contactId), ["old"]);
+});

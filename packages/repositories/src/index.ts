@@ -124,11 +124,12 @@ export const tenantSchema = z.object({
   name: z.string().min(1),
   externalId: z.string().min(1).nullable().optional(),
   createdAt: isoDateSchema,
-  updatedAt: isoDateSchema
+  updatedAt: isoDateSchema,
+  alertDigestEnabled: z.boolean().default(true)
 }).strict();
 export type Tenant = z.output<typeof tenantSchema>;
 export type CreateTenantInput = Pick<Tenant, "slug" | "name"> & { readonly externalId?: string };
-export type UpdateTenantInput = Partial<Pick<Tenant, "name" | "externalId">> & OptimisticLock;
+export type UpdateTenantInput = Partial<Pick<Tenant, "name" | "externalId" | "alertDigestEnabled">> & OptimisticLock;
 
 export const userSchema = baseRecordSchema.extend({
   externalUserId: z.string().min(1).nullable().optional(),
@@ -478,7 +479,11 @@ export interface ActivityRepository { create(context: ActivityCreateContext, inp
 
 export interface DashboardContactRecord { readonly id: string; readonly firstName?: string | null | undefined; readonly lastName?: string | null | undefined; readonly company?: string | null | undefined; readonly email?: string | null | undefined; readonly lastTouchAt?: string | null | undefined; }
 export interface DashboardActivityRecord { readonly id: string; readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined; readonly type: string; readonly note?: string | null | undefined; readonly createdById: string; readonly createdAt: string; }
-export interface DashboardRepository { countActiveContacts(context: TenantScoped): Promise<number>; sumOpenPipelineValue(context: TenantScoped): Promise<number>; sumWonValueForPeriod(context: TenantScoped, period: { readonly from: Date; readonly to: Date }): Promise<number>; listContactsForHealth(context: TenantScoped): Promise<readonly DashboardContactRecord[]>; listLatestActivities(context: TenantScoped, limit: number): Promise<readonly DashboardActivityRecord[]>; }
+export interface FollowUpDigestWorkspaceRecord { readonly tenantId: string; readonly workspaceId: string; readonly workspaceName: string; readonly alertDigestEnabled: boolean; }
+export interface FollowUpDigestRecipientRecord { readonly email: string; readonly name?: string | undefined; }
+export interface FollowUpDigestIdleContactRecord { readonly id: string; readonly lastTouchAt?: string | null | undefined; }
+export interface FollowUpDigestRepository { listWorkspacesForFollowUpDigest(): Promise<readonly FollowUpDigestWorkspaceRecord[]>; listOwnerAndAdminRecipients(context: TenantScoped): Promise<readonly FollowUpDigestRecipientRecord[]>; listIdleContactsForFollowUpDigest(context: TenantScoped, cutoff: Date): Promise<readonly FollowUpDigestIdleContactRecord[]>; }
+export interface DashboardRepository { countActiveContacts(context: TenantScoped): Promise<number>; sumOpenPipelineValue(context: TenantScoped): Promise<number>; sumWonValueForPeriod(context: TenantScoped, period: { readonly from: Date; readonly to: Date }): Promise<number>; listContactsForHealth(context: TenantScoped): Promise<readonly DashboardContactRecord[]>; listContactsForFollowUpAlerts(context: TenantScoped, cutoff: Date): Promise<readonly DashboardContactRecord[]>; getFollowUpReminderEnabled(context: TenantScoped): Promise<boolean>; listLatestActivities(context: TenantScoped, limit: number): Promise<readonly DashboardActivityRecord[]>; }
 export interface CampaignRepository { create(context: TenantScoped, input: CreateCampaignInput): Promise<Campaign>; findById(context: TenantScoped, id: string): Promise<Campaign | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<Campaign>>; update(context: TenantScoped, id: string, input: UpdateCampaignInput): Promise<Campaign>; addVariant(context: TenantScoped, input: CreateCampaignVariantInput): Promise<CampaignVariant>; enqueuePublish(context: TenantScoped, input: CreatePublishJobInput): Promise<PublishJob>; findPublishJobByIdempotencyKey(context: TenantScoped, idempotencyKey: string): Promise<PublishJob | null>; }
 export interface WorkflowRepository { createExecution(context: TenantScoped, input: CreateWorkflowExecutionInput): Promise<WorkflowExecution>; findExecutionById(context: TenantScoped, id: string): Promise<WorkflowExecution | null>; findExecutionByRunId(context: TenantScoped, runId: string): Promise<WorkflowExecution | null>; updateExecution(context: TenantScoped, id: string, input: UpdateWorkflowExecutionInput): Promise<WorkflowExecution>; upsertStep(context: TenantScoped, input: UpsertWorkflowStepInput): Promise<WorkflowStepExecution>; listRunnableExecutions(context: TenantScoped, state: z.output<typeof workflowExecutionStateSchema>, page?: PageRequest): Promise<Page<WorkflowExecution>>; }
 export interface ApprovalRepository { createRequest(context: TenantScoped, input: CreateApprovalRequestInput): Promise<ApprovalRequestRecord>; recordDecision(context: TenantScoped, input: CreateApprovalDecisionInput): Promise<ApprovalDecisionRecord>; findRequestByApprovalId(context: TenantScoped, approvalId: string): Promise<ApprovalRequestRecord | null>; }
@@ -842,8 +847,24 @@ export class PrismaDashboardRepository implements DashboardRepository {
 
   async listContactsForHealth(context: TenantScoped): Promise<readonly DashboardContactRecord[]> {
     ensureContext(context);
+    return this.listDashboardContacts(context, withTenant(context));
+  }
+
+  async listContactsForFollowUpAlerts(context: TenantScoped, cutoff: Date): Promise<readonly DashboardContactRecord[]> {
+    ensureContext(context);
+    return this.listDashboardContacts(context, withTenant(context, { OR: [{ lastTouchAt: null }, { lastTouchAt: { lt: cutoff } }] }));
+  }
+
+  async getFollowUpReminderEnabled(context: TenantScoped): Promise<boolean> {
+    ensureContext(context);
+    const row = await this.prisma.tenant.findFirst({ where: { id: context.tenantId }, select: { alertDigestEnabled: true } });
+    return z.object({ alertDigestEnabled: z.boolean().default(true) }).strict().parse(row ?? {}).alertDigestEnabled;
+  }
+
+  private async listDashboardContacts(context: TenantScoped, where: PrismaWhere): Promise<readonly DashboardContactRecord[]> {
+    ensureContext(context);
     const rows = await this.prisma.contact.findMany({
-      where: withTenant(context),
+      where,
       orderBy: { lastTouchAt: "asc" },
       select: { id: true, firstName: true, lastName: true, company: true, email: true, lastTouchAt: true },
     });
@@ -859,6 +880,46 @@ export class PrismaDashboardRepository implements DashboardRepository {
       select: { id: true, contactId: true, dealId: true, type: true, note: true, createdById: true, createdAt: true },
     });
     return rows.map((row) => parseRecord(z.object({ id: z.string().min(1), contactId: z.string().nullable().optional(), dealId: z.string().nullable().optional(), type: z.string().min(1), note: z.string().nullable().optional(), createdById: z.string().min(1), createdAt: isoDateSchema }).strict(), row));
+  }
+}
+
+
+export class PrismaFollowUpDigestRepository implements FollowUpDigestRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async listWorkspacesForFollowUpDigest(): Promise<readonly FollowUpDigestWorkspaceRecord[]> {
+    const rows = await this.prisma.tenant.findMany({
+      where: { alertDigestEnabled: true },
+      orderBy: { id: "asc" },
+      select: { id: true, name: true, alertDigestEnabled: true },
+    });
+    return rows.map((row) => {
+      const parsed = z.object({ id: z.string().min(1), name: z.string().min(1), alertDigestEnabled: z.boolean().default(true) }).strict().parse(row);
+      return { tenantId: parsed.id, workspaceId: parsed.id, workspaceName: parsed.name, alertDigestEnabled: parsed.alertDigestEnabled };
+    });
+  }
+
+  async listOwnerAndAdminRecipients(context: TenantScoped): Promise<readonly FollowUpDigestRecipientRecord[]> {
+    ensureContext(context);
+    const rows = await this.prisma.tenantUser.findMany({
+      where: withTenant(context, { isActive: true, role: { in: ["OWNER", "ADMIN"] } }),
+      orderBy: { id: "asc" },
+      select: { email: true, displayName: true },
+    });
+    return rows.map((row) => {
+      const parsed = z.object({ email: z.string().email(), displayName: z.string().min(1).nullable().optional() }).strict().parse(row);
+      return { email: parsed.email, name: parsed.displayName ?? undefined };
+    });
+  }
+
+  async listIdleContactsForFollowUpDigest(context: TenantScoped, cutoff: Date): Promise<readonly FollowUpDigestIdleContactRecord[]> {
+    ensureContext(context);
+    const rows = await this.prisma.contact.findMany({
+      where: withTenant(context, { OR: [{ lastTouchAt: null }, { lastTouchAt: { lt: cutoff } }] }),
+      orderBy: { lastTouchAt: "asc" },
+      select: { id: true, lastTouchAt: true },
+    });
+    return rows.map((row) => parseRecord(z.object({ id: z.string().min(1), lastTouchAt: isoDateSchema.nullable().optional() }).strict(), row));
   }
 }
 
@@ -982,6 +1043,7 @@ export interface PrismaRepositories {
   readonly auditLogs: AuditLogRepository;
   readonly activities: ActivityRepository;
   readonly dashboard: DashboardRepository;
+  readonly followUpDigest: FollowUpDigestRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -994,6 +1056,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     deals: new PrismaDealsRepository(prisma),
     activities: new PrismaActivityRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
+    followUpDigest: new PrismaFollowUpDigestRepository(prisma),
     campaigns: new PrismaCampaignRepository(prisma),
     workflows: new PrismaWorkflowRepository(prisma),
     approvals: new PrismaApprovalRepository(auditLogs),
