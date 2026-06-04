@@ -72,10 +72,7 @@ export type {
   StripeWebhookDependencies,
   SubscriptionStore,
 } from "./billing/contracts.js";
-export { evaluateContactCreateQuota, evaluatePipelineCreateQuota } from "./billing/quota.js";
-export type { BillingQuotaPlan, BillingQuotaReader, PipelineQuotaReader } from "./billing/quota.js";
+export { evaluateContactCreateQuota, evaluatePipelineCreateQuota, planLimits } from "./billing/quota.js";
+export type { BillingQuotaContext, BillingQuotaDecision, BillingQuotaPlan, BillingQuotaReader, PipelineQuotaReader, PlanLimits } from "./billing/quota.js";
 export { createTrialEndsAt, createTrialGate, isTrialExpired } from "./billing/trial.js";
 export type { TrialGateSubscriptionReader } from "./billing/trial.js";
-
-export { planLimits, isUnlimited, hasFeature } from "./billing/plan-limits.js";
-export type { GatedFeature, PlanLimits, PlanName, QuotaLimit, QuotaResource } from "./billing/plan-limits.js";

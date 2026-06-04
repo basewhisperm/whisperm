@@ -30,6 +30,40 @@ const starterContactLimit = 50;
 const starterPipelineLimit = 1;
 const growthPipelineLimit = 5;
 
+export interface PlanLimits {
+  readonly quotas: {
+    readonly contacts: number | null;
+    readonly pipelines: number | null;
+    readonly teamMembers: number | null;
+  };
+  readonly features: {
+    readonly reports: boolean;
+    readonly healthScores: boolean;
+    readonly apiAccess: boolean;
+  };
+}
+
+export const planLimits = (plan: string): PlanLimits => {
+  switch (plan) {
+    case "GROWTH":
+      return {
+        quotas: { contacts: null, pipelines: 5, teamMembers: 5 },
+        features: { reports: true, healthScores: true, apiAccess: false },
+      };
+    case "PRO":
+      return {
+        quotas: { contacts: null, pipelines: null, teamMembers: null },
+        features: { reports: true, healthScores: true, apiAccess: true },
+      };
+    case "STARTER":
+    default:
+      return {
+        quotas: { contacts: 50, pipelines: 1, teamMembers: 1 },
+        features: { reports: false, healthScores: false, apiAccess: false },
+      };
+  }
+};
+
 export const evaluateContactCreateQuota = async (
   reader: BillingQuotaReader,
   context: BillingQuotaContext,

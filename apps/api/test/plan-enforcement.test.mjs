@@ -225,7 +225,11 @@ const makeReportsServer = (plan) => {
 const injectReports = (server) => server.inject({
   method: "GET",
   url: "/reports?period=this_month",
-  headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-1" },
+  headers: {
+    "x-tenant-id": "tenant-a",
+    "x-user-id": "user-a",
+    "x-correlation-id": "corr-1",
+  },
 });
 
 test("14. Starter: GET /reports returns 402", async () => {

@@ -13,7 +13,7 @@ export type ApiErrorCode =
   | "QUOTA_EXCEEDED"
   | "READY_CHECK_FAILED"
   | "INTERNAL_SERVER_ERROR"
-  | "REPORTS_PLAN_REQUIRED"
+  | "REPORTS_PLAN_REQUIRED";
 
 const statusByCode: Record<ApiErrorCode, number> = {
   API_KEY_MISSING: 401,
