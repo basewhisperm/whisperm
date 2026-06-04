@@ -78,7 +78,6 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly trialScheduler?: NotificationSchedulePort | undefined;
   readonly subscriptionReader?: TrialGateSubscriptionReader | undefined;
   readonly upgradePorts?: UpgradeServicePorts | undefined;
-  readonly now?: (() => Date) | undefined;
 }
 
 export interface InjectOptions {
@@ -311,7 +310,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const requireActiveSubscription: RequireActiveSubscription | undefined =
     dependencies.subscriptionReader === undefined
       ? undefined
-      : createRequireActiveSubscription(dependencies.subscriptionReader, dependencies.now ?? (() => new Date()));
+      : createRequireActiveSubscription(dependencies.subscriptionReader, () => dependencies.now?.() ?? new Date());
   const contactDependencies = dependencies.contacts === undefined ? undefined : { contacts: dependencies.contacts, quota: dependencies.contactQuota, now: dependencies.now };
   const contactCreateHandler = contactDependencies === undefined ? undefined : createContactCreateHandler(contactDependencies);
   const contactImportHandler = contactDependencies === undefined ? undefined : createContactImportHandler(contactDependencies);
@@ -460,7 +459,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           return reply.toInjectResponse();
         }
         const body = request.body as InitTrialInput;
-        const result = await initWorkspaceTrial(dependencies.trialStore, dependencies.trialScheduler, body, dependencies.now ?? (() => new Date()));
+        const result = await initWorkspaceTrial(dependencies.trialStore, dependencies.trialScheduler, body, () => dependencies.now?.() ?? new Date());
         reply.code(201).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
         return reply.toInjectResponse();
       }

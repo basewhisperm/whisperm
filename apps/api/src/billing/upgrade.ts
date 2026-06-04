@@ -32,7 +32,7 @@ export const initiateUpgrade = async (
   context: UpgradeWorkspaceContext,
   plan: string,
 ): Promise<UpgradeResult> => {
-  const provider = resolveBillingProvider({ country: context.country });
+  const provider = resolveBillingProvider({ country: context.country ?? null });
   const port = provider === "PAYSTACK" ? ports.paystack : ports.stripe;
   const result = await port.createCustomerAndCheckout({
     tenantId: context.tenantId,
