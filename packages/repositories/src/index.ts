@@ -533,7 +533,7 @@ const paginate = <TItem extends { readonly id: string }>(items: readonly TItem[]
 
 const pageArgs = (page?: PageRequest): { readonly take: number; readonly cursor?: string } => {
   const parsed = pageRequestSchema.parse(page ?? {});
-  const take = (parsed.limit ?? 50) + 1;
+  const take = (parsed.limit ?? 25) + 1;
   return parsed.cursor === undefined ? { take } : { take, cursor: parsed.cursor };
 };
 
@@ -699,7 +699,7 @@ export class PrismaDealsRepository implements DealsRepository {
     const parsedPipeline = parseRecord(pipelineRecordSchema.omit({ stages: true }), pipeline);
     const stages = (await this.prisma.pipelineStage.findMany({ where: withTenant(context, { pipelineId }), orderBy: { position: "asc" } }))
       .map((stage) => parseRecord(pipelineStageRecordSchema, stage));
-    const limit = Math.min(Math.max(pagination.limit ?? 25, 1), 25);
+    const limit = Math.min(Math.max(pagination.limit ?? 25, 1), 100);
     const columns = await Promise.all(stages.map(async (stage): Promise<BoardColumnRecord> => {
       const cursor = pagination.cursors?.[stage.id];
       const rows = await this.prisma.deal.findMany({
