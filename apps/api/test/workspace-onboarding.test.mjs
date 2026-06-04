@@ -17,7 +17,19 @@ const makePort = (overrides = {}) => {
   }};
 };
 
-const makeTrialStore = () => { const created = []; return { created, store: { async createTrialSubscription(i) { created.push(i); return i; } } }; };
+const makeTrialStore = (subscriptions) => {
+  const created = [];
+  return {
+    created,
+    store: {
+      async createTrialSubscription(i) {
+        created.push(i);
+        subscriptions?.set(i.tenantId, i);
+        return i;
+      },
+    },
+  };
+};
 const makeScheduler = () => ({ scheduler: { async scheduleTrialReminder() {} } });
 const base = { userId: "user-1", userEmail: "owner@acme.com", firmName: "Acme Corp", country: "US" };
 
@@ -80,7 +92,7 @@ test("9. No duplicate Pipeline", async () => {
 });
 
 test("10. No duplicate Subscription", async () => {
-  const { port } = makePort(); const { store, created } = makeTrialStore(); const { scheduler } = makeScheduler();
+  const { port, subscriptions } = makePort(); const { store, created } = makeTrialStore(subscriptions); const { scheduler } = makeScheduler();
   await createWorkspace(port, store, scheduler, base, () => now);
   await createWorkspace(port, store, scheduler, base, () => now);
   assert.equal(created.length, 1);
