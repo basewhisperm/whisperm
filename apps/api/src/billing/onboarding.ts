@@ -18,6 +18,12 @@ export interface OnboardingChecklist {
   readonly percentComplete: number;
 }
 
+export class OnboardingAccessError extends Error {
+  readonly code = "ONBOARDING_ACCESS_DENIED" as const;
+  readonly statusCode = 403;
+  constructor() { super("Not a member of this workspace"); this.name = "OnboardingAccessError"; }
+}
+
 export const computeOnboardingChecklist = async (
   port: OnboardingStatePort,
   workspaceId: string,

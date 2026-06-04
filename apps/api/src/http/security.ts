@@ -46,8 +46,7 @@ const sanitizeValue = (value: unknown): unknown => {
   return value;
 };
 
-export const sanitizeRequestBody = (request: FastifyRequestLike & { body?: unknown }): void => {
-  const method = (request as unknown as { method?: string }).method;
+export const sanitizeRequestBody = (request: FastifyRequestLike & { body?: unknown }, method: string): void => {
   if (method === "POST" || method === "PATCH" || method === "PUT") {
     if (request.body !== undefined && request.body !== null) {
       request.body = sanitizeValue(request.body);
