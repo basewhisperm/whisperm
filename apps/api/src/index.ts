@@ -103,3 +103,6 @@ export { createWorkspace, generateWorkspaceSlug, currencyForCountry, DEFAULT_PIP
 export type { WorkspaceProvisioningPort, CreateWorkspaceInput, CreateWorkspaceResult, CreatedTenant, CreatedPipeline } from "./billing/workspace-provisioning.js";
 export { computeOnboardingChecklist } from "./billing/onboarding.js";
 export type { OnboardingStatePort, OnboardingChecklist, OnboardingStep, OnboardingStepKey } from "./billing/onboarding.js";
+
+export { sanitizeString, sanitizeRequestBody, createRateLimiter, authRateLimiter, applySecurityHeaders, getClientIp } from "./http/security.js";
+export type { RateLimiter, RateLimiterOptions } from "./http/security.js";
