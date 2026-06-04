@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { phoneE164Schema } from "./i18n.js";
 import { persistenceCorrelationMetadataSchema } from "./persistence.js";
 
 const idSchema = z.string().min(1);
@@ -14,7 +15,7 @@ export const contactSchema = z.object({
   tenantId: idSchema,
   externalId: idSchema.nullable().optional(),
   email: z.string().email().nullable().optional(),
-  phone: idSchema.nullable().optional(),
+  phone: phoneE164Schema.nullable().optional(),
   firstName: idSchema.nullable().optional(),
   lastName: idSchema.nullable().optional(),
   stage: contactStageSchema.default("PROSPECT"),
@@ -28,7 +29,7 @@ export const createContactRequestSchema = z.object({
   tenantId: idSchema,
   externalId: idSchema.nullable().optional(),
   email: z.string().email().nullable().optional(),
-  phone: idSchema.nullable().optional(),
+  phone: phoneE164Schema.nullable().optional(),
   firstName: idSchema.nullable().optional(),
   lastName: idSchema.nullable().optional(),
   stage: contactStageSchema.default("PROSPECT"),
@@ -42,7 +43,7 @@ export type CreateContactRequest = z.output<typeof createContactRequestSchema>;
 export const updateContactRequestSchema = z.object({
   externalId: idSchema.nullable().optional(),
   email: z.string().email().nullable().optional(),
-  phone: idSchema.nullable().optional(),
+  phone: phoneE164Schema.nullable().optional(),
   firstName: idSchema.nullable().optional(),
   lastName: idSchema.nullable().optional(),
   stage: contactStageSchema.optional(),
@@ -92,7 +93,7 @@ export const dealContactSummarySchema = z.object({
   firstName: idSchema.nullable().optional(),
   lastName: idSchema.nullable().optional(),
   email: z.string().email().nullable().optional(),
-  phone: idSchema.nullable().optional(),
+  phone: phoneE164Schema.nullable().optional(),
   company: idSchema.nullable().optional(),
 }).strict();
 export type DealContactSummary = z.output<typeof dealContactSummarySchema>;

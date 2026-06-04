@@ -550,6 +550,25 @@ const injectContactCreate = (server, tenantId, index) => server.inject({
   payload: contactBody(tenantId, index),
 });
 
+test("POST /contacts rejects non-E.164 phone numbers", async () => {
+  const contactsByTenant = new Map();
+  const server = createApiServer(createDependencies({
+    contacts: createContactService(contactsByTenant),
+    contactQuota: createContactQuota(contactsByTenant),
+  }));
+
+  const response = await server.inject({
+    method: "POST",
+    url: "/contacts",
+    headers: { "x-tenant-id": "tenant-1", "x-correlation-id": "corr-phone" },
+    payload: { ...contactBody("tenant-1", 1), phone: "0241234567" },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error.code, "REQUEST_BODY_INVALID");
+  assert.equal(contactsByTenant.get("tenant-1"), undefined);
+});
+
 test("starter workspace can create contacts up to the plan limit", async () => {
   const contactsByTenant = new Map();
   const server = createApiServer(createDependencies({
