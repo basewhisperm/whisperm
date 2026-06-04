@@ -90,6 +90,7 @@ import {
   assertTenantScope,
   buildScoreRecomputationIdempotencyKey,
   contactStageSchema,
+  phoneE164Schema,
   type ContactStage,
   scoreRecomputationJobPayloadSchema,
   scoreRecomputationResultSchema,
@@ -464,7 +465,7 @@ const contactImportRowSchema = z.object({
   email: z.string().trim().min(1, "Email is required").email(),
   firstName: idSchema.optional(),
   lastName: idSchema.optional(),
-  phone: idSchema.optional(),
+  phone: phoneE164Schema.optional(),
   externalId: idSchema.optional(),
   stage: contactStageSchema,
   metadata: metadataSchema.optional(),
@@ -518,8 +519,8 @@ const chunk = <TItem>(items: readonly TItem[], size: number): readonly (readonly
   return chunks;
 };
 
-const createContactInputSchema = z.object({ tenantId: idSchema, externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: idSchema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), stage: contactStageSchema.default("PROSPECT"), metadata: metadataSchema.nullable().optional() }).strict().refine((contact) => contact.email !== undefined || contact.phone !== undefined || contact.externalId !== undefined, { message: "Contact create requires at least one stable identifier", path: ["email"] });
-const updateContactInputSchema = z.object({ externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: idSchema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), stage: contactStageSchema.optional(), metadata: metadataSchema.nullable().optional() }).merge(optimisticLockSchema).strict();
+const createContactInputSchema = z.object({ tenantId: idSchema, externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: phoneE164Schema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), stage: contactStageSchema.default("PROSPECT"), metadata: metadataSchema.nullable().optional() }).strict().refine((contact) => contact.email !== undefined || contact.phone !== undefined || contact.externalId !== undefined, { message: "Contact create requires at least one stable identifier", path: ["email"] });
+const updateContactInputSchema = z.object({ externalId: idSchema.nullable().optional(), email: z.string().email().nullable().optional(), phone: phoneE164Schema.nullable().optional(), firstName: idSchema.nullable().optional(), lastName: idSchema.nullable().optional(), stage: contactStageSchema.optional(), metadata: metadataSchema.nullable().optional() }).merge(optimisticLockSchema).strict();
 
 export class ContactService {
   constructor(private readonly deps: ServiceDependencies) {}
