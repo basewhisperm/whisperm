@@ -84,12 +84,12 @@ export const paystackSubscriptionEventToSnapshot = (
   const tenantId = extractTenantId(data.customer?.metadata as Record<string, unknown> | null);
   return {
     tenantId,
-    provider: "STRIPE",
+    provider: "PAYSTACK",
     providerCustomerId: data.customer.customer_code,
     providerSubscriptionId: data.subscription_code,
     status: mapPaystackSubscriptionEventToStatus(event.event),
     cancelAtPeriodEnd: event.event === "subscription.disable",
-    currentPeriodEnd: data.next_payment_date ?? undefined,
+    ...(data.next_payment_date == null ? {} : { currentPeriodEnd: data.next_payment_date }),
     metadata: {
       paystackProvider: "PAYSTACK",
       planCode: data.plan?.plan_code,
@@ -106,7 +106,7 @@ export const paystackChargeEventToSnapshot = (
   const tenantId = extractTenantId(metadata);
   return {
     tenantId,
-    provider: "STRIPE",
+    provider: "PAYSTACK",
     providerCustomerId: data.customer.customer_code,
     providerSubscriptionId: data.subscription_code ?? data.reference,
     status: mapPaystackSubscriptionEventToStatus(event.event),
@@ -130,8 +130,9 @@ export const createPaystackSubscriptionChangedEvent = (
   occurredAt = new Date(),
 ): SubscriptionChangedEvent => ({
   type: "subscription.changed",
+  source: "paystack",
   tenantId: subscription.tenantId,
-  provider: "STRIPE",
+  provider: "PAYSTACK",
   providerSubscriptionId: subscription.providerSubscriptionId,
   status: subscription.status,
   occurredAt: occurredAt.toISOString(),
