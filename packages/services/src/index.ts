@@ -14,6 +14,9 @@ import {
   billingUsageRecordSchema,
   type ContactRepository,
   type ActivityRepository,
+  type ActivityListFilters,
+  type ActivityRecord,
+  activityRecordSchema,
   type ContactRecord,
   contactRecordSchema,
   type CreateContactInput,
@@ -951,6 +954,54 @@ const dealToCard = (deal: DealRecord): DealCardRecord => dealCardRecordSchema.pa
   updatedAt: deal.updatedAt,
 });
 
+
+const activityTypeSchema = z.enum(["CALL", "EMAIL", "MEETING", "TASK", "NOTE"]);
+const createActivityInputSchema = z.object({
+  tenantId: idSchema,
+  contactId: idSchema.optional(),
+  dealId: idSchema.optional(),
+  type: activityTypeSchema,
+  note: z.string().min(1).max(10000),
+  metadata: metadataSchema.nullable().optional(),
+}).strict().refine((activity) => activity.contactId !== undefined || activity.dealId !== undefined, {
+  message: "Activity create requires contactId or dealId",
+  path: ["contactId"],
+});
+const activityFiltersSchema = z.object({
+  contactId: idSchema.optional(),
+  dealId: idSchema.optional(),
+  type: activityTypeSchema.optional(),
+  createdById: idSchema.optional(),
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+}).strict();
+
+export type CreateActivityServiceInput = z.output<typeof createActivityInputSchema>;
+export type ActivityFilters = z.output<typeof activityFiltersSchema>;
+
+export class ActivityService {
+  constructor(private readonly deps: ServiceDependencies) {}
+
+  async create(contextInput: ServiceContext, input: CreateActivityServiceInput): Promise<ActivityRecord> {
+    const context = ensureContext(contextInput);
+    const actorId = context.actorId;
+    if (actorId === undefined) {
+      throw new ServiceError({ code: "SERVICE_VALIDATION_FAILED", message: "Authenticated actor is required to create an activity", status: 400, correlation: context.correlation });
+    }
+    const data = ensureTenantInput(context, exactInput(parseContract(createActivityInputSchema, input, context.correlation)));
+    return runWrite(this.deps, context, async (repositories) => {
+      const activityInput: CreateActivityInput = { ...data, createdById: actorId };
+      return activityRecordSchema.parse(await repositories.activities.create(context, activityInput));
+    });
+  }
+
+  async list(contextInput: ServiceContext, filtersInput: ActivityFilters = {}, page?: PageRequest): Promise<Page<ActivityRecord>> {
+    const context = ensureContext(contextInput);
+    const filters = exactInput(parseContract(activityFiltersSchema, filtersInput, context.correlation)) as ActivityListFilters;
+    return this.deps.activities.list(contextToTenantScope(context), filters, page);
+  }
+}
+
 export class DealService {
   constructor(private readonly deps: ServiceDependencies) {}
 
@@ -1028,6 +1079,7 @@ export interface WhispeRMServices {
   readonly users: UserService;
   readonly contacts: ContactService;
   readonly deals: DealService;
+  readonly activities: ActivityService;
   readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
   readonly workflows: WorkflowService;
@@ -1043,6 +1095,7 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   users: new UserService(dependencies),
   contacts: new ContactService(dependencies),
   deals: new DealService(dependencies),
+  activities: new ActivityService(dependencies),
   scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
   workflows: new WorkflowService(dependencies),

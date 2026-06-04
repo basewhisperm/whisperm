@@ -616,7 +616,7 @@ model Activity {
   dealId      String?      @db.Uuid
   createdById String       @db.Uuid
   type        ActivityType
-  note        String?
+  note        String
   occurredAt  DateTime     @default(now())
   metadata    Json?
   createdAt   DateTime     @default(now())

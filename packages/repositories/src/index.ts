@@ -215,7 +215,19 @@ export const activityRecordSchema = baseRecordSchema.extend({
   metadata: metadataSchema.nullable().optional()
 }).required({ updatedAt: true }).strict();
 export type ActivityRecord = z.output<typeof activityRecordSchema>;
-export type CreateActivityInput = TenantScoped & Pick<ActivityRecord, "createdById" | "type"> & Partial<Pick<ActivityRecord, "contactId" | "dealId" | "note" | "occurredAt" | "metadata">>;
+export type CreateActivityInput = TenantScoped & Pick<ActivityRecord, "createdById" | "type" | "note"> & Partial<Pick<ActivityRecord, "contactId" | "dealId" | "occurredAt" | "metadata">>;
+export interface ActivityListFilters {
+  readonly contactId?: string | undefined;
+  readonly dealId?: string | undefined;
+  readonly type?: ActivityRecord["type"] | undefined;
+  readonly createdById?: string | undefined;
+  readonly from?: string | undefined;
+  readonly to?: string | undefined;
+}
+export interface ActivityCreateContext extends TenantScoped {
+  readonly actorId?: string | undefined;
+  readonly correlation?: PersistenceCorrelationMetadata | undefined;
+}
 
 export const dealCardRecordSchema = z.object({
   id: z.string().min(1),
@@ -461,7 +473,7 @@ export interface UserRepository { create(context: TenantScoped, input: CreateUse
 export interface ContactRepository { create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord>; createMany(context: TenantScoped, inputs: readonly CreateContactInput[]): Promise<number>; count(context: TenantScoped): Promise<number>; findById(context: TenantScoped, id: string): Promise<ContactRecord | null>; findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]>; list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>>; update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord>; listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>>; }
 export interface PipelineRepository { findByWorkspace(workspaceId: string): Promise<PipelineRecord | null>; updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord>; }
 export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
-export interface ActivityRepository { create(context: TenantScoped, input: CreateActivityInput): Promise<ActivityRecord>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
+export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
 export interface CampaignRepository { create(context: TenantScoped, input: CreateCampaignInput): Promise<Campaign>; findById(context: TenantScoped, id: string): Promise<Campaign | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<Campaign>>; update(context: TenantScoped, id: string, input: UpdateCampaignInput): Promise<Campaign>; addVariant(context: TenantScoped, input: CreateCampaignVariantInput): Promise<CampaignVariant>; enqueuePublish(context: TenantScoped, input: CreatePublishJobInput): Promise<PublishJob>; findPublishJobByIdempotencyKey(context: TenantScoped, idempotencyKey: string): Promise<PublishJob | null>; }
 export interface WorkflowRepository { createExecution(context: TenantScoped, input: CreateWorkflowExecutionInput): Promise<WorkflowExecution>; findExecutionById(context: TenantScoped, id: string): Promise<WorkflowExecution | null>; findExecutionByRunId(context: TenantScoped, runId: string): Promise<WorkflowExecution | null>; updateExecution(context: TenantScoped, id: string, input: UpdateWorkflowExecutionInput): Promise<WorkflowExecution>; upsertStep(context: TenantScoped, input: UpsertWorkflowStepInput): Promise<WorkflowStepExecution>; listRunnableExecutions(context: TenantScoped, state: z.output<typeof workflowExecutionStateSchema>, page?: PageRequest): Promise<Page<WorkflowExecution>>; }
 export interface ApprovalRepository { createRequest(context: TenantScoped, input: CreateApprovalRequestInput): Promise<ApprovalRequestRecord>; recordDecision(context: TenantScoped, input: CreateApprovalDecisionInput): Promise<ApprovalDecisionRecord>; findRequestByApprovalId(context: TenantScoped, approvalId: string): Promise<ApprovalRequestRecord | null>; }
@@ -785,15 +797,44 @@ export class PrismaDealsRepository implements DealsRepository {
 
 export class PrismaActivityRepository implements ActivityRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
-  async create(context: TenantScoped, input: CreateActivityInput): Promise<ActivityRecord> {
+
+  async create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord> {
     ensureTenantInput(context, input);
-    return parseRecord(activityRecordSchema, await this.prisma.activity.create({ data: dataWithDefined({ occurredAt: new Date(), ...input }) }));
+    const correlation = context.correlation ?? { correlationId: "unknown" };
+    const createdById = context.actorId ?? input.createdById;
+    const occurredAt = input.occurredAt === undefined ? new Date() : new Date(input.occurredAt);
+    const work = async (client: PrismaPersistenceClient): Promise<ActivityRecord> => {
+      if (input.contactId != null) {
+        const result = await client.contact.updateMany({ where: byTenantId(context, input.contactId), data: { lastTouchAt: occurredAt } });
+        if (result.count !== 1) notFound("Contact not found", { contactId: input.contactId });
+      }
+      if (input.dealId != null) {
+        const deal = await client.deal.findFirst({ where: byTenantId(context, input.dealId) });
+        if (deal === null) notFound("Deal not found", { dealId: input.dealId });
+      }
+      const activity = parseRecord(activityRecordSchema, await client.activity.create({ data: dataWithDefined({ ...input, createdById, occurredAt }) }));
+      await client.auditLog.create({ data: dataWithDefined({ tenantId: context.tenantId, actorId: createdById, action: "ACTIVITY_CREATED", targetType: "ACTIVITY", targetId: activity.id, correlationId: correlation.correlationId, requestId: correlation.requestId, metadata: { contactId: activity.contactId ?? null, dealId: activity.dealId ?? null, type: activity.type } }) });
+      await client.outboxEvent.create({ data: dataWithDefined({ tenantId: context.tenantId, aggregateType: "ACTIVITY", aggregateId: activity.id, eventType: "activity.created", eventVersion: 1, idempotencyKey: `activity:${activity.id}:created`, payload: { tenantId: context.tenantId, activityId: activity.id, contactId: activity.contactId ?? null, dealId: activity.dealId ?? null, type: activity.type, createdById }, headers: {}, state: "PENDING", availableAt: occurredAt, correlationId: correlation.correlationId }) });
+      return activity;
+    };
+    if (this.prisma.$transaction === undefined) return work(this.prisma);
+    return this.prisma.$transaction(work);
   }
-  async listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>> {
+
+  async list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>> {
     ensureContext(context);
     const args = pageArgs(page);
-    const rows = await this.prisma.activity.findMany({ where: cursorWhere(context, args.cursor, { dealId }), take: args.take, orderBy: { id: "asc" } });
+    const createdAt = dataWithDefined({ gte: filters?.from === undefined ? undefined : new Date(filters.from), lte: filters?.to === undefined ? undefined : new Date(filters.to) });
+    const rows = await this.prisma.activity.findMany({
+      where: cursorWhere(context, args.cursor, dataWithDefined({ contactId: filters?.contactId, dealId: filters?.dealId, type: filters?.type, createdById: filters?.createdById, ...(Object.keys(createdAt).length === 0 ? {} : { createdAt }) })),
+      take: args.take,
+      orderBy: { createdAt: "desc" }
+    });
     return paginate(rows.map((row) => parseRecord(activityRecordSchema, row)), args.take - 1);
+  }
+
+  async listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>> {
+    return this.list(context, { dealId }, page);
   }
 }
 
