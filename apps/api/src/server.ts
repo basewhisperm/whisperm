@@ -22,6 +22,7 @@ import type { TrialGateSubscriptionReader } from "./billing/trial.js";
 import type { NotificationSchedulePort } from "@whisperm/notification-runtime";
 import { createPaystackWebhookHandler } from "./webhooks/paystack.js";
 import type { PaystackWebhookDependencies } from "./billing/contracts.js";
+import { createWorkspaceTeamManagementHandler, parseWorkspaceTeamRoute, type WorkspaceTeamManagementDependencies } from "./workspaces/team-management.js";
 
 export interface ApiKeyAuthenticationInput {
   readonly apiKey: string;
@@ -82,10 +83,11 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly upgradePorts?: UpgradeServicePorts | undefined;
   readonly workspaceProvisioningPort?: WorkspaceProvisioningPort | undefined;
   readonly onboardingStatePort?: OnboardingStatePort | undefined;
+  readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
 }
 
 export interface InjectOptions {
-  readonly method: "GET" | "POST" | "PATCH";
+  readonly method: "GET" | "POST" | "PATCH" | "DELETE";
   readonly url: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly payload?: unknown;
@@ -311,6 +313,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
     : createPaystackWebhookHandler(dependencies.paystackWebhook, {
       paystackSecretKey: dependencies.paystackWebhook.paystackSecretKey,
     });
+  const teamManagementHandler = dependencies.workspaceTeamManagement === undefined ? undefined : createWorkspaceTeamManagementHandler(dependencies.workspaceTeamManagement);
   const requireActiveSubscription: RequireActiveSubscription | undefined =
     dependencies.subscriptionReader === undefined
       ? undefined
@@ -360,6 +363,18 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           throw new ApiError({ code: "READY_CHECK_FAILED", message: "API service is not ready", cause });
         }
         reply.send({ ok: true, data: { status: "ready" }, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+
+
+      const workspaceTeamRoute = parseWorkspaceTeamRoute(options.method, parsedUrl.pathname);
+      if (workspaceTeamRoute !== null) {
+        if (teamManagementHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "WORKSPACE_TEAM_NOT_CONFIGURED", message: "Workspace team management is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        request.params = { ...workspaceTeamRoute.params, routeName: workspaceTeamRoute.name };
+        await teamManagementHandler(request, reply);
         return reply.toInjectResponse();
       }
 
@@ -513,7 +528,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
     async listen(options) {
       server = createServer(async (incomingRequest: IncomingMessage, outgoingResponse: ServerResponse) => {
         const result = await inject({
-          method: incomingRequest.method === "POST" ? "POST" : incomingRequest.method === "PATCH" ? "PATCH" : "GET",
+          method: incomingRequest.method === "POST" ? "POST" : incomingRequest.method === "PATCH" ? "PATCH" : incomingRequest.method === "DELETE" ? "DELETE" : "GET",
           url: incomingRequest.url ?? "/",
           headers: Object.fromEntries(Object.entries(incomingRequest.headers).flatMap(([name, value]) => {
             if (typeof value === "string") {
