@@ -7,6 +7,7 @@ import {
   PrismaDealsRepository,
   PrismaEventRepository,
   PrismaFollowUpDigestRepository,
+  PrismaReportsRepository,
   PrismaPipelineRepository,
   PrismaTenantRepository,
   PrismaUserRepository,
@@ -67,7 +68,7 @@ const createClient = () => {
   const names = [
     "tenant", "tenantUser", "contact", "leadEvent", "contentItem", "contentVariant", "publishJob", "workflowExecution",
     "workflowStepExecution", "eventIngestion", "outboxEvent", "inboxEvent", "idempotencyKey", "aiExecution", "auditLog",
-    "pipeline", "pipelineStage", "deal", "activity"
+    "pipeline", "pipelineStage", "deal", "activity", "subscription"
   ];
   return Object.fromEntries(names.map((name) => [name, createDelegate(name)]));
 };
@@ -144,7 +145,7 @@ test("factory wires all repository interfaces", () => {
   const repositories = createPrismaRepositories(createClient());
 
   assert.deepEqual(Object.keys(repositories).sort(), [
-    "activities", "approvals", "auditLogs", "billing", "campaigns", "contacts", "dashboard", "deals", "events", "executions", "followUpDigest", "pipelines", "tenants", "users", "workflows"
+    "activities", "approvals", "auditLogs", "billing", "campaigns", "contacts", "dashboard", "deals", "events", "executions", "followUpDigest", "reports", "pipelines", "tenants", "users", "workflows"
   ].sort());
 });
 
@@ -179,6 +180,54 @@ test("dashboard repository scopes metrics contacts and activity reads by tenant"
   assert.deepEqual(prisma.tenant.calls[0].args.select, { alertDigestEnabled: true });
   assert.deepEqual(prisma.activity.calls[0].args.where, { tenantId: "tenant-a" });
   assert.deepEqual(prisma.activity.calls[0].args.take, 10);
+});
+
+
+test("reports repository scopes plan and real-time aggregate reads by tenant", async () => {
+  const prisma = createClient();
+  prisma.subscription.findFirst = async (args) => {
+    prisma.subscription.calls.push({ name: "subscription", method: "findFirst", args });
+    return { plan: "GROWTH" };
+  };
+  prisma.deal.findMany = async (args) => {
+    prisma.deal.calls.push({ name: "deal", method: "findMany", args });
+    if (args.select?.pipelineStageId === true) {
+      return [
+        { pipelineStageId: "stage-1", value: "100.50" },
+        { pipelineStageId: "stage-1", value: "50" },
+        { pipelineStageId: "stage-2", value: 25 }
+      ];
+    }
+    return [
+      { createdAt: "2026-06-01T00:00:00.000Z", closedAt: "2026-06-11T00:00:00.000Z" },
+      { createdAt: "2026-06-05T00:00:00.000Z", closedAt: "2026-06-25T00:00:00.000Z" }
+    ];
+  };
+  prisma.pipelineStage.findMany = async (args) => {
+    prisma.pipelineStage.calls.push({ name: "pipelineStage", method: "findMany", args });
+    return [{ id: "stage-1", name: "Qualified" }, { id: "stage-2", name: "Proposal" }];
+  };
+  prisma.contact.findMany = async (args) => {
+    prisma.contact.calls.push({ name: "contact", method: "findMany", args });
+    return [{ source: "referral" }, { source: "referral" }, { source: "website" }, { source: null }];
+  };
+  const reports = new PrismaReportsRepository(prisma);
+  const period = { startDate: new Date("2026-06-01T00:00:00.000Z"), endDate: new Date("2026-07-01T00:00:00.000Z") };
+
+  assert.deepEqual(await reports.getCurrentPlan({ tenantId: "tenant-a" }), { plan: "GROWTH" });
+  assert.deepEqual(await reports.revenueByStage({ tenantId: "tenant-a" }, period), [
+    { stageId: "stage-1", stageName: "Qualified", revenue: 150.5 },
+    { stageId: "stage-2", stageName: "Proposal", revenue: 25 }
+  ]);
+  assert.deepEqual(await reports.clientAcquisitionSources({ tenantId: "tenant-a" }, period), [{ source: "referral", count: 2 }, { source: "website", count: 1 }]);
+  assert.deepEqual(await reports.averageDaysToClose({ tenantId: "tenant-a" }, period), { avgDaysToClose: 15 });
+  assert.deepEqual(await reports.renewalRate({ tenantId: "tenant-a" }, period), { rate: null });
+
+  assert.deepEqual(prisma.subscription.calls[0].args.where, { tenantId: "tenant-a", status: { in: ["ACTIVE", "TRIALING"] } });
+  assert.deepEqual(prisma.deal.calls[0].args.where, { tenantId: "tenant-a", createdAt: { gte: period.startDate, lt: period.endDate } });
+  assert.deepEqual(prisma.pipelineStage.calls[0].args.where, { tenantId: "tenant-a", id: { in: ["stage-1", "stage-2"] } });
+  assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", createdAt: { gte: period.startDate, lt: period.endDate }, source: { not: null } });
+  assert.deepEqual(prisma.deal.calls[1].args.where, { tenantId: "tenant-a", closedAt: { gte: period.startDate, lt: period.endDate } });
 });
 
 
