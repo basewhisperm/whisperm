@@ -785,3 +785,21 @@ export type {
   StripeSubscriptionStatus,
   SubscriptionChangedEvent,
 } from "./providers/stripe.js";
+
+export {
+  paystackEventToSnapshot,
+  paystackSubscriptionEventToSnapshot,
+  paystackChargeEventToSnapshot,
+  createPaystackSubscriptionChangedEvent,
+  verifyPaystackSignature,
+  mapPaystackSubscriptionEventToStatus,
+  resolveBillingProvider,
+  PAYSTACK_PRICING_GHS,
+} from "./providers/paystack.js";
+export type {
+  BillingProviderName,
+  PaystackEventType,
+  PaystackWebhookEvent,
+  PaystackSubscriptionData,
+  PaystackChargeData,
+} from "./providers/paystack.js";

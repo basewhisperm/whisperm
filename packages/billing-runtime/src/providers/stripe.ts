@@ -15,7 +15,7 @@ export type StripeSubscriptionStatus = z.output<typeof stripeSubscriptionStatusS
 
 export interface BillingSubscriptionSnapshot {
   tenantId: string;
-  provider: "STRIPE";
+  provider: "STRIPE" | "PAYSTACK";
   providerCustomerId: string;
   providerSubscriptionId: string;
   status: StripeSubscriptionStatus;
@@ -29,11 +29,11 @@ export interface BillingSubscriptionSnapshot {
 export interface SubscriptionChangedEvent {
   type: "subscription.changed";
   tenantId: string;
-  provider: "STRIPE";
+  provider: "STRIPE" | "PAYSTACK";
   providerSubscriptionId: string;
   status: StripeSubscriptionStatus;
   occurredAt: string;
-  source: "stripe";
+  source: "stripe" | "paystack";
   stripeEventId?: string;
   subscription: BillingSubscriptionSnapshot;
 }

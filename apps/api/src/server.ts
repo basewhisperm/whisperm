@@ -13,6 +13,8 @@ import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDepen
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
 import { createStripeWebhookHandler } from "./webhooks/stripe.js";
+import { createPaystackWebhookHandler } from "./webhooks/paystack.js";
+import type { PaystackWebhookDependencies } from "./billing/contracts.js";
 
 export interface ApiKeyAuthenticationInput {
   readonly apiKey: string;
@@ -50,6 +52,10 @@ export interface StripeWebhookServerConfig extends StripeWebhookDependencies {
   readonly stripeWebhookSecret: string;
 }
 
+export interface PaystackWebhookServerConfig extends PaystackWebhookDependencies {
+  readonly paystackSecretKey: string;
+}
+
 export interface ApiServerDependencies extends InboundWebhookIngestionDependencies {
   readonly contacts?: ContactRouteDependencies["contacts"] | undefined;
   readonly contactQuota?: ContactRouteDependencies["quota"] | undefined;
@@ -62,6 +68,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly readiness?: ReadinessCheck;
   readonly logger?: RequestLogger;
   readonly stripeWebhook?: StripeWebhookServerConfig;
+  readonly paystackWebhook?: PaystackWebhookServerConfig;
 }
 
 export interface InjectOptions {
@@ -286,6 +293,11 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
       stripeSecretKey: dependencies.stripeWebhook.stripeSecretKey,
       stripeWebhookSecret: dependencies.stripeWebhook.stripeWebhookSecret,
     });
+  const paystackWebhookHandler = dependencies.paystackWebhook === undefined
+    ? undefined
+    : createPaystackWebhookHandler(dependencies.paystackWebhook, {
+      paystackSecretKey: dependencies.paystackWebhook.paystackSecretKey,
+    });
   const contactDependencies = dependencies.contacts === undefined ? undefined : { contacts: dependencies.contacts, quota: dependencies.contactQuota, now: dependencies.now };
   const contactCreateHandler = contactDependencies === undefined ? undefined : createContactCreateHandler(contactDependencies);
   const contactImportHandler = contactDependencies === undefined ? undefined : createContactImportHandler(contactDependencies);
@@ -349,6 +361,15 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           return reply.toInjectResponse();
         }
         await stripeWebhookHandler(request, reply);
+        return reply.toInjectResponse();
+      }
+
+      if (options.method === "POST" && parsedUrl.pathname === "/webhooks/paystack") {
+        if (paystackWebhookHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "PAYSTACK_WEBHOOK_NOT_CONFIGURED", message: "Paystack webhook is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        await paystackWebhookHandler(request, reply);
         return reply.toInjectResponse();
       }
 

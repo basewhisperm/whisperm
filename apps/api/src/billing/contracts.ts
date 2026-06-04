@@ -4,7 +4,7 @@ import type {
 } from "@whisperm/billing-runtime";
 
 export interface BillingEventIngestionReservation {
-  provider: "STRIPE";
+  provider: "STRIPE" | "PAYSTACK";
   providerEventId: string;
   eventType: string;
   correlationId: string;
@@ -23,6 +23,13 @@ export interface BillingOutbox {
 }
 
 export interface StripeWebhookDependencies {
+  billingEventIngestion: BillingEventIngestionStore;
+  subscriptions: SubscriptionStore;
+  outbox: BillingOutbox;
+  now?: () => Date;
+}
+
+export interface PaystackWebhookDependencies {
   billingEventIngestion: BillingEventIngestionStore;
   subscriptions: SubscriptionStore;
   outbox: BillingOutbox;
