@@ -1130,3 +1130,13 @@ export type {
   TrialEmailInput,
   WorkspaceEmailInput,
 } from "./notifications/email-templates.js";
+
+export {
+  runWeeklyFollowUpDigest,
+  type FollowUpDigestIdleContact,
+  type FollowUpDigestNotificationPort,
+  type FollowUpDigestRecipient,
+  type FollowUpDigestRepositoryPort,
+  type FollowUpDigestWorkspace,
+  type WeeklyFollowUpDigestResult,
+} from "./notifications/follow-up-digest.js";

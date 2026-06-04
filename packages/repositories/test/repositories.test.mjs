@@ -6,6 +6,7 @@ import {
   PrismaDashboardRepository,
   PrismaDealsRepository,
   PrismaEventRepository,
+  PrismaFollowUpDigestRepository,
   PrismaPipelineRepository,
   PrismaTenantRepository,
   PrismaUserRepository,
@@ -143,7 +144,7 @@ test("factory wires all repository interfaces", () => {
   const repositories = createPrismaRepositories(createClient());
 
   assert.deepEqual(Object.keys(repositories).sort(), [
-    "activities", "approvals", "auditLogs", "billing", "campaigns", "contacts", "dashboard", "deals", "events", "executions", "pipelines", "tenants", "users", "workflows"
+    "activities", "approvals", "auditLogs", "billing", "campaigns", "contacts", "dashboard", "deals", "events", "executions", "followUpDigest", "pipelines", "tenants", "users", "workflows"
   ].sort());
 });
 
@@ -164,6 +165,8 @@ test("dashboard repository scopes metrics contacts and activity reads by tenant"
   assert.equal(await dashboard.sumOpenPipelineValue({ tenantId: "tenant-a" }), 42);
   assert.equal(await dashboard.sumWonValueForPeriod({ tenantId: "tenant-a" }, { from: new Date("2026-05-01T00:00:00.000Z"), to: new Date("2026-06-01T00:00:00.000Z") }), 42);
   await dashboard.listContactsForHealth({ tenantId: "tenant-a" });
+  await dashboard.listContactsForFollowUpAlerts({ tenantId: "tenant-a" }, new Date("2026-05-22T00:00:00.000Z"));
+  await dashboard.getFollowUpReminderEnabled({ tenantId: "tenant-a" });
   await dashboard.listLatestActivities({ tenantId: "tenant-a" }, 10);
 
   assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", stage: { not: "INACTIVE" } });
@@ -171,8 +174,37 @@ test("dashboard repository scopes metrics contacts and activity reads by tenant"
   assert.deepEqual(prisma.deal.calls[1].args.where, { tenantId: "tenant-a", closedAt: { gte: new Date("2026-05-01T00:00:00.000Z"), lt: new Date("2026-06-01T00:00:00.000Z") } });
   assert.deepEqual(prisma.contact.calls[1].args.where, { tenantId: "tenant-a" });
   assert.deepEqual(prisma.contact.calls[1].args.select, { id: true, firstName: true, lastName: true, company: true, email: true, lastTouchAt: true });
+  assert.deepEqual(prisma.contact.calls[2].args.where, { tenantId: "tenant-a", OR: [{ lastTouchAt: null }, { lastTouchAt: { lt: new Date("2026-05-22T00:00:00.000Z") } }] });
+  assert.deepEqual(prisma.tenant.calls[0].args.where, { id: "tenant-a" });
+  assert.deepEqual(prisma.tenant.calls[0].args.select, { alertDigestEnabled: true });
   assert.deepEqual(prisma.activity.calls[0].args.where, { tenantId: "tenant-a" });
   assert.deepEqual(prisma.activity.calls[0].args.take, 10);
+});
+
+
+test("follow-up digest repository scopes workspace recipients and idle contacts", async () => {
+  const prisma = createClient();
+  prisma.tenant.findMany = async (args) => {
+    prisma.tenant.calls.push({ name: "tenant", method: "findMany", args });
+    return [{ id: "tenant-a", name: "Tenant A", alertDigestEnabled: true }];
+  };
+  prisma.tenantUser.findMany = async (args) => {
+    prisma.tenantUser.calls.push({ name: "tenantUser", method: "findMany", args });
+    return [{ email: "owner@example.com", displayName: "Owner" }];
+  };
+  prisma.contact.findMany = async (args) => {
+    prisma.contact.calls.push({ name: "contact", method: "findMany", args });
+    return [{ id: "contact-idle", lastTouchAt: null }];
+  };
+  const digest = new PrismaFollowUpDigestRepository(prisma);
+
+  assert.deepEqual(await digest.listWorkspacesForFollowUpDigest(), [{ tenantId: "tenant-a", workspaceId: "tenant-a", workspaceName: "Tenant A", alertDigestEnabled: true }]);
+  assert.deepEqual(await digest.listOwnerAndAdminRecipients({ tenantId: "tenant-a" }), [{ email: "owner@example.com", name: "Owner" }]);
+  assert.deepEqual(await digest.listIdleContactsForFollowUpDigest({ tenantId: "tenant-a" }, new Date("2026-05-22T00:00:00.000Z")), [{ id: "contact-idle", lastTouchAt: null }]);
+
+  assert.deepEqual(prisma.tenant.calls[0].args.where, { alertDigestEnabled: true });
+  assert.deepEqual(prisma.tenantUser.calls[0].args.where, { tenantId: "tenant-a", isActive: true, role: { in: ["OWNER", "ADMIN"] } });
+  assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", OR: [{ lastTouchAt: null }, { lastTouchAt: { lt: new Date("2026-05-22T00:00:00.000Z") } }] });
 });
 
 

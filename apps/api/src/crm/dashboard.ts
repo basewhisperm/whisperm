@@ -1,4 +1,5 @@
 import { ApiError } from "../errors.js";
+import { computeContactHealth, type ContactHealthStatus } from "./contact-health.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike } from "../http/fastify.js";
 
 export interface DashboardRouteContext {
@@ -33,10 +34,12 @@ export interface DashboardReadModel {
   sumOpenPipelineValue(context: { readonly tenantId: string }): Promise<number> | number;
   sumWonValueForPeriod(context: { readonly tenantId: string }, period: { readonly from: Date; readonly to: Date }): Promise<number> | number;
   listContactsForHealth(context: { readonly tenantId: string }): Promise<readonly DashboardContactRecord[]> | readonly DashboardContactRecord[];
+  listContactsForFollowUpAlerts?(context: { readonly tenantId: string }, cutoff: Date): Promise<readonly DashboardContactRecord[]> | readonly DashboardContactRecord[];
+  getFollowUpReminderEnabled?(context: { readonly tenantId: string }): Promise<boolean> | boolean;
   listLatestActivities(context: { readonly tenantId: string }, limit: number): Promise<readonly DashboardActivityRecord[]> | readonly DashboardActivityRecord[];
 }
 
-export type DashboardHealthStatus = "green" | "amber" | "red";
+export type DashboardHealthStatus = ContactHealthStatus;
 
 export interface DashboardHealthPanelItem {
   readonly contactId: string;
@@ -88,8 +91,6 @@ type DashboardFastifyRequest = FastifyRequestLike & {
   readonly params?: Readonly<Record<string, string | undefined>> | undefined;
 };
 
-const millisecondsPerDay = 24 * 60 * 60 * 1000;
-
 const toDate = (value: string | Date | null | undefined): Date | null => {
   if (value === undefined || value === null) return null;
   return value instanceof Date ? value : new Date(value);
@@ -103,19 +104,6 @@ const toIso = (value: string | Date | null | undefined): string | null => {
 const startOfUtcMonth = (now: Date): Date => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
 const startOfNextUtcMonth = (now: Date): Date => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-
-const daysSince = (lastTouchAt: string | Date | null | undefined, now: Date): number | null => {
-  const lastTouch = toDate(lastTouchAt);
-  if (lastTouch === null) return null;
-  return Math.max(0, Math.floor((now.getTime() - lastTouch.getTime()) / millisecondsPerDay));
-};
-
-const healthForDays = (days: number | null): { readonly status: DashboardHealthStatus; readonly fillPct: number } => {
-  if (days === null) return { status: "red", fillPct: 0 };
-  if (days <= 7) return { status: "green", fillPct: Math.max(70, 100 - days * 4) };
-  if (days <= 14) return { status: "amber", fillPct: Math.max(35, 69 - (days - 8) * 5) };
-  return { status: "red", fillPct: Math.max(0, 34 - (days - 15) * 2) };
-};
 
 const contactName = (contact: DashboardContactRecord): string => {
   const fullName = [contact.firstName, contact.lastName]
@@ -139,16 +127,12 @@ const compareContactsByIdleFirst = (left: DashboardContactRecord, right: Dashboa
   return delta === 0 ? left.id.localeCompare(right.id) : delta;
 };
 
-const toHealthItem = (contact: DashboardContactRecord, now: Date): DashboardHealthPanelItem => {
-  const days = daysSince(contact.lastTouchAt, now);
-  return {
-    contactId: contact.id,
-    name: contactName(contact),
-    lastTouchAt: toIso(contact.lastTouchAt),
-    daysSinceLastTouch: days,
-    ...healthForDays(days),
-  };
-};
+const toHealthItem = (contact: DashboardContactRecord, now: Date): DashboardHealthPanelItem => ({
+  contactId: contact.id,
+  name: contactName(contact),
+  lastTouchAt: toIso(contact.lastTouchAt),
+  ...computeContactHealth(toDate(contact.lastTouchAt), now),
+});
 
 const toActivityFeedItem = (activity: DashboardActivityRecord): DashboardActivityFeedItem => ({
   id: activity.id,
@@ -191,16 +175,26 @@ export const createDashboardService = (readModel: DashboardReadModel, now: () =>
   async get(context) {
     const currentTime = now();
     const tenantScope = { tenantId: context.tenantId };
-    const [activeClients, pipelineValue, wonsThisMonth, contacts, activities] = await Promise.all([
+    const followUpCutoff = new Date(currentTime.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const [activeClients, pipelineValue, wonsThisMonth, contacts, activities, followUpReminderEnabled] = await Promise.all([
       readModel.countActiveContacts(tenantScope),
       readModel.sumOpenPipelineValue(tenantScope),
       readModel.sumWonValueForPeriod(tenantScope, { from: startOfUtcMonth(currentTime), to: startOfNextUtcMonth(currentTime) }),
       readModel.listContactsForHealth(tenantScope),
       readModel.listLatestActivities(tenantScope, 10),
+      readModel.getFollowUpReminderEnabled?.(tenantScope) ?? true,
     ]);
 
     const sortedContacts = [...contacts].sort(compareContactsByIdleFirst);
     const healthPanel = sortedContacts.map((contact) => toHealthItem(contact, currentTime));
+    const alertContacts = followUpReminderEnabled
+      ? readModel.listContactsForFollowUpAlerts === undefined
+        ? sortedContacts.filter((contact) => {
+            const health = computeContactHealth(toDate(contact.lastTouchAt), currentTime);
+            return health.daysSinceLastTouch === null || health.daysSinceLastTouch > 7;
+          })
+        : [...await readModel.listContactsForFollowUpAlerts(tenantScope, followUpCutoff)].sort(compareContactsByIdleFirst)
+      : [];
 
     return {
       metrics: {
@@ -212,14 +206,15 @@ export const createDashboardService = (readModel: DashboardReadModel, now: () =>
       },
       healthPanel,
       activityFeed: activities.map(toActivityFeedItem),
-      followUpAlerts: healthPanel
-        .filter((item) => item.daysSinceLastTouch === null || item.daysSinceLastTouch > 7)
-        .map((item) => ({
-          contactId: item.contactId,
-          name: item.name,
-          lastTouchAt: item.lastTouchAt,
-          daysSinceLastTouch: item.daysSinceLastTouch,
-        })),
+      followUpAlerts: alertContacts.map((contact) => {
+        const health = computeContactHealth(toDate(contact.lastTouchAt), currentTime);
+        return {
+          contactId: contact.id,
+          name: contactName(contact),
+          lastTouchAt: toIso(contact.lastTouchAt),
+          daysSinceLastTouch: health.daysSinceLastTouch,
+        };
+      }),
     };
   },
 });
