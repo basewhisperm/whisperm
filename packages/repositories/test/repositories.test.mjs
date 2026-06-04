@@ -545,3 +545,82 @@ test("activity list applies tenant scope and supported filters newest first", as
   });
   assert.deepEqual(prisma.activity.calls[0].args.orderBy, { createdAt: "desc" });
 });
+
+test("repository list pagination defaults to 25 and enforces max 100", async () => {
+  const prisma = createClient();
+  prisma.contact.findMany = async (args) => {
+    prisma.contact.calls.push({ name: "contact", method: "findMany", args });
+    return Array.from({ length: args.take }, (_, index) => ({
+      id: `contact-${index}`,
+      tenantId: "tenant-a",
+      email: `contact-${index}@example.test`,
+      firstName: null,
+      lastName: null,
+      phone: null,
+      stage: "PROSPECT",
+      externalId: null,
+      metadata: {},
+      createdAt: now,
+      updatedAt: now
+    }));
+  };
+  const contacts = new (await import("../dist/index.js")).PrismaContactRepository(prisma);
+
+  const defaultPage = await contacts.list({ tenantId: "tenant-a" });
+  assert.equal(prisma.contact.calls[0].args.take, 26);
+  assert.equal(defaultPage.items.length, 25);
+
+  const maxPage = await contacts.list({ tenantId: "tenant-a" }, { limit: 100 });
+  assert.equal(prisma.contact.calls[1].args.take, 101);
+  assert.equal(maxPage.items.length, 100);
+
+  await assert.rejects(
+    contacts.list({ tenantId: "tenant-a" }, { limit: 101 }),
+    /Number must be less than or equal to 100/
+  );
+});
+
+test("pipeline board query count is stage-bounded, tenant scoped, and supports 50 cards", async () => {
+  const prisma = createClient();
+  prisma.pipeline.findFirst = async (args) => {
+    prisma.pipeline.calls.push({ name: "pipeline", method: "findFirst", args });
+    return { id: "pipeline-a", tenantId: "tenant-a", name: "Sales", isDefault: true, defaultKey: "default", createdAt: now, updatedAt: now };
+  };
+  prisma.pipelineStage.findMany = async (args) => {
+    prisma.pipelineStage.calls.push({ name: "pipelineStage", method: "findMany", args });
+    return [
+      { id: "stage-a", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Open", position: 1, color: null, createdAt: now, updatedAt: now },
+      { id: "stage-b", tenantId: "tenant-a", pipelineId: "pipeline-a", name: "Won", position: 2, color: null, createdAt: now, updatedAt: now }
+    ];
+  };
+  prisma.deal.findMany = async (args) => {
+    prisma.deal.calls.push({ name: "deal", method: "findMany", args });
+    if (args.where.pipelineStageId !== "stage-a") return [];
+    return Array.from({ length: args.take }, (_, index) => ({
+      id: `deal-${String(index).padStart(3, "0")}`,
+      tenantId: "tenant-a",
+      contactId: null,
+      pipelineId: "pipeline-a",
+      pipelineStageId: "stage-a",
+      ownerId: null,
+      externalId: null,
+      title: `Deal ${index}`,
+      value: "100",
+      currency: "USD",
+      probability: 50,
+      closedAt: null,
+      metadata: {},
+      createdAt: now,
+      updatedAt: now
+    }));
+  };
+  const deals = new PrismaDealsRepository(prisma);
+
+  const board = await deals.findBoardByPipeline("tenant-a", "pipeline-a", { limit: 50 });
+
+  assert.equal(board.columns[0].deals.items.length, 50);
+  assert.equal(prisma.deal.calls.length, 2);
+  assert.ok(prisma.deal.calls.every((call) => call.args.where.tenantId === "tenant-a"));
+  assert.deepEqual(prisma.deal.calls[0].args.where, { tenantId: "tenant-a", pipelineId: "pipeline-a", pipelineStageId: "stage-a" });
+  assert.equal(prisma.deal.calls[0].args.take, 51);
+});

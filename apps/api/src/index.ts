@@ -49,6 +49,8 @@ export type {
   ApiKeyPrincipal,
   ApiServer,
   ApiServerDependencies,
+  ApiTelemetry,
+  ApiTelemetrySpan,
   HmacVerificationInput,
   HmacVerifier,
   InjectOptions,

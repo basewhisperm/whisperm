@@ -606,6 +606,9 @@ model Deal {
   @@index([tenantId, pipelineStageId])
   @@index([tenantId, ownerId])
   @@index([tenantId, pipelineId, pipelineStageId])
+  @@index([tenantId, pipelineId, pipelineStageId, id])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, closedAt])
   @@index([tenantId, externalId])
 }
 
@@ -629,6 +632,8 @@ model Activity {
 
   @@unique([tenantId, id])
   @@index([tenantId])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, createdAt])
   @@index([tenantId, contactId, occurredAt])
   @@index([tenantId, dealId, occurredAt])
   @@index([tenantId, createdById])
