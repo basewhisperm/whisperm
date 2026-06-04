@@ -211,6 +211,9 @@ export const agentRegistryEntrySchema = z.object({
    * or persistence lock needed to make a race-free decision. Active states are
    * REQUESTED, ACCEPTED, RUNNING, and WAITING_FOR_APPROVAL.
    */
+  // Maximum number of delegations that may execute concurrently.
+  // The schema validates configuration bounds only; active delegation-count
+  // enforcement happens at runtime in the coordination/delegation executor.
   maxConcurrentDelegations: z.number().int().min(1).max(100).default(1),
   supervisionRequired: z.boolean().default(false),
   createdAt: z.string().datetime(),
