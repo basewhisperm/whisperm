@@ -72,8 +72,10 @@ export type {
   StripeWebhookDependencies,
   SubscriptionStore,
 } from "./billing/contracts.js";
-export { evaluateContactCreateQuota, evaluatePipelineCreateQuota, planLimits } from "./billing/quota.js";
+export { evaluateContactCreateQuota, evaluatePipelineCreateQuota, evaluateTeamMemberQuota, planLimits } from "./billing/quota.js";
 export type { BillingQuotaContext, BillingQuotaDecision, BillingQuotaPlan, BillingQuotaReader, PipelineQuotaReader, PlanLimits } from "./billing/quota.js";
+export { createWorkspaceTeamManagementHandler, parseWorkspaceTeamRoute } from "./workspaces/team-management.js";
+export type { TeamInviteMailer, TeamManagementStore, WorkspaceInvitationRecord, WorkspaceMemberRecord, WorkspaceRecord, WorkspaceTeamManagementDependencies } from "./workspaces/team-management.js";
 export { createTrialEndsAt, createTrialGate, isTrialExpired } from "./billing/trial.js";
 export type { TrialGateSubscriptionReader } from "./billing/trial.js";
 

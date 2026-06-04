@@ -29,6 +29,8 @@ export interface BillingQuotaDecision {
 const starterContactLimit = 50;
 const starterPipelineLimit = 1;
 const growthPipelineLimit = 5;
+const starterTeamMemberLimit = 1;
+const growthTeamMemberLimit = 5;
 
 export interface PlanLimits {
   readonly quotas: {
@@ -111,6 +113,38 @@ export const evaluatePipelineCreateQuota = async (
       quotaId: `${plan.toLowerCase()}.pipelines`,
       tenantId: context.tenantId,
       metric: "WORKFLOW_RUNS",
+      limit,
+      period: "BILLING_CYCLE",
+      enforcement: "HARD",
+      failClosed: true,
+      active: true,
+      correlation: context.correlation,
+    }),
+    currentQuantity,
+    requestedQuantity: 1,
+    evaluatedAt: now,
+  });
+  return decision.allowed
+    ? { allowed: true }
+    : { allowed: false, code: "quota_exceeded", limit };
+};
+
+
+export const evaluateTeamMemberQuota = async (
+  plan: BillingQuotaPlan,
+  context: BillingQuotaContext,
+  currentQuantity: number,
+  now: Date,
+): Promise<BillingQuotaDecision> => {
+  if (plan === "PRO") {
+    return { allowed: true };
+  }
+  const limit = plan === "GROWTH" ? growthTeamMemberLimit : starterTeamMemberLimit;
+  const decision = evaluateQuota({
+    policy: quotaPolicySchema.parse({
+      quotaId: `${plan.toLowerCase()}.teamMembers`,
+      tenantId: context.tenantId,
+      metric: "CONTACTS",
       limit,
       period: "BILLING_CYCLE",
       enforcement: "HARD",
