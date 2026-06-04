@@ -334,6 +334,17 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         return reply.toInjectResponse();
       }
 
+            if (options.method === "POST" && parsedUrl.pathname === "/contacts") {
+        if (contactCreateHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "CONTACTS_NOT_CONFIGURED", message: "Contacts API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const tenantId = firstHeaderValue(request.headers, "x-tenant-id") ?? "";
+        await enforceQuota({ tenantId, resource: "contacts" });
+        await contactCreateHandler(request, reply);
+        return reply.toInjectResponse();
+      }
+
       if (options.method === "POST" && parsedUrl.pathname === "/contacts/import") {
         if (contactImportHandler === undefined) {
           reply.code(503).send({ ok: false, error: { code: "CONTACT_IMPORT_NOT_CONFIGURED", message: "Contact import is not configured" }, meta: { correlationId: request.correlationId } });
@@ -366,6 +377,8 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           reply.code(503).send({ ok: false, error: { code: "REPORTS_NOT_CONFIGURED", message: "Reports API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
         }
+        const reportsTenantId = firstHeaderValue(request.headers, "x-tenant-id") ?? "";
+        await assertFeature({ tenantId: reportsTenantId, feature: "reports" });
         request.query = parsedUrl.query;
         await reportsHandler(request, reply);
         return reply.toInjectResponse();
