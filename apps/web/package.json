@@ -8,7 +8,7 @@
     "build": "next build",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test test/smoke.test.js"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.3",
