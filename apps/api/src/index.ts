@@ -76,3 +76,16 @@ export { evaluateContactCreateQuota, evaluatePipelineCreateQuota, planLimits } f
 export type { BillingQuotaContext, BillingQuotaDecision, BillingQuotaPlan, BillingQuotaReader, PipelineQuotaReader, PlanLimits } from "./billing/quota.js";
 export { createTrialEndsAt, createTrialGate, isTrialExpired } from "./billing/trial.js";
 export type { TrialGateSubscriptionReader } from "./billing/trial.js";
+
+export { createPaystackWebhookHandler } from "./webhooks/paystack.js";
+export type { PaystackWebhookRequest } from "./webhooks/paystack.js";
+export type { PaystackWebhookDependencies } from "./billing/contracts.js";
+export {
+  resolveBillingProvider,
+  verifyPaystackSignature,
+  mapPaystackSubscriptionEventToStatus,
+  paystackEventToSnapshot,
+  createPaystackSubscriptionChangedEvent,
+  PAYSTACK_PRICING_GHS,
+} from "@whisperm/billing-runtime";
+export type { BillingProviderName, PaystackEventType, PaystackWebhookEvent } from "@whisperm/billing-runtime";
