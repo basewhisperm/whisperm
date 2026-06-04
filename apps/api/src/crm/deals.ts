@@ -7,6 +7,7 @@ import {
 } from "@whisperm/types";
 
 import { ApiError } from "../errors.js";
+import { evaluatePipelineCreateQuota, type PipelineQuotaReader } from "../billing/quota.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike } from "../http/fastify.js";
 
 export interface DealRouteContext {
@@ -38,6 +39,8 @@ export interface DealServicePort {
 
 export interface DealRouteDependencies {
   readonly deals: DealServicePort;
+  readonly quota?: PipelineQuotaReader | undefined;
+  readonly now?: (() => Date) | undefined;
 }
 
 type DealFastifyRequest = FastifyRequestLike & {
@@ -123,6 +126,21 @@ export const createPipelineBoardHandler = (dependencies: DealRouteDependencies) 
 export const createDealCreateHandler = (dependencies: DealRouteDependencies) => async (request: DealFastifyRequest, reply: FastifyReplyLike): Promise<void> => {
   const context = dealRouteContext(request);
   const body = createDealRequestSchema.parse(request.body);
+  if (dependencies.quota !== undefined) {
+    const quotaDecision = await evaluatePipelineCreateQuota(
+      dependencies.quota,
+      context,
+      (dependencies.now ?? (() => new Date()))(),
+    );
+    if (!quotaDecision.allowed) {
+      throw new ApiError({
+        code: "QUOTA_EXCEEDED",
+        message: "Pipeline quota exceeded for the current plan",
+        statusCode: 402,
+        details: { quotaCode: quotaDecision.code ?? "quota_exceeded", limit: quotaDecision.limit },
+      });
+    }
+  }
   const deal = await dependencies.deals.createCard(context, toCreateDealInput(context.tenantId, body));
   reply.code(201);
   sendSuccess(reply, deal, context.correlation.correlationId);
