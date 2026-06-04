@@ -5,6 +5,7 @@ import { inboundWebhookRequestSchema } from "@whisperm/types";
 import { ApiError, mapErrorToHttp } from "./errors.js";
 import type { StripeWebhookDependencies } from "./billing/contracts.js";
 import { createActivityCreateHandler, createActivityListHandler, createContactActivitiesHandler, createDealActivitiesHandler, type ActivityRouteDependencies } from "./crm/activities.js";
+import { createDashboardHandler, type DashboardRouteDependencies } from "./crm/dashboard.js";
 import { createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
@@ -52,6 +53,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly contacts?: ContactRouteDependencies["contacts"] | undefined;
   readonly deals?: DealRouteDependencies["deals"] | undefined;
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
+  readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
@@ -285,6 +287,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const dealCreateHandler = dependencies.deals === undefined ? undefined : createDealCreateHandler({ deals: dependencies.deals });
   const dealStageMoveHandler = dependencies.deals === undefined ? undefined : createDealStageMoveHandler({ deals: dependencies.deals });
   const dealDetailHandler = dependencies.deals === undefined ? undefined : createDealDetailHandler({ deals: dependencies.deals });
+  const dashboardHandler = dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
   const activityCreateHandler = dependencies.activities === undefined ? undefined : createActivityCreateHandler({ activities: dependencies.activities });
   const activityListHandler = dependencies.activities === undefined ? undefined : createActivityListHandler({ activities: dependencies.activities });
   const contactActivitiesHandler = dependencies.activities === undefined ? undefined : createContactActivitiesHandler({ activities: dependencies.activities });
@@ -339,6 +342,15 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           return reply.toInjectResponse();
         }
         await stripeWebhookHandler(request, reply);
+        return reply.toInjectResponse();
+      }
+
+      if (options.method === "GET" && parsedUrl.pathname === "/dashboard") {
+        if (dashboardHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "DASHBOARD_NOT_CONFIGURED", message: "Dashboard API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        await dashboardHandler(request, reply);
         return reply.toInjectResponse();
       }
 
