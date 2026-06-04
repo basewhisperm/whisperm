@@ -14,7 +14,6 @@ export type ApiErrorCode =
   | "READY_CHECK_FAILED"
   | "INTERNAL_SERVER_ERROR"
   | "REPORTS_PLAN_REQUIRED"
-  | "PLAN_LIMIT_EXCEEDED";
 
 const statusByCode: Record<ApiErrorCode, number> = {
   API_KEY_MISSING: 401,
@@ -28,7 +27,6 @@ const statusByCode: Record<ApiErrorCode, number> = {
   READY_CHECK_FAILED: 503,
   INTERNAL_SERVER_ERROR: 500,
   REPORTS_PLAN_REQUIRED: 402,
-  PLAN_LIMIT_EXCEEDED: 402,
 };
 
 export interface ApiErrorOptions {

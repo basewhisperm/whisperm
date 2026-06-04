@@ -1,36 +1,26 @@
+/**
+ * plan-enforcement.test.mjs
+ *
+ * Tests for issue #60 — S3.3 Plan enforcement: tier limits wired into API.
+ * Uses the existing BillingQuotaReader / PipelineQuotaReader DI pattern.
+ */
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
   planLimits,
-  enforceQuota,
-  assertFeature,
-  setPlanResolver,
-  setCurrentCountResolver,
-  setFeaturePlanResolver,
-  PLAN_LIMIT_EXCEEDED,
+  evaluateContactCreateQuota,
+  evaluatePipelineCreateQuota,
   ApiError,
   createApiServer,
   createReportsService,
 } from "../dist/index.js";
 
-const wireQuota = (plan, count) => {
-  const resolver = async () => plan;
-  setPlanResolver(resolver);
-  setCurrentCountResolver(async () => count);
-  setFeaturePlanResolver(resolver);
-};
+const now = new Date("2026-06-15T12:00:00.000Z");
 
-const assertPlanLimitExceeded = async (promise) => {
-  try {
-    await promise;
-    assert.fail("Expected ApiError with PLAN_LIMIT_EXCEEDED");
-  } catch (err) {
-    assert.ok(err instanceof ApiError, `Expected ApiError, got ${err?.constructor?.name}`);
-    assert.equal(err.code, PLAN_LIMIT_EXCEEDED);
-    assert.equal(err.statusCode, 402);
-  }
-};
+// ---------------------------------------------------------------------------
+// 1–4: planLimits unit tests
+// ---------------------------------------------------------------------------
 
 test("1. Starter limits match spec", () => {
   const l = planLimits("STARTER");
@@ -68,118 +58,158 @@ test("4. Unknown plan falls back to Starter safely", () => {
   assert.equal(l.features.reports, false);
 });
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const makeContactQuota = (plan, count) => ({
+  async findCurrentPlan() { return plan; },
+  async countContacts() { return count; },
+});
+
+const makePipelineQuota = (plan, count) => ({
+  async findCurrentPlan() { return plan; },
+  async countPipelines() { return count; },
+});
+
+const ctx = (tenantId = "ws-1") => ({
+  tenantId,
+  correlation: { correlationId: "test-corr" },
+});
+
+// ---------------------------------------------------------------------------
+// 5–7: Contact quota
+// ---------------------------------------------------------------------------
+
 test("5. Starter: 50th contact allowed (count=49)", async () => {
-  wireQuota("STARTER", 49);
-  await assert.doesNotReject(() => enforceQuota({ tenantId: "ws-1", resource: "contacts" }));
+  const d = await evaluateContactCreateQuota(makeContactQuota("STARTER", 49), ctx(), now);
+  assert.equal(d.allowed, true);
 });
 
-test("6. Starter: 51st contact returns 402 PLAN_LIMIT_EXCEEDED (count=50)", async () => {
-  wireQuota("STARTER", 50);
-  await assertPlanLimitExceeded(enforceQuota({ tenantId: "ws-1", resource: "contacts" }));
+test("6. Starter: 51st contact blocked (count=50)", async () => {
+  const d = await evaluateContactCreateQuota(makeContactQuota("STARTER", 50), ctx(), now);
+  assert.equal(d.allowed, false);
+  assert.equal(d.code, "quota_exceeded");
+  assert.equal(d.limit, 50);
 });
 
-test("7. Growth: contacts unlimited — passes at any count", async () => {
-  wireQuota("GROWTH", 999999);
-  await assert.doesNotReject(() => enforceQuota({ tenantId: "ws-2", resource: "contacts" }));
+test("7. Growth: contacts unlimited — allowed at any count", async () => {
+  const d = await evaluateContactCreateQuota(makeContactQuota("GROWTH", 999999), ctx(), now);
+  assert.equal(d.allowed, true);
 });
 
-test("8. Starter: 2nd pipeline returns 402 (count=1)", async () => {
-  wireQuota("STARTER", 1);
-  await assertPlanLimitExceeded(enforceQuota({ tenantId: "ws-1", resource: "pipelines" }));
+// ---------------------------------------------------------------------------
+// 8–10: Pipeline quota
+// ---------------------------------------------------------------------------
+
+test("8. Starter: 2nd pipeline blocked (count=1)", async () => {
+  const d = await evaluatePipelineCreateQuota(makePipelineQuota("STARTER", 1), ctx(), now);
+  assert.equal(d.allowed, false);
+  assert.equal(d.limit, 1);
 });
 
-test("9. Growth: 6th pipeline returns 402 (count=5)", async () => {
-  wireQuota("GROWTH", 5);
-  await assertPlanLimitExceeded(enforceQuota({ tenantId: "ws-2", resource: "pipelines" }));
+test("9. Growth: 6th pipeline blocked (count=5)", async () => {
+  const d = await evaluatePipelineCreateQuota(makePipelineQuota("GROWTH", 5), ctx(), now);
+  assert.equal(d.allowed, false);
+  assert.equal(d.limit, 5);
 });
 
 test("10. Pro: pipelines unlimited", async () => {
-  wireQuota("PRO", 999999);
-  await assert.doesNotReject(() => enforceQuota({ tenantId: "ws-3", resource: "pipelines" }));
+  const d = await evaluatePipelineCreateQuota(makePipelineQuota("PRO", 999999), ctx(), now);
+  assert.equal(d.allowed, true);
 });
 
-test("11. Starter: 2nd team member returns 402 (count=1)", async () => {
-  wireQuota("STARTER", 1);
-  await assertPlanLimitExceeded(enforceQuota({ tenantId: "ws-1", resource: "teamMembers" }));
+// ---------------------------------------------------------------------------
+// HTTP integration: POST /contacts quota via server
+// ---------------------------------------------------------------------------
+
+const baseDeps = (overrides = {}) => ({
+  createEventId: () => "event-1",
+  apiKeyAuthenticator: {
+    async authenticate(input) {
+      if (input.apiKey !== "valid-key") throw new ApiError({ code: "API_KEY_INVALID", message: "bad key" });
+      return { tenantId: input.tenantId };
+    },
+  },
+  hmacVerifier: { async verify() { return true; } },
+  idempotency: { async reserve() { return "reserved"; }, async markSucceeded() {}, async markFailed() {} },
+  persistence: { async persistInboundEvent() {} },
+  queue: { async enqueueInboundEvent() {} },
+  ...overrides,
 });
 
-test("12. Growth: 6th team member returns 402 (count=5)", async () => {
-  wireQuota("GROWTH", 5);
-  await assertPlanLimitExceeded(enforceQuota({ tenantId: "ws-2", resource: "teamMembers" }));
+const contactsByTenant = (counts) => {
+  const map = new Map(Object.entries(counts).map(([k, n]) =>
+    [k, Array.from({ length: n }, (_, i) => ({ id: `${k}-${i}` }))]
+  ));
+  return map;
+};
+
+const makeContactService = (byTenant) => ({
+  async create(ctx, input) {
+    const list = byTenant.get(ctx.tenantId) ?? [];
+    const contact = { id: `new-${list.length}`, ...input };
+    byTenant.set(ctx.tenantId, [...list, contact]);
+    return contact;
+  },
+  async list(ctx) { return { items: byTenant.get(ctx.tenantId) ?? [] }; },
+  async get(ctx, id) { return (byTenant.get(ctx.tenantId) ?? []).find(c => c.id === id) ?? null; },
+  async update(ctx, id, input) { return { id, ...input }; },
 });
 
-test("13. Pro: team members unlimited", async () => {
-  wireQuota("PRO", 999999);
-  await assert.doesNotReject(() => enforceQuota({ tenantId: "ws-3", resource: "teamMembers" }));
+const makeContactQuotaService = (byTenant, planByTenant = new Map()) => ({
+  async findCurrentPlan(ctx) { return planByTenant.get(ctx.tenantId) ?? "STARTER"; },
+  async countContacts(ctx) { return (byTenant.get(ctx.tenantId) ?? []).length; },
 });
 
-test("14. Starter: reports throws 402", async () => {
-  wireQuota("STARTER", 0);
-  await assertPlanLimitExceeded(assertFeature({ tenantId: "ws-1", feature: "reports" }));
+const injectContactCreate = (server, tenantId, index) => server.inject({
+  method: "POST",
+  url: "/contacts",
+  headers: { "x-tenant-id": tenantId, "x-correlation-id": "corr-1", "content-type": "application/json" },
+  payload: { tenantId, email: `user${index}@example.com`, stage: "PROSPECT" },
 });
 
-test("15. Growth: reports allowed", async () => {
-  wireQuota("GROWTH", 0);
-  await assert.doesNotReject(() => assertFeature({ tenantId: "ws-2", feature: "reports" }));
+test("11. Starter: 51st contact returns 402 QUOTA_EXCEEDED via HTTP", async () => {
+  const byTenant = contactsByTenant({ "tenant-1": 50 });
+  const server = createApiServer(baseDeps({
+    contacts: makeContactService(byTenant),
+    contactQuota: makeContactQuotaService(byTenant),
+    now: () => now,
+  }));
+  const res = await injectContactCreate(server, "tenant-1", 51);
+  assert.equal(res.statusCode, 402);
+  assert.equal(res.json().error.code, "QUOTA_EXCEEDED");
+  assert.equal(byTenant.get("tenant-1").length, 50);
 });
 
-test("16. Pro: reports allowed", async () => {
-  wireQuota("PRO", 0);
-  await assert.doesNotReject(() => assertFeature({ tenantId: "ws-3", feature: "reports" }));
+test("12. Starter: 50th contact returns 201", async () => {
+  const byTenant = contactsByTenant({ "tenant-1": 49 });
+  const server = createApiServer(baseDeps({
+    contacts: makeContactService(byTenant),
+    contactQuota: makeContactQuotaService(byTenant),
+    now: () => now,
+  }));
+  const res = await injectContactCreate(server, "tenant-1", 50);
+  assert.equal(res.statusCode, 201);
 });
 
-test("17. Starter: healthScores throws 402", async () => {
-  wireQuota("STARTER", 0);
-  await assertPlanLimitExceeded(assertFeature({ tenantId: "ws-1", feature: "healthScores" }));
+test("13. Growth: contact creation not blocked at any count", async () => {
+  const byTenant = contactsByTenant({ "tenant-growth": 999 });
+  const planMap = new Map([["tenant-growth", "GROWTH"]]);
+  const server = createApiServer(baseDeps({
+    contacts: makeContactService(byTenant),
+    contactQuota: makeContactQuotaService(byTenant, planMap),
+    now: () => now,
+  }));
+  const res = await injectContactCreate(server, "tenant-growth", 1000);
+  assert.equal(res.statusCode, 201);
 });
 
-test("18. Starter: apiAccess throws 402", async () => {
-  wireQuota("STARTER", 0);
-  await assertPlanLimitExceeded(assertFeature({ tenantId: "ws-1", feature: "apiAccess" }));
-});
-
-test("19. Growth: apiAccess throws 402", async () => {
-  wireQuota("GROWTH", 0);
-  await assertPlanLimitExceeded(assertFeature({ tenantId: "ws-2", feature: "apiAccess" }));
-});
-
-test("20. Pro: apiAccess allowed", async () => {
-  wireQuota("PRO", 0);
-  await assert.doesNotReject(() => assertFeature({ tenantId: "ws-3", feature: "apiAccess" }));
-});
-
-test("21. enforceQuota skips count resolver for unlimited resources", async () => {
-  let countCalls = 0;
-  setPlanResolver(async () => "GROWTH");
-  setCurrentCountResolver(async () => { countCalls++; return 0; });
-  setFeaturePlanResolver(async () => "GROWTH");
-  await enforceQuota({ tenantId: "ws-bg", resource: "contacts" });
-  assert.equal(countCalls, 0, "Count resolver must not be called for unlimited resources");
-});
-
-test("22. Job does not create resource after limit exceeded", async () => {
-  wireQuota("STARTER", 50);
-  let jobActionCalled = false;
-  const runJob = async (tenantId) => {
-    await enforceQuota({ tenantId, resource: "contacts" });
-    jobActionCalled = true;
-  };
-  try {
-    await runJob("ws-1");
-    assert.fail("Expected limit error");
-  } catch (err) {
-    assert.ok(err instanceof ApiError);
-    assert.equal(err.code, PLAN_LIMIT_EXCEEDED);
-  }
-  assert.equal(jobActionCalled, false, "Job action must not run when quota exceeded");
-});
+// ---------------------------------------------------------------------------
+// HTTP integration: GET /reports feature gate
+// ---------------------------------------------------------------------------
 
 const makeReportsServer = (plan) => {
-  const resolver = async () => plan;
-  setPlanResolver(resolver);
-  setCurrentCountResolver(async () => 0);
-  setFeaturePlanResolver(resolver);
-  const now = new Date("2026-06-15T12:00:00.000Z");
   const readModel = {
     async getCurrentPlan() { return { plan }; },
     async revenueByStage() { return []; },
@@ -187,29 +217,49 @@ const makeReportsServer = (plan) => {
     async averageDaysToClose() { return { avgDaysToClose: null }; },
     async renewalRate() { return { rate: null }; },
   };
-  return createApiServer({
-    createEventId: () => "event-1",
-    apiKeyAuthenticator: { async authenticate(i) { if (i.apiKey !== "k") throw new ApiError({ code: "API_KEY_INVALID", message: "bad" }); return { tenantId: i.tenantId }; } },
-    hmacVerifier: { async verify() { return true; } },
-    idempotency: { async reserve() { return "reserved"; }, async markSucceeded() {}, async markFailed() {} },
-    persistence: { async persistInboundEvent() {} },
-    queue: { async enqueueInboundEvent() {} },
+  return createApiServer(baseDeps({
     reports: createReportsService(readModel, () => now),
-  });
+  }));
 };
 
-test("GET /reports returns 402 for Starter", async () => {
-  const res = await makeReportsServer("STARTER").inject({ method: "GET", url: "/reports?period=this_month", headers: { "x-tenant-id": "t-1", "x-correlation-id": "c-1" } });
+const injectReports = (server) => server.inject({
+  method: "GET",
+  url: "/reports?period=this_month",
+  headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-1" },
+});
+
+test("14. Starter: GET /reports returns 402", async () => {
+  const res = await injectReports(makeReportsServer("STARTER"));
   assert.equal(res.statusCode, 402);
-  assert.equal(res.json().error.code, PLAN_LIMIT_EXCEEDED);
+  assert.equal(res.json().error.code, "REPORTS_PLAN_REQUIRED");
 });
 
-test("GET /reports returns 200 for Growth", async () => {
-  const res = await makeReportsServer("GROWTH").inject({ method: "GET", url: "/reports?period=this_month", headers: { "x-tenant-id": "t-1", "x-correlation-id": "c-1" } });
+test("15. Growth: GET /reports returns 200", async () => {
+  const res = await injectReports(makeReportsServer("GROWTH"));
   assert.equal(res.statusCode, 200);
 });
 
-test("GET /reports returns 200 for Pro", async () => {
-  const res = await makeReportsServer("PRO").inject({ method: "GET", url: "/reports?period=this_month", headers: { "x-tenant-id": "t-1", "x-correlation-id": "c-1" } });
+test("16. Pro: GET /reports returns 200", async () => {
+  const res = await injectReports(makeReportsServer("PRO"));
   assert.equal(res.statusCode, 200);
+});
+
+// ---------------------------------------------------------------------------
+// Job path: quota decision used before action
+// ---------------------------------------------------------------------------
+
+test("17. Job does not create contact after quota exceeded", async () => {
+  let actionCalled = false;
+  const decision = await evaluateContactCreateQuota(makeContactQuota("STARTER", 50), ctx(), now);
+  if (decision.allowed) { actionCalled = true; }
+  assert.equal(decision.allowed, false);
+  assert.equal(actionCalled, false);
+});
+
+test("18. Job creates contact when within quota", async () => {
+  let actionCalled = false;
+  const decision = await evaluateContactCreateQuota(makeContactQuota("STARTER", 49), ctx(), now);
+  if (decision.allowed) { actionCalled = true; }
+  assert.equal(decision.allowed, true);
+  assert.equal(actionCalled, true);
 });

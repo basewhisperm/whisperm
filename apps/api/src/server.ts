@@ -9,6 +9,7 @@ import { createDashboardHandler, type DashboardRouteDependencies } from "./crm/d
 import { createReportsHandler, type ReportsRouteDependencies } from "./crm/reports.js";
 import { createContactCreateHandler, createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
+import type { PipelineQuotaReader } from "./billing/quota.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
@@ -53,6 +54,7 @@ export interface StripeWebhookServerConfig extends StripeWebhookDependencies {
 export interface ApiServerDependencies extends InboundWebhookIngestionDependencies {
   readonly contacts?: ContactRouteDependencies["contacts"] | undefined;
   readonly contactQuota?: ContactRouteDependencies["quota"] | undefined;
+  readonly dealQuota?: PipelineQuotaReader | undefined;
   readonly deals?: DealRouteDependencies["deals"] | undefined;
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
@@ -290,7 +292,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const contactCreateHandler = contactDependencies === undefined ? undefined : createContactCreateHandler(contactDependencies);
   const contactImportHandler = contactDependencies === undefined ? undefined : createContactImportHandler(contactDependencies);
   const pipelineBoardHandler = dependencies.deals === undefined ? undefined : createPipelineBoardHandler({ deals: dependencies.deals });
-  const dealCreateHandler = dependencies.deals === undefined ? undefined : createDealCreateHandler({ deals: dependencies.deals });
+  const dealCreateHandler = dependencies.deals === undefined ? undefined : createDealCreateHandler({ deals: dependencies.deals, quota: dependencies.dealQuota, now: dependencies.now });
   const dealStageMoveHandler = dependencies.deals === undefined ? undefined : createDealStageMoveHandler({ deals: dependencies.deals });
   const dealDetailHandler = dependencies.deals === undefined ? undefined : createDealDetailHandler({ deals: dependencies.deals });
   const dashboardHandler = dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
@@ -339,8 +341,6 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           reply.code(503).send({ ok: false, error: { code: "CONTACTS_NOT_CONFIGURED", message: "Contacts API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
         }
-        const tenantId = firstHeaderValue(request.headers, "x-tenant-id") ?? "";
-        await enforceQuota({ tenantId, resource: "contacts" });
         await contactCreateHandler(request, reply);
         return reply.toInjectResponse();
       }
@@ -377,8 +377,6 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           reply.code(503).send({ ok: false, error: { code: "REPORTS_NOT_CONFIGURED", message: "Reports API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
         }
-        const reportsTenantId = firstHeaderValue(request.headers, "x-tenant-id") ?? "";
-        await assertFeature({ tenantId: reportsTenantId, feature: "reports" });
         request.query = parsedUrl.query;
         await reportsHandler(request, reply);
         return reply.toInjectResponse();
