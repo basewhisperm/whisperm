@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import {
   createSubscriptionChangedEvent,
   stripeSubscriptionToSnapshot,
+  type BillingSubscriptionSnapshot,
 } from "@whisperm/billing-runtime";
 
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike } from "../http/fastify.js";
@@ -11,6 +12,74 @@ import type { StripeWebhookDependencies } from "../billing/contracts.js";
 export interface StripeWebhookRequest extends FastifyRequestLike {
   rawBody?: string;
 }
+
+
+const stringOrUndefined = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim().length > 0 ? value : undefined;
+
+const invoiceMetadata = (invoice: Stripe.Invoice): Record<string, string> => {
+  const invoiceWithSubscriptionDetails = invoice as unknown as { readonly subscription_details?: { readonly metadata?: Record<string, string> } };
+  const parent = (invoice as unknown as { readonly parent?: { readonly subscription_details?: { readonly metadata?: Record<string, string> } } }).parent;
+  return {
+    ...(parent?.subscription_details?.metadata ?? {}),
+    ...(invoiceWithSubscriptionDetails.subscription_details?.metadata ?? {}),
+    ...(invoice.metadata ?? {}),
+  };
+};
+
+const invoiceSubscriptionId = (invoice: Stripe.Invoice): string | undefined => {
+  const subscription = (invoice as unknown as { readonly subscription?: unknown }).subscription;
+  const parentSubscription = (invoice as unknown as { readonly parent?: { readonly subscription_details?: { readonly subscription?: unknown } } }).parent?.subscription_details?.subscription;
+  const candidate = subscription ?? parentSubscription;
+  if (typeof candidate === "string") return stringOrUndefined(candidate);
+  if (typeof candidate === "object" && candidate !== null && "id" in candidate) return stringOrUndefined(candidate.id);
+  return undefined;
+};
+
+const invoiceCustomerId = (invoice: Stripe.Invoice): string | undefined => {
+  const customer = invoice.customer;
+  if (typeof customer === "string") return stringOrUndefined(customer);
+  if (typeof customer === "object" && customer !== null && "id" in customer) return stringOrUndefined(customer.id);
+  return undefined;
+};
+
+const invoiceToSubscriptionSnapshot = (
+  invoice: Stripe.Invoice,
+  status: BillingSubscriptionSnapshot["status"],
+): BillingSubscriptionSnapshot | undefined => {
+  const metadata = invoiceMetadata(invoice);
+  const tenantId = stringOrUndefined(metadata.tenantId);
+  const providerSubscriptionId = invoiceSubscriptionId(invoice);
+  const providerCustomerId = invoiceCustomerId(invoice);
+  if (tenantId === undefined || providerSubscriptionId === undefined || providerCustomerId === undefined) {
+    return undefined;
+  }
+
+  return {
+    tenantId,
+    provider: "STRIPE",
+    providerCustomerId,
+    providerSubscriptionId,
+    status,
+    cancelAtPeriodEnd: false,
+    metadata,
+  };
+};
+
+const subscriptionSnapshotFromEvent = (event: Stripe.Event): BillingSubscriptionSnapshot | undefined => {
+  switch (event.type) {
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
+      return stripeSubscriptionToSnapshot(event.data.object as Stripe.Subscription);
+    case "invoice.payment_failed":
+      return invoiceToSubscriptionSnapshot(event.data.object as Stripe.Invoice, "PAST_DUE");
+    case "invoice.payment_succeeded":
+      return invoiceToSubscriptionSnapshot(event.data.object as Stripe.Invoice, "ACTIVE");
+    default:
+      return undefined;
+  }
+};
 
 const handledEvents = new Set([
   "customer.subscription.created",
@@ -39,9 +108,11 @@ export const createStripeWebhookHandler = (
       return;
     }
 
-    const rawBody =
-      request.rawBody ??
-      (typeof request.body === "string" ? request.body : JSON.stringify(request.body ?? {}));
+    const rawBody = request.rawBody ?? (typeof request.body === "string" ? request.body : undefined);
+    if (rawBody === undefined) {
+      reply.code(400).send({ ok: false, error: "STRIPE_RAW_BODY_MISSING" });
+      return;
+    }
 
     let event: Stripe.Event;
 
@@ -73,29 +144,17 @@ export const createStripeWebhookHandler = (
       return;
     }
 
-    if (
-      event.type === "customer.subscription.created" ||
-      event.type === "customer.subscription.updated" ||
-      event.type === "customer.subscription.deleted"
-    ) {
-      const snapshot = stripeSubscriptionToSnapshot(
-        event.data.object as Stripe.Subscription,
-      );
-
-      await dependencies.subscriptions.upsertSubscription(snapshot);
-
-      await dependencies.outbox.publishSubscriptionChanged(
-        createSubscriptionChangedEvent(snapshot, dependencies.now?.() ?? new Date()),
-      );
-    }
-
-    if (
-      event.type === "invoice.payment_failed" ||
-      event.type === "invoice.payment_succeeded"
-    ) {
-      reply.code(200).send({ ok: true, received: true, deferred: true });
+    const snapshot = subscriptionSnapshotFromEvent(event);
+    if (snapshot === undefined) {
+      reply.code(202).send({ ok: true, received: true, unmapped: true });
       return;
     }
+
+    await dependencies.subscriptions.upsertSubscription(snapshot);
+
+    await dependencies.outbox.publishSubscriptionChanged(
+      createSubscriptionChangedEvent(snapshot, dependencies.now?.() ?? new Date(), event.id),
+    );
 
     reply.code(200).send({ ok: true, received: true });
   };

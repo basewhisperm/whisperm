@@ -7,6 +7,7 @@ import {
   type UpdateContactRequest,
 } from "@whisperm/types";
 
+import { evaluateContactCreateQuota, type BillingQuotaReader } from "../billing/quota.js";
 import { ApiError } from "../errors.js";
 import {
   firstHeaderValue,
@@ -84,6 +85,8 @@ export interface ContactRouteContext {
 
 export interface ContactRouteDependencies {
   readonly contacts: ContactServicePort;
+  readonly quota?: BillingQuotaReader | undefined;
+  readonly now?: (() => Date) | undefined;
 }
 
 interface MultipartFile {
@@ -338,6 +341,20 @@ export const createContactCreateHandler =
         code: "TENANT_CONTEXT_MISMATCH",
         message: "Contact payload tenantId must match route tenantId",
       });
+    }
+    if (dependencies.quota !== undefined) {
+      const quotaDecision = await evaluateContactCreateQuota(
+        dependencies.quota,
+        context,
+        dependencies.now?.() ?? new Date(),
+      );
+      if (!quotaDecision.allowed) {
+        throw new ApiError({
+          code: "QUOTA_EXCEEDED",
+          message: "Contact quota exceeded for the current plan",
+          details: { quotaCode: quotaDecision.code ?? "quota_exceeded", limit: quotaDecision.limit },
+        });
+      }
     }
     const contact = await dependencies.contacts.create(context, body);
     reply.code(201);
