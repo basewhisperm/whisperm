@@ -11,6 +11,7 @@ import { createContactCreateHandler, createContactImportHandler, createContactLi
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
+import { applySecurityHeaders, sanitizeRequestBody, authRateLimiter, getClientIp } from "./http/security.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
 import { createStripeWebhookHandler } from "./webhooks/stripe.js";
 import type { WorkspaceTrialStore } from "./billing/trial-init.js";
@@ -71,6 +72,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
+  readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
@@ -84,7 +86,6 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly upgradePorts?: UpgradeServicePorts | undefined;
   readonly workspaceProvisioningPort?: WorkspaceProvisioningPort | undefined;
   readonly onboardingStatePort?: OnboardingStatePort | undefined;
-  readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
 }
 
 export interface InjectOptions {
@@ -398,6 +399,8 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
       const contentType = firstHeaderValue(request.headers, "content-type")?.toLowerCase() ?? "";
       request.body = contentType.startsWith("multipart/form-data") ? undefined : parseJsonPayload(rawBody);
       correlationIdMiddleware()(request, reply);
+      applySecurityHeaders(reply);
+      sanitizeRequestBody(request);
       requestLoggingMiddleware(request);
 
       if (options.method === "GET" && parsedUrl.pathname === "/healthz") {
@@ -520,6 +523,19 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         tenantIsolationValidation(request);
         await ingestionHandler(request, reply);
         return reply.toInjectResponse();
+      }
+
+      if (options.method === "POST" && (
+        parsedUrl.pathname === "/workspaces" ||
+        parsedUrl.pathname === "/auth/login" ||
+        parsedUrl.pathname === "/auth/signup" ||
+        parsedUrl.pathname === "/auth/reset-password" ||
+        parsedUrl.pathname === "/auth/accept-invite"
+      )) {
+        if (!authRateLimiter.check(getClientIp(request))) {
+          reply.code(429).send({ ok: false, error: { code: "RATE_LIMITED", message: "Too many requests. Please try again later." }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
       }
 
       if (options.method === "POST" && parsedUrl.pathname === "/workspaces") {

@@ -16,7 +16,8 @@ export type ApiErrorCode =
   | "READY_CHECK_FAILED"
   | "INTERNAL_SERVER_ERROR"
   | "REPORTS_PLAN_REQUIRED"
-  | "TRIAL_EXPIRED";
+  | "TRIAL_EXPIRED"
+  | "RATE_LIMITED";
 
 const statusByCode: Record<ApiErrorCode, number> = {
   API_KEY_MISSING: 401,
@@ -30,6 +31,7 @@ const statusByCode: Record<ApiErrorCode, number> = {
   PLAN_LIMIT_EXCEEDED: 402,
   AUTH_INVALID_TOKEN: 401,
   READY_CHECK_FAILED: 503,
+  RATE_LIMITED: 429,
   INTERNAL_SERVER_ERROR: 500,
   REPORTS_PLAN_REQUIRED: 402,
   TRIAL_EXPIRED: 402,

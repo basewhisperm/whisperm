@@ -8,6 +8,8 @@
   --color-pulse: #7F77DD;
   --color-mist: #EEEDFE;
   --color-growth: #1D9E75;
+  --color-health-amber: #B45309;
+  --color-health-red: #B42318;
   --color-ivory: #F1EFE8;
 
   --color-background: var(--color-ivory);
@@ -19,8 +21,9 @@
   --color-primary-foreground: white;
   --color-secondary: var(--color-mist);
   --color-secondary-foreground: var(--color-midnight);
+  --color-primary-hover: color-mix(in srgb, var(--color-primary) 88%, var(--color-midnight));
   --color-accent: var(--color-pulse);
-  --color-accent-foreground: white;
+  --color-accent-foreground: var(--color-midnight);
   --color-ring: var(--color-pulse);
 
   --border-width-hairline: 0.5px;
@@ -33,6 +36,10 @@
 html,
 body {
   height: 100%;
+}
+
+html {
+  font-size: 16px;
 }
 
 body {
