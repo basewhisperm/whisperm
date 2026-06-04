@@ -105,7 +105,7 @@ export type { TrialReminderMarker, TrialReminderJobPayload, NotificationServiceP
 
 export { createWorkspace, generateWorkspaceSlug, currencyForCountry, DEFAULT_PIPELINE_STAGES } from "./billing/workspace-provisioning.js";
 export type { WorkspaceProvisioningPort, CreateWorkspaceInput, CreateWorkspaceResult, CreatedTenant, CreatedPipeline } from "./billing/workspace-provisioning.js";
-export { computeOnboardingChecklist } from "./billing/onboarding.js";
+export { computeOnboardingChecklist, OnboardingAccessError } from "./billing/onboarding.js";
 export type { OnboardingStatePort, OnboardingChecklist, OnboardingStep, OnboardingStepKey } from "./billing/onboarding.js";
 
 export { sanitizeString, sanitizeRequestBody, createRateLimiter, authRateLimiter, applySecurityHeaders, getClientIp } from "./http/security.js";

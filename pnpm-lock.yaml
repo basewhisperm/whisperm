@@ -41,15 +41,15 @@ importers:
 
   apps/web:
     dependencies:
-      '@whisperm/types':
-        specifier: workspace:*
-        version: link:../../packages/types
       '@radix-ui/react-slot':
         specifier: ^1.2.3
         version: 1.2.4(@types/react@18.3.30)(react@18.3.1)
       '@tabler/icons-react':
         specifier: ^3.35.0
         version: 3.44.0(react@18.3.1)
+      '@whisperm/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1

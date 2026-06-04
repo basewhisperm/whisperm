@@ -400,7 +400,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
       request.body = contentType.startsWith("multipart/form-data") ? undefined : parseJsonPayload(rawBody);
       correlationIdMiddleware()(request, reply);
       applySecurityHeaders(reply);
-      sanitizeRequestBody(request);
+      sanitizeRequestBody(request, options.method);
       requestLoggingMiddleware(request);
 
       if (options.method === "GET" && parsedUrl.pathname === "/healthz") {
