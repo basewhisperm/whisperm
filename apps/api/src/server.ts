@@ -72,6 +72,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
+  readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
