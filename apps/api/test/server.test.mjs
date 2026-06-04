@@ -609,3 +609,156 @@ test("growth and pro workspaces are not blocked by starter contact limit", async
     assert.equal(contactsByTenant.get(`tenant-${plan}`).length, 51);
   }
 });
+
+test("contact list route defaults pagination to limit 25 and rejects over max", async () => {
+  const calls = [];
+  const server = createApiServer(createDependencies({
+    contacts: {
+      async create() { assert.fail("unexpected create"); },
+      async update() { assert.fail("unexpected update"); },
+      async get() { assert.fail("unexpected get"); },
+      async list(context, page) {
+        calls.push({ context, page });
+        const limit = page?.limit ?? 25;
+        if (limit > 100) {
+          throw new ApiError({ code: "REQUEST_BODY_INVALID", message: "limit must be less than or equal to 100", statusCode: 400 });
+        }
+        return { items: Array.from({ length: limit }, (_, index) => ({ id: `contact-${index}`, tenantId: context.tenantId, email: `contact-${index}@example.test`, createdAt: "2026-01-01T00:00:00.000Z" })) };
+      },
+      async importCsvRows() { assert.fail("unexpected import"); }
+    }
+  }));
+
+  const defaultResponse = await server.inject({ method: "GET", url: "/contacts", headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-contacts" } });
+  assert.equal(defaultResponse.statusCode, 200);
+  assert.equal(defaultResponse.json().data.items.length, 25);
+  assert.deepEqual(calls[0].context.tenantId, "tenant-a");
+  assert.equal(calls[0].page, undefined);
+
+  const maxResponse = await server.inject({ method: "GET", url: "/contacts?limit=100", headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-contacts" } });
+  assert.equal(maxResponse.statusCode, 200);
+  assert.equal(maxResponse.json().data.items.length, 100);
+  assert.deepEqual(calls[1].page, { limit: 100 });
+
+  const overResponse = await server.inject({ method: "GET", url: "/contacts?limit=101", headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-contacts" } });
+  assert.equal(overResponse.statusCode, 400);
+  assert.equal(overResponse.json().error.code, "REQUEST_BODY_INVALID");
+});
+
+test("activity list route accepts limit 100 and rejects limit above 100", async () => {
+  const calls = [];
+  const server = createApiServer(createDependencies({
+    activities: {
+      async create() { assert.fail("unexpected create"); },
+      async list(context, filters, page) { calls.push({ context, filters, page }); return { items: [] }; }
+    }
+  }));
+
+  const maxResponse = await server.inject({ method: "GET", url: "/activities?limit=100", headers: { "x-tenant-id": "tenant-a", "x-user-id": "user-a", "x-correlation-id": "corr-activities" } });
+  assert.equal(maxResponse.statusCode, 200);
+  assert.deepEqual(calls[0].page, { limit: 100 });
+  assert.equal(calls[0].context.tenantId, "tenant-a");
+
+  const overResponse = await server.inject({ method: "GET", url: "/activities?limit=101", headers: { "x-tenant-id": "tenant-a", "x-user-id": "user-a", "x-correlation-id": "corr-activities" } });
+  assert.equal(overResponse.statusCode, 400);
+  assert.equal(overResponse.json().error.code, "REQUEST_BODY_INVALID");
+});
+
+test("API telemetry creates safe route spans without sensitive body data", async () => {
+  const spans = [];
+  const telemetry = {
+    startSpan(name, attributes) {
+      const span = { name, attributes: { ...attributes }, ended: undefined, setAttribute(key, value) { this.attributes[key] = value; }, end(status) { this.ended = status; } };
+      spans.push(span);
+      return span;
+    }
+  };
+  const server = createApiServer(createDependencies({
+    telemetry,
+    dashboard: { async get(context) { return { metrics: { activeClients: 0, pipelineValue: 0, wonsThisMonth: 0, avgResponseTimeDays: null }, healthPanel: [], activityFeed: [], followUpAlerts: [], tenantId: context.tenantId }; } }
+  }));
+
+  const response = await server.inject({
+    method: "GET",
+    url: "/dashboard",
+    headers: { "x-tenant-id": "tenant-a", "x-user-id": "user-a", authorization: "Bearer secret", "x-correlation-id": "corr-dashboard" },
+    payload: { email: "private@example.test", note: "secret note" }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(spans.length, 1);
+  assert.equal(spans[0].name, "api.request");
+  assert.equal(spans[0].attributes["http.method"], "GET");
+  assert.equal(spans[0].attributes["http.route"], "/dashboard");
+  assert.equal(spans[0].attributes["http.status_code"], 200);
+  assert.equal(spans[0].attributes["workspace.present"], true);
+  assert.equal(spans[0].ended, "OK");
+  const serializedAttributes = JSON.stringify(spans[0].attributes);
+  assert.equal(serializedAttributes.includes("private@example.test"), false);
+  assert.equal(serializedAttributes.includes("secret note"), false);
+  assert.equal(serializedAttributes.includes("Bearer secret"), false);
+});
+
+test("dashboard route handles 200 contacts under local p95 target and remains workspace scoped", async () => {
+  const durations = [];
+  const calls = [];
+  const dashboard = {
+    async get(context) {
+      calls.push(context);
+      const contacts = Array.from({ length: 200 }, (_, index) => ({ contactId: `contact-${index}`, name: `Contact ${index}`, lastTouchAt: "2026-01-01T00:00:00.000Z", daysSinceLastTouch: 1, status: "HEALTHY", fillPct: 100 }));
+      return { metrics: { activeClients: 200, pipelineValue: 5000, wonsThisMonth: 1000, avgResponseTimeDays: null }, healthPanel: contacts, activityFeed: [], followUpAlerts: [] };
+    }
+  };
+  const server = createApiServer(createDependencies({ dashboard }));
+
+  for (let index = 0; index < 20; index += 1) {
+    const started = performance.now();
+    const response = await server.inject({ method: "GET", url: "/dashboard", headers: { "x-tenant-id": "tenant-perf", "x-user-id": "user-a", "x-correlation-id": `corr-dashboard-${index}` } });
+    durations.push(performance.now() - started);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().data.healthPanel.length, 200);
+  }
+  const p95 = durations.toSorted((left, right) => left - right)[Math.ceil(durations.length * 0.95) - 1];
+  assert.ok(p95 < 300, `expected dashboard p95 < 300ms, got ${p95}ms`);
+  assert.ok(calls.every((context) => context.tenantId === "tenant-perf"));
+});
+
+test("pipeline board route handles 50 deals under local target and remains workspace scoped", async () => {
+  const calls = [];
+  const deals = {
+    async board(context, pipelineId, pagination) {
+      calls.push({ context, pipelineId, pagination });
+      return { pipeline: { id: pipelineId, name: "Sales" }, columns: [{ id: "stage-a", name: "Prospect", position: 1, deals: { items: Array.from({ length: 50 }, (_, index) => ({ id: `deal-${index}`, title: `Deal ${index}`, dealValue: "100", currency: "USD", owner: null, probability: 50, stageId: "stage-a", updatedAt: "2026-05-29T00:00:00.000Z" })), limit: 50 } }] };
+    },
+    async createCard() { assert.fail("unexpected create"); },
+    async moveStage() { assert.fail("unexpected move"); },
+    async detail() { assert.fail("unexpected detail"); }
+  };
+  const server = createApiServer(createDependencies({ deals }));
+
+  const started = performance.now();
+  const response = await server.inject({ method: "GET", url: "/pipelines/pipeline-a/board?limit=50", headers: { "x-tenant-id": "tenant-board", "x-correlation-id": "corr-board-perf" } });
+  const duration = performance.now() - started;
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().data.columns[0].deals.items.length, 50);
+  assert.ok(duration < 500, `expected board response < 500ms, got ${duration}ms`);
+  assert.equal(calls[0].context.tenantId, "tenant-board");
+});
+
+test("pipeline board route rejects limit above 100 before service call", async () => {
+  let called = false;
+  const server = createApiServer(createDependencies({
+    deals: {
+      async board() { called = true; return { pipeline: { id: "pipeline-a", name: "Sales" }, columns: [] }; },
+      async createCard() { assert.fail("unexpected create"); },
+      async moveStage() { assert.fail("unexpected move"); },
+      async detail() { assert.fail("unexpected detail"); }
+    }
+  }));
+
+  const response = await server.inject({ method: "GET", url: "/pipelines/pipeline-a/board?limit=101", headers: { "x-tenant-id": "tenant-a", "x-correlation-id": "corr-board-limit" } });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error.code, "REQUEST_BODY_INVALID");
+  assert.equal(called, false);
+});

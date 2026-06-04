@@ -938,7 +938,7 @@ export class BillingService {
 }
 
 
-const boardPageInputSchema = z.object({ limit: z.number().int().min(1).max(25).optional(), cursors: z.record(idSchema, idSchema.optional()).optional() }).strict();
+const boardPageInputSchema = z.object({ limit: z.number().int().min(1).max(100).optional(), cursors: z.record(idSchema, idSchema.optional()).optional() }).strict();
 const createDealInputSchema = z.object({ tenantId: idSchema, pipelineStageId: idSchema, contactId: idSchema.nullable().optional(), ownerId: idSchema.nullable().optional(), externalId: idSchema.nullable().optional(), title: idSchema, value: z.union([z.number(), z.string()]).nullable().optional(), currency: z.string().min(3).max(3).optional(), probability: z.number().int().min(0).max(100).nullable().optional(), closedAt: isoDateSchema.nullable().optional(), metadata: metadataSchema.nullable().optional() }).strict();
 const moveDealStageInputSchema = z.object({ stageId: idSchema, expectedUpdatedAt: isoDateSchema }).strict();
 

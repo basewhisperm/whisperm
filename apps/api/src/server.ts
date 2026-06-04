@@ -7,7 +7,7 @@ import type { StripeWebhookDependencies } from "./billing/contracts.js";
 import { createActivityCreateHandler, createActivityListHandler, createContactActivitiesHandler, createDealActivitiesHandler, type ActivityRouteDependencies } from "./crm/activities.js";
 import { createDashboardHandler, type DashboardRouteDependencies } from "./crm/dashboard.js";
 import { createReportsHandler, type ReportsRouteDependencies } from "./crm/reports.js";
-import { createContactCreateHandler, createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
+import { createContactCreateHandler, createContactImportHandler, createContactListHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
@@ -75,6 +75,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
   readonly logger?: RequestLogger;
+  readonly telemetry?: ApiTelemetry | undefined;
   readonly stripeWebhook?: StripeWebhookServerConfig;
   readonly paystackWebhook?: PaystackWebhookServerConfig;
   readonly trialStore?: WorkspaceTrialStore | undefined;
@@ -106,6 +107,15 @@ export interface ApiServer {
   close(): Promise<void>;
 }
 
+export interface ApiTelemetrySpan {
+  setAttribute?(key: string, value: string | number | boolean): void;
+  end(status: "OK" | "ERROR"): void;
+}
+
+export interface ApiTelemetry {
+  startSpan?(name: string, attributes: Readonly<Record<string, string | number | boolean>>): ApiTelemetrySpan;
+}
+
 interface MutableRequest extends FastifyRequestLike {
   method: string;
   url: string;
@@ -132,6 +142,10 @@ class MemoryReply implements FastifyReplyLike {
 
   send(payload: unknown): void {
     this.responsePayload = payload;
+  }
+
+  getStatusCode(): number {
+    return this.statusCode;
   }
 
   toInjectResponse(): InjectResponse {
@@ -165,6 +179,29 @@ const createRequestLogger = (logger: RequestLogger | undefined): RequestLogger =
 
 const requestLoggingMiddleware = (request: MutableRequest): void => {
   request.log?.info?.({ correlationId: request.correlationId, method: request.method, url: request.url }, "request received");
+};
+
+const routeTemplate = (method: string, pathname: string): string => {
+  if (method === "GET" && pathname === "/healthz") return "/healthz";
+  if (method === "GET" && pathname === "/readyz") return "/readyz";
+  if (method === "POST" && pathname === "/contacts/import") return "/contacts/import";
+  if (method === "POST" && pathname === "/webhooks/stripe") return "/webhooks/stripe";
+  if (method === "POST" && pathname === "/webhooks/paystack") return "/webhooks/paystack";
+  if (method === "GET" && pathname === "/dashboard") return "/dashboard";
+  if (method === "GET" && pathname === "/reports") return "/reports";
+  if (method === "POST" && pathname === "/workspaces") return "/workspaces";
+  if (method === "POST" && pathname === "/billing/upgrade") return "/billing/upgrade";
+  if (method === "GET" && /^\/workspaces\/[^/?#]+\/onboarding\/?$/u.test(pathname)) return "/workspaces/:id/onboarding";
+  const crmRoute = parseCrmRoute(method, pathname);
+  if (crmRoute?.name === "pipelineBoard") return "/pipelines/:id/board";
+  if (crmRoute?.name === "dealMoveStage") return "/deals/:id/stage";
+  if (crmRoute?.name === "dealDetail") return "/deals/:id";
+  if (crmRoute?.name === "contactActivities") return "/contacts/:id/activities";
+  if (crmRoute?.name === "dealActivities") return "/deals/:id/activities";
+  if (crmRoute?.name === "dealCreate") return "/deals";
+  if (crmRoute?.name === "activityCreate" || crmRoute?.name === "activityList") return "/activities";
+  if (crmRoute?.name === "contactCreate" || crmRoute?.name === "contactList") return "/contacts";
+  return parseSdkEventsRoute(method, pathname) === null ? "unknown" : "/sdk-events/:tenantId";
 };
 
 const requireParam = (request: MutableRequest, name: string): string => {
@@ -252,10 +289,11 @@ const parseUrl = (url: string): ParsedUrl => {
   return { pathname: parsed.pathname, query: Object.fromEntries(parsed.searchParams.entries()) };
 };
 
-const parseCrmRoute = (method: string, pathname: string): { readonly name: "pipelineBoard" | "dealCreate" | "dealMoveStage" | "dealDetail" | "activityCreate" | "activityList" | "contactCreate" | "contactActivities" | "dealActivities"; readonly params: Readonly<Record<string, string>> } | null => {
+const parseCrmRoute = (method: string, pathname: string): { readonly name: "pipelineBoard" | "dealCreate" | "dealMoveStage" | "dealDetail" | "activityCreate" | "activityList" | "contactCreate" | "contactList" | "contactActivities" | "dealActivities"; readonly params: Readonly<Record<string, string>> } | null => {
   if (method === "POST" && pathname === "/deals") return { name: "dealCreate", params: {} };
   if (method === "POST" && pathname === "/activities") return { name: "activityCreate", params: {} };
   if (method === "POST" && pathname === "/contacts") return { name: "contactCreate", params: {} };
+  if (method === "GET" && pathname === "/contacts") return { name: "contactList", params: {} };
   if (method === "GET" && pathname === "/activities") return { name: "activityList", params: {} };
   const pipelineBoard = /^\/pipelines\/([^/?#]+)\/board\/?$/u.exec(pathname);
   if (method === "GET" && pipelineBoard !== null) return { name: "pipelineBoard", params: { pipelineId: decodeURIComponent(pipelineBoard[1] ?? "") } };
@@ -321,6 +359,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const contactDependencies = dependencies.contacts === undefined ? undefined : { contacts: dependencies.contacts, quota: dependencies.contactQuota, now: dependencies.now };
   const contactCreateHandler = contactDependencies === undefined ? undefined : createContactCreateHandler(contactDependencies);
   const contactImportHandler = contactDependencies === undefined ? undefined : createContactImportHandler(contactDependencies);
+  const contactListHandler = contactDependencies === undefined ? undefined : createContactListHandler(contactDependencies);
   const pipelineBoardHandler = dependencies.deals === undefined ? undefined : createPipelineBoardHandler({ deals: dependencies.deals });
   const dealCreateHandler = dependencies.deals === undefined ? undefined : createDealCreateHandler({ deals: dependencies.deals });
   const dealStageMoveHandler = dependencies.deals === undefined ? undefined : createDealStageMoveHandler({ deals: dependencies.deals });
@@ -346,6 +385,16 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
 
     try {
       const parsedUrl = parseUrl(options.url);
+      const route = routeTemplate(options.method, parsedUrl.pathname);
+      const startedAt = Date.now();
+      const tenantPresent = (firstHeaderValue(request.headers, tenantHeaderName)?.trim().length ?? 0) > 0;
+      const span = dependencies.telemetry?.startSpan?.("api.request", {
+        "http.method": options.method,
+        "http.route": route,
+        "workspace.present": tenantPresent,
+        "tenant.present": tenantPresent,
+      });
+      try {
       const contentType = firstHeaderValue(request.headers, "content-type")?.toLowerCase() ?? "";
       request.body = contentType.startsWith("multipart/form-data") ? undefined : parseJsonPayload(rawBody);
       correlationIdMiddleware()(request, reply);
@@ -434,7 +483,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
             const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
       if (crmRoute !== null) {
         const isActivityRoute = crmRoute.name === "activityCreate" || crmRoute.name === "activityList" || crmRoute.name === "contactActivities" || crmRoute.name === "dealActivities";
-        const isContactRoute = crmRoute.name === "contactCreate";
+        const isContactRoute = crmRoute.name === "contactCreate" || crmRoute.name === "contactList";
         if (isContactRoute && dependencies.contacts === undefined) {
           reply.code(503).send({ ok: false, error: { code: "CONTACTS_NOT_CONFIGURED", message: "Contacts API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
@@ -455,6 +504,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         if (crmRoute.name === "dealDetail" && dealDetailHandler !== undefined) await dealDetailHandler(request, reply);
         if (crmRoute.name === "activityCreate" && activityCreateHandler !== undefined) await activityCreateHandler(request, reply);
         if (crmRoute.name === "contactCreate" && contactCreateHandler !== undefined) await contactCreateHandler(request, reply);
+        if (crmRoute.name === "contactList" && contactListHandler !== undefined) await contactListHandler(request, reply);
         if (crmRoute.name === "activityList" && activityListHandler !== undefined) await activityListHandler(request, reply);
         if (crmRoute.name === "contactActivities" && contactActivitiesHandler !== undefined) await contactActivitiesHandler(request, reply);
         if (crmRoute.name === "dealActivities" && dealActivitiesHandler !== undefined) await dealActivitiesHandler(request, reply);
@@ -511,6 +561,14 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
 
             reply.code(404).send({ ok: false, error: { code: "NOT_FOUND", message: "Route not found" }, meta: { correlationId: request.correlationId } });
       return reply.toInjectResponse();
+      } catch (error) {
+        return sendMappedError(reply, request.correlationId, error, request.log);
+      } finally {
+        const durationMs = Date.now() - startedAt;
+        span?.setAttribute?.("http.status_code", reply.getStatusCode());
+        span?.setAttribute?.("duration_ms", durationMs);
+        span?.end(reply.getStatusCode() >= 500 ? "ERROR" : "OK");
+      }
     } catch (error) {
       return sendMappedError(reply, request.correlationId, error, request.log);
     }

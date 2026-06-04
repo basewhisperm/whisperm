@@ -74,9 +74,18 @@ const sendSuccess = (reply: FastifyReplyLike, data: unknown, correlationId: stri
   reply.send({ ok: true, data, meta: { correlationId: correlationId ?? "unknown" } });
 };
 
+const parseBoardLimit = (value: string | undefined): number | undefined => {
+  if (value === undefined) return undefined;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new ApiError({ code: "REQUEST_BODY_INVALID", message: "limit must be an integer between 1 and 100", statusCode: 400 });
+  }
+  return limit;
+};
+
 const parseBoardPage = (request: DealFastifyRequest): DealPageRequest => {
   const query = request.query ?? {};
-  const limit = typeof query.limit === "string" ? Number(query.limit) : undefined;
+  const limit = parseBoardLimit(query.limit);
   const cursors = Object.fromEntries(Object.entries(query)
     .filter(([key, value]) => key.startsWith("cursor[") && key.endsWith("]") && value !== undefined && value.length > 0)
     .map(([key, value]) => [key.slice("cursor[".length, -1), value] as const));
