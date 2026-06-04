@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@whisperm/billing-runtime": "workspace:^",
+    "@whisperm/notification-runtime": "workspace:^",
     "@whisperm/types": "workspace:*",
     "fastify-raw-body": "^5.0.0",
+    "paystack-node": "^0.3.0",
     "stripe": "^22.2.0"
   }
 }

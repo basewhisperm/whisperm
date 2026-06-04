@@ -13,7 +13,8 @@ export type ApiErrorCode =
   | "QUOTA_EXCEEDED"
   | "READY_CHECK_FAILED"
   | "INTERNAL_SERVER_ERROR"
-  | "REPORTS_PLAN_REQUIRED";
+  | "REPORTS_PLAN_REQUIRED"
+  | "TRIAL_EXPIRED";
 
 const statusByCode: Record<ApiErrorCode, number> = {
   API_KEY_MISSING: 401,
@@ -27,6 +28,7 @@ const statusByCode: Record<ApiErrorCode, number> = {
   READY_CHECK_FAILED: 503,
   INTERNAL_SERVER_ERROR: 500,
   REPORTS_PLAN_REQUIRED: 402,
+  TRIAL_EXPIRED: 402,
 };
 
 export interface ApiErrorOptions {

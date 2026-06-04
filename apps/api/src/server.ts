@@ -13,6 +13,11 @@ import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDepen
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
 import { createStripeWebhookHandler } from "./webhooks/stripe.js";
+import { initWorkspaceTrial, type WorkspaceTrialStore, type InitTrialInput } from "./billing/trial-init.js";
+import { initiateUpgrade, type UpgradeServicePorts, type UpgradeWorkspaceContext } from "./billing/upgrade.js";
+import { createRequireActiveSubscription, type RequireActiveSubscription, TRIAL_EXPIRED } from "./billing/require-active-subscription.js";
+import type { TrialGateSubscriptionReader } from "./billing/trial.js";
+import type { NotificationSchedulePort } from "@whisperm/notification-runtime";
 import { createPaystackWebhookHandler } from "./webhooks/paystack.js";
 import type { PaystackWebhookDependencies } from "./billing/contracts.js";
 
@@ -69,6 +74,10 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly logger?: RequestLogger;
   readonly stripeWebhook?: StripeWebhookServerConfig;
   readonly paystackWebhook?: PaystackWebhookServerConfig;
+  readonly trialStore?: WorkspaceTrialStore | undefined;
+  readonly trialScheduler?: NotificationSchedulePort | undefined;
+  readonly subscriptionReader?: TrialGateSubscriptionReader | undefined;
+  readonly upgradePorts?: UpgradeServicePorts | undefined;
 }
 
 export interface InjectOptions {
@@ -298,6 +307,10 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
     : createPaystackWebhookHandler(dependencies.paystackWebhook, {
       paystackSecretKey: dependencies.paystackWebhook.paystackSecretKey,
     });
+  const requireActiveSubscription: RequireActiveSubscription | undefined =
+    dependencies.subscriptionReader === undefined
+      ? undefined
+      : createRequireActiveSubscription(dependencies.subscriptionReader, () => dependencies.now?.() ?? new Date());
   const contactDependencies = dependencies.contacts === undefined ? undefined : { contacts: dependencies.contacts, quota: dependencies.contactQuota, now: dependencies.now };
   const contactCreateHandler = contactDependencies === undefined ? undefined : createContactCreateHandler(contactDependencies);
   const contactImportHandler = contactDependencies === undefined ? undefined : createContactImportHandler(contactDependencies);
@@ -392,7 +405,14 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         return reply.toInjectResponse();
       }
 
-      const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
+      if (requireActiveSubscription !== undefined) {
+        const tenantId = firstHeaderValue(request.headers, "x-tenant-id") ?? "";
+        if (tenantId.length > 0) {
+          await requireActiveSubscription(tenantId);
+        }
+      }
+
+            const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
       if (crmRoute !== null) {
         const isActivityRoute = crmRoute.name === "activityCreate" || crmRoute.name === "activityList" || crmRoute.name === "contactActivities" || crmRoute.name === "dealActivities";
         const isContactRoute = crmRoute.name === "contactCreate";
@@ -433,7 +453,29 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         return reply.toInjectResponse();
       }
 
-      reply.code(404).send({ ok: false, error: { code: "NOT_FOUND", message: "Route not found" }, meta: { correlationId: request.correlationId } });
+      if (options.method === "POST" && parsedUrl.pathname === "/workspaces") {
+        if (dependencies.trialStore === undefined || dependencies.trialScheduler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "WORKSPACE_CREATION_NOT_CONFIGURED", message: "Workspace creation is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const body = request.body as InitTrialInput;
+        const result = await initWorkspaceTrial(dependencies.trialStore, dependencies.trialScheduler, body, () => dependencies.now?.() ?? new Date());
+        reply.code(201).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+
+      if (options.method === "POST" && parsedUrl.pathname === "/billing/upgrade") {
+        if (dependencies.upgradePorts === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "UPGRADE_NOT_CONFIGURED", message: "Upgrade flow is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const body = request.body as { context: UpgradeWorkspaceContext; plan: string };
+        const result = await initiateUpgrade(dependencies.upgradePorts, body.context, body.plan);
+        reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+
+            reply.code(404).send({ ok: false, error: { code: "NOT_FOUND", message: "Route not found" }, meta: { correlationId: request.correlationId } });
       return reply.toInjectResponse();
     } catch (error) {
       return sendMappedError(reply, request.correlationId, error, request.log);

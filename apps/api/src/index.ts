@@ -89,3 +89,12 @@ export {
   PAYSTACK_PRICING_GHS,
 } from "@whisperm/billing-runtime";
 export type { BillingProviderName, PaystackEventType, PaystackWebhookEvent } from "@whisperm/billing-runtime";
+
+export { initWorkspaceTrial } from "./billing/trial-init.js";
+export type { WorkspaceTrialStore, TrialSubscription, InitTrialInput, InitTrialResult } from "./billing/trial-init.js";
+export { initiateUpgrade } from "./billing/upgrade.js";
+export type { UpgradeServicePorts, UpgradeWorkspaceContext, UpgradeResult, StripeUpgradePort, PaystackUpgradePort } from "./billing/upgrade.js";
+export { createRequireActiveSubscription, TRIAL_EXPIRED } from "./billing/require-active-subscription.js";
+export type { RequireActiveSubscription } from "./billing/require-active-subscription.js";
+export { buildTrialReminderJobs, scheduleTrialReminderJobs, executeTrialReminderJob } from "@whisperm/notification-runtime";
+export type { TrialReminderMarker, TrialReminderJobPayload, NotificationServicePort, NotificationSchedulePort, TenantCreatedNotificationPayload } from "@whisperm/notification-runtime";
