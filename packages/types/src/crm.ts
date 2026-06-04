@@ -51,6 +51,35 @@ export const updateContactRequestSchema = z.object({
 }).strict();
 export type UpdateContactRequest = z.output<typeof updateContactRequestSchema>;
 
+
+export const activityTypeValues = ["CALL", "EMAIL", "MEETING", "TASK", "NOTE"] as const;
+export const activityTypeSchema = z.enum(activityTypeValues);
+export type ActivityType = z.output<typeof activityTypeSchema>;
+
+export const createActivityRequestSchema = z.object({
+  contactId: idSchema.optional(),
+  dealId: idSchema.optional(),
+  type: activityTypeSchema,
+  note: z.string().min(1).max(10000),
+}).strict().refine((activity) => activity.contactId !== undefined || activity.dealId !== undefined, {
+  message: "Activity create requires contactId or dealId",
+  path: ["contactId"],
+});
+export type CreateActivityRequest = z.output<typeof createActivityRequestSchema>;
+
+export const listActivitiesQuerySchema = z.object({
+  contactId: idSchema.optional(),
+  dealId: idSchema.optional(),
+  type: activityTypeSchema.optional(),
+  createdById: idSchema.optional(),
+  createdBy: idSchema.optional(),
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+  limit: z.preprocess((value) => typeof value === "string" ? Number(value) : value, z.number().int().min(1).max(100).optional()),
+  cursor: idSchema.optional(),
+}).strict().transform(({ createdBy, limit, cursor, ...filters }) => ({ ...filters, ...(createdBy === undefined ? {} : { createdById: createdBy }) }));
+export type ListActivitiesQuery = z.output<typeof listActivitiesQuerySchema>;
+
 export const dealOwnerSchema = z.object({
   id: idSchema,
   displayName: idSchema.nullable().optional(),

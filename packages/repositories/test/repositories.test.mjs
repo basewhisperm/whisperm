@@ -385,3 +385,49 @@ test("stage move uses tenant scoped optimistic lock and rejects stale updates", 
   );
   assert.deepEqual(prisma.deal.calls.find((call) => call.method === "updateMany").args.where, { tenantId: "tenant-a", id: "deal-1", updatedAt: new Date(now) });
 });
+
+test("activity create is tenant-scoped transactional and writes contact touch audit and outbox", async () => {
+  const prisma = createClient();
+  const txClient = createClient();
+  let transactionUsed = false;
+  prisma.$transaction = async (work) => {
+    transactionUsed = true;
+    return work(txClient);
+  };
+  txClient.deal.findFirst = async (args) => {
+    txClient.deal.calls.push({ name: "deal", method: "findFirst", args });
+    return { id: "deal-1", tenantId: "tenant-a", title: "Deal", pipelineId: "pipeline-a", pipelineStageId: "stage-a", currency: "USD", createdAt: now, updatedAt: now };
+  };
+  const { activities } = createPrismaRepositories(prisma);
+
+  const activity = await activities.create(
+    { tenantId: "tenant-a", actorId: "user-1", correlation: { correlationId: "corr-1", requestId: "req-1" } },
+    { tenantId: "tenant-a", contactId: "contact-1", dealId: "deal-1", createdById: "body-user", type: "NOTE", note: "Followed up" }
+  );
+
+  assert.equal(transactionUsed, true);
+  assert.equal(activity.createdById, "user-1");
+  assert.deepEqual(txClient.contact.calls[0].args.where, { tenantId: "tenant-a", id: "contact-1" });
+  assert.equal(txClient.contact.calls[0].args.data.lastTouchAt instanceof Date, true);
+  assert.equal(txClient.auditLog.calls[0].args.data.action, "ACTIVITY_CREATED");
+  assert.equal(txClient.auditLog.calls[0].args.data.actorId, "user-1");
+  assert.equal(txClient.outboxEvent.calls[0].args.data.eventType, "activity.created");
+  assert.equal(txClient.outboxEvent.calls[0].args.data.payload.activityId, activity.id);
+});
+
+test("activity list applies tenant scope and supported filters newest first", async () => {
+  const prisma = createClient();
+  const { activities } = createPrismaRepositories(prisma);
+
+  await activities.list({ tenantId: "tenant-a" }, { contactId: "contact-1", dealId: "deal-1", type: "EMAIL", createdById: "user-1", from: now, to: now }, { limit: 25 });
+
+  assert.deepEqual(prisma.activity.calls[0].args.where, {
+    tenantId: "tenant-a",
+    contactId: "contact-1",
+    dealId: "deal-1",
+    type: "EMAIL",
+    createdById: "user-1",
+    createdAt: { gte: new Date(now), lte: new Date(now) }
+  });
+  assert.deepEqual(prisma.activity.calls[0].args.orderBy, { createdAt: "desc" });
+});

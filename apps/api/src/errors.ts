@@ -65,6 +65,10 @@ export interface ErrorResponse {
 }
 
 export const mapErrorToHttp = (error: unknown): { readonly statusCode: number; readonly payload: Omit<ErrorResponse, "meta"> } => {
+  if (typeof error === "object" && error !== null && "name" in error && error.name === "ZodError") {
+    return { statusCode: 400, payload: { ok: false, error: { code: "REQUEST_BODY_INVALID", message: "Request payload is invalid" } } };
+  }
+
   if (error instanceof ApiError || error instanceof AuthError || error instanceof EventIngestionError || error instanceof OAuthError) {
     return {
       statusCode: error.statusCode,

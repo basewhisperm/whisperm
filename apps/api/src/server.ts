@@ -4,6 +4,7 @@ import { inboundWebhookRequestSchema } from "@whisperm/types";
 
 import { ApiError, mapErrorToHttp } from "./errors.js";
 import type { StripeWebhookDependencies } from "./billing/contracts.js";
+import { createActivityCreateHandler, createActivityListHandler, createContactActivitiesHandler, createDealActivitiesHandler, type ActivityRouteDependencies } from "./crm/activities.js";
 import { createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
@@ -50,6 +51,7 @@ export interface StripeWebhookServerConfig extends StripeWebhookDependencies {
 export interface ApiServerDependencies extends InboundWebhookIngestionDependencies {
   readonly contacts?: ContactRouteDependencies["contacts"] | undefined;
   readonly deals?: DealRouteDependencies["deals"] | undefined;
+  readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
@@ -223,12 +225,18 @@ const parseUrl = (url: string): ParsedUrl => {
   return { pathname: parsed.pathname, query: Object.fromEntries(parsed.searchParams.entries()) };
 };
 
-const parseCrmRoute = (method: string, pathname: string): { readonly name: "pipelineBoard" | "dealCreate" | "dealMoveStage" | "dealDetail"; readonly params: Readonly<Record<string, string>> } | null => {
+const parseCrmRoute = (method: string, pathname: string): { readonly name: "pipelineBoard" | "dealCreate" | "dealMoveStage" | "dealDetail" | "activityCreate" | "activityList" | "contactActivities" | "dealActivities"; readonly params: Readonly<Record<string, string>> } | null => {
   if (method === "POST" && pathname === "/deals") return { name: "dealCreate", params: {} };
+  if (method === "POST" && pathname === "/activities") return { name: "activityCreate", params: {} };
+  if (method === "GET" && pathname === "/activities") return { name: "activityList", params: {} };
   const pipelineBoard = /^\/pipelines\/([^/?#]+)\/board\/?$/u.exec(pathname);
   if (method === "GET" && pipelineBoard !== null) return { name: "pipelineBoard", params: { pipelineId: decodeURIComponent(pipelineBoard[1] ?? "") } };
   const dealMove = /^\/deals\/([^/?#]+)\/stage\/?$/u.exec(pathname);
   if (method === "PATCH" && dealMove !== null) return { name: "dealMoveStage", params: { dealId: decodeURIComponent(dealMove[1] ?? "") } };
+  const contactActivities = /^\/contacts\/([^/?#]+)\/activities\/?$/u.exec(pathname);
+  if (method === "GET" && contactActivities !== null) return { name: "contactActivities", params: { contactId: decodeURIComponent(contactActivities[1] ?? "") } };
+  const dealActivities = /^\/deals\/([^/?#]+)\/activities\/?$/u.exec(pathname);
+  if (method === "GET" && dealActivities !== null) return { name: "dealActivities", params: { dealId: decodeURIComponent(dealActivities[1] ?? "") } };
   const dealDetail = /^\/deals\/([^/?#]+)\/?$/u.exec(pathname);
   if (method === "GET" && dealDetail !== null) return { name: "dealDetail", params: { dealId: decodeURIComponent(dealDetail[1] ?? "") } };
   return null;
@@ -277,6 +285,10 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const dealCreateHandler = dependencies.deals === undefined ? undefined : createDealCreateHandler({ deals: dependencies.deals });
   const dealStageMoveHandler = dependencies.deals === undefined ? undefined : createDealStageMoveHandler({ deals: dependencies.deals });
   const dealDetailHandler = dependencies.deals === undefined ? undefined : createDealDetailHandler({ deals: dependencies.deals });
+  const activityCreateHandler = dependencies.activities === undefined ? undefined : createActivityCreateHandler({ activities: dependencies.activities });
+  const activityListHandler = dependencies.activities === undefined ? undefined : createActivityListHandler({ activities: dependencies.activities });
+  const contactActivitiesHandler = dependencies.activities === undefined ? undefined : createContactActivitiesHandler({ activities: dependencies.activities });
+  const dealActivitiesHandler = dependencies.activities === undefined ? undefined : createDealActivitiesHandler({ activities: dependencies.activities });
   let server: Server | undefined;
 
   const inject = async (options: InjectOptions): Promise<InjectResponse> => {
@@ -332,8 +344,13 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
 
       const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
       if (crmRoute !== null) {
-        if (dependencies.deals === undefined) {
+        const isActivityRoute = crmRoute.name === "activityCreate" || crmRoute.name === "activityList" || crmRoute.name === "contactActivities" || crmRoute.name === "dealActivities";
+        if (!isActivityRoute && dependencies.deals === undefined) {
           reply.code(503).send({ ok: false, error: { code: "DEALS_NOT_CONFIGURED", message: "Deals API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        if (isActivityRoute && dependencies.activities === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "ACTIVITIES_NOT_CONFIGURED", message: "Activities API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
         }
         request.params = crmRoute.params;
@@ -342,6 +359,10 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         if (crmRoute.name === "dealCreate" && dealCreateHandler !== undefined) await dealCreateHandler(request, reply);
         if (crmRoute.name === "dealMoveStage" && dealStageMoveHandler !== undefined) await dealStageMoveHandler(request, reply);
         if (crmRoute.name === "dealDetail" && dealDetailHandler !== undefined) await dealDetailHandler(request, reply);
+        if (crmRoute.name === "activityCreate" && activityCreateHandler !== undefined) await activityCreateHandler(request, reply);
+        if (crmRoute.name === "activityList" && activityListHandler !== undefined) await activityListHandler(request, reply);
+        if (crmRoute.name === "contactActivities" && contactActivitiesHandler !== undefined) await contactActivitiesHandler(request, reply);
+        if (crmRoute.name === "dealActivities" && dealActivitiesHandler !== undefined) await dealActivitiesHandler(request, reply);
         return reply.toInjectResponse();
       }
 

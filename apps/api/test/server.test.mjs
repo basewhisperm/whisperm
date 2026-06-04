@@ -420,3 +420,92 @@ test("deal detail route returns deal contact and activity", async () => {
   assert.equal(response.json().data.contact.email, "lead@example.com");
   assert.deepEqual(response.json().data.activity, []);
 });
+
+const activityHeaders = { "x-tenant-id": "tenant-a", "x-user-id": "jwt-user", "x-correlation-id": "corr-activity" };
+
+const createActivityApiDependencies = () => {
+  const calls = [];
+  const activities = [
+    { id: "activity-a", tenantId: "tenant-a", contactId: "contact-1", dealId: "deal-1", type: "NOTE", note: "Tenant A", createdById: "jwt-user", occurredAt: "2026-01-02T00:00:00.000Z", createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z" },
+    { id: "activity-b", tenantId: "tenant-b", contactId: "contact-1", dealId: "deal-1", type: "NOTE", note: "Tenant B", createdById: "other-user", occurredAt: "2026-01-02T00:00:00.000Z", createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z" },
+    { id: "activity-c", tenantId: "tenant-a", contactId: "contact-2", dealId: "deal-2", type: "CALL", note: "Other", createdById: "jwt-user", occurredAt: "2026-01-03T00:00:00.000Z", createdAt: "2026-01-03T00:00:00.000Z", updatedAt: "2026-01-03T00:00:00.000Z" }
+  ];
+  return createDependencies({
+    calls,
+    activities: {
+      async create(context, input) {
+        calls.push({ method: "create", context, input });
+        const created = { id: "activity-created", tenantId: context.tenantId, contactId: input.contactId ?? null, dealId: input.dealId ?? null, type: input.type, note: input.note, createdById: context.actorId, occurredAt: "2026-01-04T00:00:00.000Z", createdAt: "2026-01-04T00:00:00.000Z", updatedAt: "2026-01-04T00:00:00.000Z" };
+        activities.push(created);
+        return created;
+      },
+      async list(context, filters = {}, page = {}) {
+        calls.push({ method: "list", context, filters, page });
+        return { items: activities.filter((activity) => activity.tenantId === context.tenantId)
+          .filter((activity) => filters.contactId === undefined || activity.contactId === filters.contactId)
+          .filter((activity) => filters.dealId === undefined || activity.dealId === filters.dealId)
+          .filter((activity) => filters.type === undefined || activity.type === filters.type)
+          .filter((activity) => filters.createdById === undefined || activity.createdById === filters.createdById) };
+      }
+    }
+  });
+};
+
+test("POST /activities sources tenant and createdBy from request context", async () => {
+  const dependencies = createActivityApiDependencies();
+  const server = createApiServer(dependencies);
+
+  const response = await server.inject({ method: "POST", url: "/activities", headers: activityHeaders, payload: { contactId: "contact-1", dealId: "deal-1", type: "NOTE", note: "Follow up", createdBy: "spoofed-user" } });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(dependencies.calls.length, 0);
+
+  const success = await server.inject({ method: "POST", url: "/activities", headers: activityHeaders, payload: { contactId: "contact-1", dealId: "deal-1", type: "NOTE", note: "Follow up" } });
+  assert.equal(success.statusCode, 201);
+  assert.equal(success.json().data.createdById, "jwt-user");
+  assert.equal(dependencies.calls[0].input.tenantId, "tenant-a");
+  assert.equal(dependencies.calls[0].context.actorId, "jwt-user");
+});
+
+test("POST /activities fails when contactId and dealId are missing", async () => {
+  const dependencies = createActivityApiDependencies();
+  const server = createApiServer(dependencies);
+
+  const response = await server.inject({ method: "POST", url: "/activities", headers: activityHeaders, payload: { type: "NOTE", note: "Missing links" } });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error.code, "REQUEST_BODY_INVALID");
+  assert.equal(dependencies.calls.length, 0);
+});
+
+test("GET /activities returns only activities for auth tenant", async () => {
+  const dependencies = createActivityApiDependencies();
+  const server = createApiServer(dependencies);
+
+  const response = await server.inject({ method: "GET", url: "/activities", headers: activityHeaders });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().data.items.map((activity) => activity.tenantId), ["tenant-a", "tenant-a"]);
+});
+
+test("GET /contacts/:id/activities filters to that contact", async () => {
+  const dependencies = createActivityApiDependencies();
+  const server = createApiServer(dependencies);
+
+  const response = await server.inject({ method: "GET", url: "/contacts/contact-1/activities", headers: activityHeaders });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().data.items.map((activity) => activity.id), ["activity-a"]);
+  assert.equal(dependencies.calls[0].filters.contactId, "contact-1");
+});
+
+test("GET /deals/:id/activities filters to that deal", async () => {
+  const dependencies = createActivityApiDependencies();
+  const server = createApiServer(dependencies);
+
+  const response = await server.inject({ method: "GET", url: "/deals/deal-2/activities", headers: activityHeaders });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().data.items.map((activity) => activity.id), ["activity-c"]);
+  assert.equal(dependencies.calls[0].filters.dealId, "deal-2");
+});
