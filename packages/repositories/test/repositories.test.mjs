@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   PersistenceError,
+  PrismaDashboardRepository,
   PrismaDealsRepository,
   PrismaEventRepository,
   PrismaPipelineRepository,
@@ -52,6 +53,10 @@ const createDelegate = (name) => {
     upsert: async (args) => {
       calls.push({ name, method: "upsert", args });
       return { id: `${name}-id`, tenantId: args.create.tenantId, createdAt: now, updatedAt: now, ...args.create, ...args.update };
+    },
+    aggregate: async (args) => {
+      calls.push({ name, method: "aggregate", args });
+      return { _sum: { value: 42 } };
     }
   };
   return delegate;
@@ -138,8 +143,36 @@ test("factory wires all repository interfaces", () => {
   const repositories = createPrismaRepositories(createClient());
 
   assert.deepEqual(Object.keys(repositories).sort(), [
-    "activities", "approvals", "auditLogs", "billing", "campaigns", "contacts", "deals", "events", "executions", "pipelines", "tenants", "users", "workflows"
+    "activities", "approvals", "auditLogs", "billing", "campaigns", "contacts", "dashboard", "deals", "events", "executions", "pipelines", "tenants", "users", "workflows"
   ].sort());
+});
+
+
+test("dashboard repository scopes metrics contacts and activity reads by tenant", async () => {
+  const prisma = createClient();
+  prisma.contact.findMany = async (args) => {
+    prisma.contact.calls.push({ name: "contact", method: "findMany", args });
+    return [{ id: "contact-1", firstName: "A", lastName: "Client", company: null, email: "a@example.com", lastTouchAt: now }];
+  };
+  prisma.activity.findMany = async (args) => {
+    prisma.activity.calls.push({ name: "activity", method: "findMany", args });
+    return [{ id: "activity-1", contactId: "contact-1", dealId: null, type: "NOTE", note: "note", createdById: "user-1", createdAt: now }];
+  };
+  const dashboard = new PrismaDashboardRepository(prisma);
+
+  assert.equal(await dashboard.countActiveContacts({ tenantId: "tenant-a" }), 7);
+  assert.equal(await dashboard.sumOpenPipelineValue({ tenantId: "tenant-a" }), 42);
+  assert.equal(await dashboard.sumWonValueForPeriod({ tenantId: "tenant-a" }, { from: new Date("2026-05-01T00:00:00.000Z"), to: new Date("2026-06-01T00:00:00.000Z") }), 42);
+  await dashboard.listContactsForHealth({ tenantId: "tenant-a" });
+  await dashboard.listLatestActivities({ tenantId: "tenant-a" }, 10);
+
+  assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", stage: { not: "INACTIVE" } });
+  assert.deepEqual(prisma.deal.calls[0].args.where, { tenantId: "tenant-a", closedAt: null });
+  assert.deepEqual(prisma.deal.calls[1].args.where, { tenantId: "tenant-a", closedAt: { gte: new Date("2026-05-01T00:00:00.000Z"), lt: new Date("2026-06-01T00:00:00.000Z") } });
+  assert.deepEqual(prisma.contact.calls[1].args.where, { tenantId: "tenant-a" });
+  assert.deepEqual(prisma.contact.calls[1].args.select, { id: true, firstName: true, lastName: true, company: true, email: true, lastTouchAt: true });
+  assert.deepEqual(prisma.activity.calls[0].args.where, { tenantId: "tenant-a" });
+  assert.deepEqual(prisma.activity.calls[0].args.take, 10);
 });
 
 

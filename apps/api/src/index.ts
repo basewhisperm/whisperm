@@ -57,7 +57,9 @@ export type {
 } from "./server.js";
 
 export { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler } from "./crm/deals.js";
+export { createDashboardHandler, createDashboardService } from "./crm/dashboard.js";
 export type { ActivityRouteContext, ActivityRouteDependencies, ActivityServicePort } from "./crm/activities.js";
+export type { DashboardActivityFeedItem, DashboardActivityRecord, DashboardContactRecord, DashboardFollowUpAlert, DashboardHealthPanelItem, DashboardReadModel, DashboardResponse, DashboardRouteContext, DashboardRouteDependencies, DashboardServicePort } from "./crm/dashboard.js";
 export type { DealRouteContext, DealRouteDependencies, DealServicePort } from "./crm/deals.js";
 export { createStripeWebhookHandler } from "./webhooks/stripe.js";
 export type { StripeWebhookRequest } from "./webhooks/stripe.js";

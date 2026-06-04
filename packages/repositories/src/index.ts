@@ -54,10 +54,11 @@ type PrismaOrderBy = Readonly<Record<string, SortDirection>>;
 interface PrismaDelegate {
   create(args: { readonly data: PrismaData }): Promise<unknown>;
   findUnique?(args: { readonly where: PrismaWhere }): Promise<unknown | null>;
-  findFirst(args: { readonly where: PrismaWhere; readonly orderBy?: PrismaOrderBy }): Promise<unknown | null>;
-  findMany(args: { readonly where: PrismaWhere; readonly take?: number; readonly orderBy?: PrismaOrderBy }): Promise<readonly unknown[]>;
+  findFirst(args: { readonly where: PrismaWhere; readonly orderBy?: PrismaOrderBy; readonly select?: PrismaData }): Promise<unknown | null>;
+  findMany(args: { readonly where: PrismaWhere; readonly take?: number; readonly orderBy?: PrismaOrderBy; readonly select?: PrismaData }): Promise<readonly unknown[]>;
   createMany?(args: { readonly data: readonly PrismaData[] }): Promise<{ readonly count: number }>;
   count?(args: { readonly where: PrismaWhere }): Promise<number>;
+  aggregate?(args: { readonly where: PrismaWhere; readonly _sum?: PrismaData; readonly _count?: PrismaData }): Promise<unknown>;
   deleteMany?(args: { readonly where: PrismaWhere }): Promise<{ readonly count: number }>;
   update(args: { readonly where: PrismaWhere; readonly data: PrismaData }): Promise<unknown>;
   updateMany(args: { readonly where: PrismaWhere; readonly data: PrismaData }): Promise<{ readonly count: number }>;
@@ -474,6 +475,10 @@ export interface ContactRepository { create(context: TenantScoped, input: Create
 export interface PipelineRepository { findByWorkspace(workspaceId: string): Promise<PipelineRecord | null>; updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord>; }
 export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
 export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
+
+export interface DashboardContactRecord { readonly id: string; readonly firstName?: string | null | undefined; readonly lastName?: string | null | undefined; readonly company?: string | null | undefined; readonly email?: string | null | undefined; readonly lastTouchAt?: string | null | undefined; }
+export interface DashboardActivityRecord { readonly id: string; readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined; readonly type: string; readonly note?: string | null | undefined; readonly createdById: string; readonly createdAt: string; }
+export interface DashboardRepository { countActiveContacts(context: TenantScoped): Promise<number>; sumOpenPipelineValue(context: TenantScoped): Promise<number>; sumWonValueForPeriod(context: TenantScoped, period: { readonly from: Date; readonly to: Date }): Promise<number>; listContactsForHealth(context: TenantScoped): Promise<readonly DashboardContactRecord[]>; listLatestActivities(context: TenantScoped, limit: number): Promise<readonly DashboardActivityRecord[]>; }
 export interface CampaignRepository { create(context: TenantScoped, input: CreateCampaignInput): Promise<Campaign>; findById(context: TenantScoped, id: string): Promise<Campaign | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<Campaign>>; update(context: TenantScoped, id: string, input: UpdateCampaignInput): Promise<Campaign>; addVariant(context: TenantScoped, input: CreateCampaignVariantInput): Promise<CampaignVariant>; enqueuePublish(context: TenantScoped, input: CreatePublishJobInput): Promise<PublishJob>; findPublishJobByIdempotencyKey(context: TenantScoped, idempotencyKey: string): Promise<PublishJob | null>; }
 export interface WorkflowRepository { createExecution(context: TenantScoped, input: CreateWorkflowExecutionInput): Promise<WorkflowExecution>; findExecutionById(context: TenantScoped, id: string): Promise<WorkflowExecution | null>; findExecutionByRunId(context: TenantScoped, runId: string): Promise<WorkflowExecution | null>; updateExecution(context: TenantScoped, id: string, input: UpdateWorkflowExecutionInput): Promise<WorkflowExecution>; upsertStep(context: TenantScoped, input: UpsertWorkflowStepInput): Promise<WorkflowStepExecution>; listRunnableExecutions(context: TenantScoped, state: z.output<typeof workflowExecutionStateSchema>, page?: PageRequest): Promise<Page<WorkflowExecution>>; }
 export interface ApprovalRepository { createRequest(context: TenantScoped, input: CreateApprovalRequestInput): Promise<ApprovalRequestRecord>; recordDecision(context: TenantScoped, input: CreateApprovalDecisionInput): Promise<ApprovalDecisionRecord>; findRequestByApprovalId(context: TenantScoped, approvalId: string): Promise<ApprovalRequestRecord | null>; }
@@ -795,6 +800,68 @@ export class PrismaDealsRepository implements DealsRepository {
   }
 }
 
+const numberFromUnknown = (value: unknown): number => {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number(value);
+  if (typeof value === "object" && value !== null && "toString" in value) return Number(value.toString());
+  return 0;
+};
+
+const aggregateSumValue = async (delegate: PrismaDelegate, where: PrismaWhere): Promise<number> => {
+  const aggregated = await delegate.aggregate?.({ where, _sum: { value: true } });
+  if (aggregated !== undefined && typeof aggregated === "object" && aggregated !== null && "_sum" in aggregated) {
+    const sum = (aggregated as { readonly _sum?: Readonly<Record<string, unknown>> })._sum?.value;
+    return Number.isFinite(numberFromUnknown(sum)) ? numberFromUnknown(sum) : 0;
+  }
+  const rows = await delegate.findMany({ where, select: { value: true } });
+  return rows.reduce<number>((total, row) => {
+    if (typeof row !== "object" || row === null || !("value" in row)) return total;
+    return total + numberFromUnknown(row.value);
+  }, 0);
+};
+
+export class PrismaDashboardRepository implements DashboardRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async countActiveContacts(context: TenantScoped): Promise<number> {
+    ensureContext(context);
+    const result = await this.prisma.contact.count?.({ where: withTenant(context, { stage: { not: "INACTIVE" } }) });
+    if (result === undefined) throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Contact count is not supported by this Prisma client", status: 503 });
+    return result;
+  }
+
+  async sumOpenPipelineValue(context: TenantScoped): Promise<number> {
+    ensureContext(context);
+    return aggregateSumValue(this.prisma.deal, withTenant(context, { closedAt: null }));
+  }
+
+  async sumWonValueForPeriod(context: TenantScoped, period: { readonly from: Date; readonly to: Date }): Promise<number> {
+    ensureContext(context);
+    return aggregateSumValue(this.prisma.deal, withTenant(context, { closedAt: { gte: period.from, lt: period.to } }));
+  }
+
+  async listContactsForHealth(context: TenantScoped): Promise<readonly DashboardContactRecord[]> {
+    ensureContext(context);
+    const rows = await this.prisma.contact.findMany({
+      where: withTenant(context),
+      orderBy: { lastTouchAt: "asc" },
+      select: { id: true, firstName: true, lastName: true, company: true, email: true, lastTouchAt: true },
+    });
+    return rows.map((row) => parseRecord(z.object({ id: z.string().min(1), firstName: z.string().nullable().optional(), lastName: z.string().nullable().optional(), company: z.string().nullable().optional(), email: z.string().nullable().optional(), lastTouchAt: isoDateSchema.nullable().optional() }).strict(), row));
+  }
+
+  async listLatestActivities(context: TenantScoped, limit: number): Promise<readonly DashboardActivityRecord[]> {
+    ensureContext(context);
+    const rows = await this.prisma.activity.findMany({
+      where: withTenant(context),
+      take: Math.min(Math.max(limit, 1), 10),
+      orderBy: { createdAt: "desc" },
+      select: { id: true, contactId: true, dealId: true, type: true, note: true, createdById: true, createdAt: true },
+    });
+    return rows.map((row) => parseRecord(z.object({ id: z.string().min(1), contactId: z.string().nullable().optional(), dealId: z.string().nullable().optional(), type: z.string().min(1), note: z.string().nullable().optional(), createdById: z.string().min(1), createdAt: isoDateSchema }).strict(), row));
+  }
+}
+
 export class PrismaActivityRepository implements ActivityRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
 
@@ -914,6 +981,7 @@ export interface PrismaRepositories {
   readonly billing: BillingRepository;
   readonly auditLogs: AuditLogRepository;
   readonly activities: ActivityRepository;
+  readonly dashboard: DashboardRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -925,6 +993,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     pipelines: new PrismaPipelineRepository(prisma),
     deals: new PrismaDealsRepository(prisma),
     activities: new PrismaActivityRepository(prisma),
+    dashboard: new PrismaDashboardRepository(prisma),
     campaigns: new PrismaCampaignRepository(prisma),
     workflows: new PrismaWorkflowRepository(prisma),
     approvals: new PrismaApprovalRepository(auditLogs),
