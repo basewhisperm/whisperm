@@ -7,7 +7,7 @@ import type { StripeWebhookDependencies } from "./billing/contracts.js";
 import { createActivityCreateHandler, createActivityListHandler, createContactActivitiesHandler, createDealActivitiesHandler, type ActivityRouteDependencies } from "./crm/activities.js";
 import { createDashboardHandler, type DashboardRouteDependencies } from "./crm/dashboard.js";
 import { createReportsHandler, type ReportsRouteDependencies } from "./crm/reports.js";
-import { createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
+import { createContactCreateHandler, createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
@@ -52,6 +52,7 @@ export interface StripeWebhookServerConfig extends StripeWebhookDependencies {
 
 export interface ApiServerDependencies extends InboundWebhookIngestionDependencies {
   readonly contacts?: ContactRouteDependencies["contacts"] | undefined;
+  readonly contactQuota?: ContactRouteDependencies["quota"] | undefined;
   readonly deals?: DealRouteDependencies["deals"] | undefined;
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
@@ -229,9 +230,10 @@ const parseUrl = (url: string): ParsedUrl => {
   return { pathname: parsed.pathname, query: Object.fromEntries(parsed.searchParams.entries()) };
 };
 
-const parseCrmRoute = (method: string, pathname: string): { readonly name: "pipelineBoard" | "dealCreate" | "dealMoveStage" | "dealDetail" | "activityCreate" | "activityList" | "contactActivities" | "dealActivities"; readonly params: Readonly<Record<string, string>> } | null => {
+const parseCrmRoute = (method: string, pathname: string): { readonly name: "pipelineBoard" | "dealCreate" | "dealMoveStage" | "dealDetail" | "activityCreate" | "activityList" | "contactCreate" | "contactActivities" | "dealActivities"; readonly params: Readonly<Record<string, string>> } | null => {
   if (method === "POST" && pathname === "/deals") return { name: "dealCreate", params: {} };
   if (method === "POST" && pathname === "/activities") return { name: "activityCreate", params: {} };
+  if (method === "POST" && pathname === "/contacts") return { name: "contactCreate", params: {} };
   if (method === "GET" && pathname === "/activities") return { name: "activityList", params: {} };
   const pipelineBoard = /^\/pipelines\/([^/?#]+)\/board\/?$/u.exec(pathname);
   if (method === "GET" && pipelineBoard !== null) return { name: "pipelineBoard", params: { pipelineId: decodeURIComponent(pipelineBoard[1] ?? "") } };
@@ -284,7 +286,9 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
       stripeSecretKey: dependencies.stripeWebhook.stripeSecretKey,
       stripeWebhookSecret: dependencies.stripeWebhook.stripeWebhookSecret,
     });
-  const contactImportHandler = dependencies.contacts === undefined ? undefined : createContactImportHandler({ contacts: dependencies.contacts });
+  const contactDependencies = dependencies.contacts === undefined ? undefined : { contacts: dependencies.contacts, quota: dependencies.contactQuota, now: dependencies.now };
+  const contactCreateHandler = contactDependencies === undefined ? undefined : createContactCreateHandler(contactDependencies);
+  const contactImportHandler = contactDependencies === undefined ? undefined : createContactImportHandler(contactDependencies);
   const pipelineBoardHandler = dependencies.deals === undefined ? undefined : createPipelineBoardHandler({ deals: dependencies.deals });
   const dealCreateHandler = dependencies.deals === undefined ? undefined : createDealCreateHandler({ deals: dependencies.deals });
   const dealStageMoveHandler = dependencies.deals === undefined ? undefined : createDealStageMoveHandler({ deals: dependencies.deals });
@@ -370,7 +374,12 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
       const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
       if (crmRoute !== null) {
         const isActivityRoute = crmRoute.name === "activityCreate" || crmRoute.name === "activityList" || crmRoute.name === "contactActivities" || crmRoute.name === "dealActivities";
-        if (!isActivityRoute && dependencies.deals === undefined) {
+        const isContactRoute = crmRoute.name === "contactCreate";
+        if (isContactRoute && dependencies.contacts === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "CONTACTS_NOT_CONFIGURED", message: "Contacts API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        if (!isActivityRoute && !isContactRoute && dependencies.deals === undefined) {
           reply.code(503).send({ ok: false, error: { code: "DEALS_NOT_CONFIGURED", message: "Deals API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
         }
@@ -385,6 +394,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         if (crmRoute.name === "dealMoveStage" && dealStageMoveHandler !== undefined) await dealStageMoveHandler(request, reply);
         if (crmRoute.name === "dealDetail" && dealDetailHandler !== undefined) await dealDetailHandler(request, reply);
         if (crmRoute.name === "activityCreate" && activityCreateHandler !== undefined) await activityCreateHandler(request, reply);
+        if (crmRoute.name === "contactCreate" && contactCreateHandler !== undefined) await contactCreateHandler(request, reply);
         if (crmRoute.name === "activityList" && activityListHandler !== undefined) await activityListHandler(request, reply);
         if (crmRoute.name === "contactActivities" && contactActivitiesHandler !== undefined) await contactActivitiesHandler(request, reply);
         if (crmRoute.name === "dealActivities" && dealActivitiesHandler !== undefined) await dealActivitiesHandler(request, reply);

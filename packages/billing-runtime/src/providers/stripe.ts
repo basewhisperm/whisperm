@@ -33,6 +33,8 @@ export interface SubscriptionChangedEvent {
   providerSubscriptionId: string;
   status: StripeSubscriptionStatus;
   occurredAt: string;
+  source: "stripe";
+  stripeEventId?: string;
   subscription: BillingSubscriptionSnapshot;
 }
 
@@ -104,6 +106,7 @@ export const stripeSubscriptionToSnapshot = (
 export const createSubscriptionChangedEvent = (
   subscription: BillingSubscriptionSnapshot,
   occurredAt = new Date(),
+  stripeEventId?: string,
 ): SubscriptionChangedEvent => ({
   type: "subscription.changed",
   tenantId: subscription.tenantId,
@@ -111,5 +114,7 @@ export const createSubscriptionChangedEvent = (
   providerSubscriptionId: subscription.providerSubscriptionId,
   status: subscription.status,
   occurredAt: occurredAt.toISOString(),
+  source: "stripe",
+  ...(stripeEventId === undefined ? {} : { stripeEventId }),
   subscription,
 });

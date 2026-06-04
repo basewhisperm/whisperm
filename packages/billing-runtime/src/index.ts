@@ -31,7 +31,8 @@ export const usageMetricValues = [
   "RETRIEVAL_VECTOR_READS",
   "STORAGE_BYTES_HOURS",
   "APPROVAL_REQUESTS",
-  "EXECUTION_SECONDS"
+  "EXECUTION_SECONDS",
+  "CONTACTS"
 ] as const;
 export const usageMetricSchema = z.enum(usageMetricValues);
 export type UsageMetric = z.output<typeof usageMetricSchema>;

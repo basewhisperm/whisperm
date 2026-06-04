@@ -509,3 +509,103 @@ test("GET /deals/:id/activities filters to that deal", async () => {
   assert.deepEqual(response.json().data.items.map((activity) => activity.id), ["activity-c"]);
   assert.equal(dependencies.calls[0].filters.dealId, "deal-2");
 });
+
+const contactBody = (tenantId = "tenant-1", index = 1) => ({
+  tenantId,
+  email: `person-${tenantId}-${index}@example.com`,
+});
+
+const createContactService = (contactsByTenant = new Map()) => ({
+  async create(context, input) {
+    const existing = contactsByTenant.get(context.tenantId) ?? [];
+    const created = {
+      id: `contact-${context.tenantId}-${existing.length + 1}`,
+      tenantId: context.tenantId,
+      email: input.email,
+      stage: input.stage ?? "PROSPECT",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    contactsByTenant.set(context.tenantId, [...existing, created]);
+    return created;
+  },
+  async update() { throw new Error("not used"); },
+  async get() { throw new Error("not used"); },
+  async list() { throw new Error("not used"); },
+});
+
+const createContactQuota = (contactsByTenant, planByTenant = new Map()) => ({
+  async countContacts(context) {
+    return (contactsByTenant.get(context.tenantId) ?? []).length;
+  },
+  async findCurrentPlan(context) {
+    return planByTenant.get(context.tenantId) ?? "STARTER";
+  },
+});
+
+const injectContactCreate = (server, tenantId, index) => server.inject({
+  method: "POST",
+  url: "/contacts",
+  headers: { "x-tenant-id": tenantId, "x-correlation-id": `corr-${tenantId}-${index}` },
+  payload: contactBody(tenantId, index),
+});
+
+test("starter workspace can create contacts up to the plan limit", async () => {
+  const contactsByTenant = new Map();
+  const server = createApiServer(createDependencies({
+    contacts: createContactService(contactsByTenant),
+    contactQuota: createContactQuota(contactsByTenant),
+  }));
+
+  for (let index = 1; index <= 50; index += 1) {
+    const response = await injectContactCreate(server, "tenant-1", index);
+    assert.equal(response.statusCode, 201);
+  }
+
+  assert.equal(contactsByTenant.get("tenant-1").length, 50);
+});
+
+test("starter workspace creating the 51st contact returns 402", async () => {
+  const contactsByTenant = new Map([["tenant-1", Array.from({ length: 50 }, (_, index) => ({ id: `existing-${index}` }))]]);
+  const server = createApiServer(createDependencies({
+    contacts: createContactService(contactsByTenant),
+    contactQuota: createContactQuota(contactsByTenant),
+  }));
+
+  const response = await injectContactCreate(server, "tenant-1", 51);
+
+  assert.equal(response.statusCode, 402);
+  assert.equal(response.json().error.code, "QUOTA_EXCEEDED");
+  assert.equal(contactsByTenant.get("tenant-1").length, 50);
+});
+
+test("contact quota count is workspace scoped", async () => {
+  const contactsByTenant = new Map([
+    ["tenant-1", Array.from({ length: 50 }, (_, index) => ({ id: `tenant-1-${index}` }))],
+    ["tenant-2", Array.from({ length: 49 }, (_, index) => ({ id: `tenant-2-${index}` }))],
+  ]);
+  const server = createApiServer(createDependencies({
+    contacts: createContactService(contactsByTenant),
+    contactQuota: createContactQuota(contactsByTenant),
+  }));
+
+  const response = await injectContactCreate(server, "tenant-2", 50);
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(contactsByTenant.get("tenant-2").length, 50);
+});
+
+test("growth and pro workspaces are not blocked by starter contact limit", async () => {
+  for (const plan of ["GROWTH", "PRO"]) {
+    const contactsByTenant = new Map([[`tenant-${plan}`, Array.from({ length: 50 }, (_, index) => ({ id: `${plan}-${index}` }))]]);
+    const server = createApiServer(createDependencies({
+      contacts: createContactService(contactsByTenant),
+      contactQuota: createContactQuota(contactsByTenant, new Map([[`tenant-${plan}`, plan]])),
+    }));
+
+    const response = await injectContactCreate(server, `tenant-${plan}`, 51);
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(contactsByTenant.get(`tenant-${plan}`).length, 51);
+  }
+});

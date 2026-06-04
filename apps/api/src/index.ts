@@ -72,5 +72,7 @@ export type {
   StripeWebhookDependencies,
   SubscriptionStore,
 } from "./billing/contracts.js";
+export { evaluateContactCreateQuota } from "./billing/quota.js";
+export type { BillingQuotaPlan, BillingQuotaReader } from "./billing/quota.js";
 export { createTrialEndsAt, createTrialGate, isTrialExpired } from "./billing/trial.js";
 export type { TrialGateSubscriptionReader } from "./billing/trial.js";
