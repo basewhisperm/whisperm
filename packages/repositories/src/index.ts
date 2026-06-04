@@ -58,7 +58,8 @@ interface PrismaDelegate {
   findMany(args: { readonly where: PrismaWhere; readonly take?: number; readonly orderBy?: PrismaOrderBy; readonly select?: PrismaData }): Promise<readonly unknown[]>;
   createMany?(args: { readonly data: readonly PrismaData[] }): Promise<{ readonly count: number }>;
   count?(args: { readonly where: PrismaWhere }): Promise<number>;
-  aggregate?(args: { readonly where: PrismaWhere; readonly _sum?: PrismaData; readonly _count?: PrismaData }): Promise<unknown>;
+  aggregate?(args: { readonly where: PrismaWhere; readonly _sum?: PrismaData; readonly _count?: PrismaData; readonly _avg?: PrismaData }): Promise<unknown>;
+  groupBy?(args: PrismaData): Promise<readonly unknown[]>;
   deleteMany?(args: { readonly where: PrismaWhere }): Promise<{ readonly count: number }>;
   update(args: { readonly where: PrismaWhere; readonly data: PrismaData }): Promise<unknown>;
   updateMany(args: { readonly where: PrismaWhere; readonly data: PrismaData }): Promise<{ readonly count: number }>;
@@ -85,6 +86,7 @@ export interface PrismaPersistenceClient {
   readonly pipelineStage: PrismaDelegate;
   readonly deal: PrismaDelegate;
   readonly activity: PrismaDelegate;
+  readonly subscription: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
 
@@ -484,6 +486,10 @@ export interface FollowUpDigestRecipientRecord { readonly email: string; readonl
 export interface FollowUpDigestIdleContactRecord { readonly id: string; readonly lastTouchAt?: string | null | undefined; }
 export interface FollowUpDigestRepository { listWorkspacesForFollowUpDigest(): Promise<readonly FollowUpDigestWorkspaceRecord[]>; listOwnerAndAdminRecipients(context: TenantScoped): Promise<readonly FollowUpDigestRecipientRecord[]>; listIdleContactsForFollowUpDigest(context: TenantScoped, cutoff: Date): Promise<readonly FollowUpDigestIdleContactRecord[]>; }
 export interface DashboardRepository { countActiveContacts(context: TenantScoped): Promise<number>; sumOpenPipelineValue(context: TenantScoped): Promise<number>; sumWonValueForPeriod(context: TenantScoped, period: { readonly from: Date; readonly to: Date }): Promise<number>; listContactsForHealth(context: TenantScoped): Promise<readonly DashboardContactRecord[]>; listContactsForFollowUpAlerts(context: TenantScoped, cutoff: Date): Promise<readonly DashboardContactRecord[]>; getFollowUpReminderEnabled(context: TenantScoped): Promise<boolean>; listLatestActivities(context: TenantScoped, limit: number): Promise<readonly DashboardActivityRecord[]>; }
+export interface ReportPeriodRange { readonly startDate: Date; readonly endDate: Date; }
+export interface RevenueByStageReportRecord { readonly stageId: string; readonly stageName: string; readonly revenue: number; }
+export interface ClientAcquisitionSourceReportRecord { readonly source: string; readonly count: number; }
+export interface ReportsRepository { getCurrentPlan(context: TenantScoped): Promise<{ readonly plan: string } | null>; revenueByStage(context: TenantScoped, period: ReportPeriodRange): Promise<readonly RevenueByStageReportRecord[]>; clientAcquisitionSources(context: TenantScoped, period: ReportPeriodRange): Promise<readonly ClientAcquisitionSourceReportRecord[]>; averageDaysToClose(context: TenantScoped, period: ReportPeriodRange): Promise<{ readonly avgDaysToClose: number | null }>; renewalRate(context: TenantScoped, period: ReportPeriodRange): Promise<{ readonly rate: number | null }>; }
 export interface CampaignRepository { create(context: TenantScoped, input: CreateCampaignInput): Promise<Campaign>; findById(context: TenantScoped, id: string): Promise<Campaign | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<Campaign>>; update(context: TenantScoped, id: string, input: UpdateCampaignInput): Promise<Campaign>; addVariant(context: TenantScoped, input: CreateCampaignVariantInput): Promise<CampaignVariant>; enqueuePublish(context: TenantScoped, input: CreatePublishJobInput): Promise<PublishJob>; findPublishJobByIdempotencyKey(context: TenantScoped, idempotencyKey: string): Promise<PublishJob | null>; }
 export interface WorkflowRepository { createExecution(context: TenantScoped, input: CreateWorkflowExecutionInput): Promise<WorkflowExecution>; findExecutionById(context: TenantScoped, id: string): Promise<WorkflowExecution | null>; findExecutionByRunId(context: TenantScoped, runId: string): Promise<WorkflowExecution | null>; updateExecution(context: TenantScoped, id: string, input: UpdateWorkflowExecutionInput): Promise<WorkflowExecution>; upsertStep(context: TenantScoped, input: UpsertWorkflowStepInput): Promise<WorkflowStepExecution>; listRunnableExecutions(context: TenantScoped, state: z.output<typeof workflowExecutionStateSchema>, page?: PageRequest): Promise<Page<WorkflowExecution>>; }
 export interface ApprovalRepository { createRequest(context: TenantScoped, input: CreateApprovalRequestInput): Promise<ApprovalRequestRecord>; recordDecision(context: TenantScoped, input: CreateApprovalDecisionInput): Promise<ApprovalDecisionRecord>; findRequestByApprovalId(context: TenantScoped, approvalId: string): Promise<ApprovalRequestRecord | null>; }
@@ -884,6 +890,100 @@ export class PrismaDashboardRepository implements DashboardRepository {
 }
 
 
+export class PrismaReportsRepository implements ReportsRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async getCurrentPlan(context: TenantScoped): Promise<{ readonly plan: string } | null> {
+    ensureContext(context);
+    const row = await this.prisma.subscription.findFirst({
+      where: withTenant(context, { status: { in: ["ACTIVE", "TRIALING"] } }),
+      orderBy: { createdAt: "desc" },
+      select: { plan: true },
+    });
+    if (row === null) return null;
+    return z.object({ plan: z.string().min(1) }).strict().parse(row);
+  }
+
+  async revenueByStage(context: TenantScoped, period: ReportPeriodRange): Promise<readonly RevenueByStageReportRecord[]> {
+    ensureContext(context);
+    const where = withTenant(context, { createdAt: { gte: period.startDate, lt: period.endDate } });
+    const totals = new Map<string, number>();
+    if (this.prisma.deal.groupBy !== undefined) {
+      const grouped = await this.prisma.deal.groupBy({ by: ["pipelineStageId"], where, _sum: { value: true } });
+      for (const row of grouped) {
+        const parsed = z.object({ pipelineStageId: z.string().min(1), _sum: z.object({ value: decimalLikeSchema.nullable().optional() }).partial() }).passthrough().parse(row);
+        totals.set(parsed.pipelineStageId, numberFromUnknown(parsed._sum.value));
+      }
+    } else {
+      const rows = await this.prisma.deal.findMany({
+        where,
+        select: { pipelineStageId: true, value: true },
+      });
+      for (const row of rows) {
+        const parsed = z.object({ pipelineStageId: z.string().min(1), value: decimalLikeSchema.nullable().optional() }).strict().parse(row);
+        totals.set(parsed.pipelineStageId, (totals.get(parsed.pipelineStageId) ?? 0) + numberFromUnknown(parsed.value));
+      }
+    }
+    if (totals.size === 0) return [];
+    const stages = await this.prisma.pipelineStage.findMany({
+      where: withTenant(context, { id: { in: [...totals.keys()] } }),
+      orderBy: { position: "asc" },
+      select: { id: true, name: true },
+    });
+    return stages.map((stage) => {
+      const parsed = z.object({ id: z.string().min(1), name: z.string().min(1) }).strict().parse(stage);
+      return { stageId: parsed.id, stageName: parsed.name, revenue: totals.get(parsed.id) ?? 0 };
+    });
+  }
+
+  async clientAcquisitionSources(context: TenantScoped, period: ReportPeriodRange): Promise<readonly ClientAcquisitionSourceReportRecord[]> {
+    ensureContext(context);
+    // TODO(S2.3): keep returning [] if source tracking is removed or replaced by a dedicated acquisition model.
+    const where = withTenant(context, { createdAt: { gte: period.startDate, lt: period.endDate }, source: { not: null } });
+    const counts = new Map<string, number>();
+    if (this.prisma.contact.groupBy !== undefined) {
+      const grouped = await this.prisma.contact.groupBy({ by: ["source"], where, _count: { source: true } });
+      for (const row of grouped) {
+        const parsed = z.object({ source: z.string().min(1).nullable().optional(), _count: z.object({ source: z.number().int().nonnegative().optional() }).partial() }).passthrough().parse(row);
+        if (parsed.source === undefined || parsed.source === null || parsed.source.trim().length === 0) continue;
+        counts.set(parsed.source, parsed._count.source ?? 0);
+      }
+    } else {
+      const rows = await this.prisma.contact.findMany({
+        where,
+        select: { source: true },
+      });
+      for (const row of rows) {
+        const parsed = z.object({ source: z.string().min(1).nullable().optional() }).strict().parse(row);
+        if (parsed.source === undefined || parsed.source === null || parsed.source.trim().length === 0) continue;
+        counts.set(parsed.source, (counts.get(parsed.source) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([source, count]) => ({ source, count }));
+  }
+
+  async averageDaysToClose(context: TenantScoped, period: ReportPeriodRange): Promise<{ readonly avgDaysToClose: number | null }> {
+    ensureContext(context);
+    const rows = await this.prisma.deal.findMany({
+      where: withTenant(context, { closedAt: { gte: period.startDate, lt: period.endDate } }),
+      select: { createdAt: true, closedAt: true },
+    });
+    if (rows.length === 0) return { avgDaysToClose: null };
+    const totalDays = rows.reduce<number>((total, row) => {
+      const parsed = parseRecord(z.object({ createdAt: isoDateSchema, closedAt: isoDateSchema }).strict(), row);
+      return total + ((new Date(parsed.closedAt).getTime() - new Date(parsed.createdAt).getTime()) / 86_400_000);
+    }, 0);
+    return { avgDaysToClose: totalDays / rows.length };
+  }
+
+  async renewalRate(context: TenantScoped, period: ReportPeriodRange): Promise<{ readonly rate: number | null }> {
+    ensureContext(context);
+    // TODO(S2.3): return renewed / eligible renewals when renewal outcome data is modeled.
+    void period;
+    return { rate: null };
+  }
+}
+
 export class PrismaFollowUpDigestRepository implements FollowUpDigestRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
 
@@ -1044,6 +1144,7 @@ export interface PrismaRepositories {
   readonly activities: ActivityRepository;
   readonly dashboard: DashboardRepository;
   readonly followUpDigest: FollowUpDigestRepository;
+  readonly reports: ReportsRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -1056,6 +1157,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     deals: new PrismaDealsRepository(prisma),
     activities: new PrismaActivityRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
+    reports: new PrismaReportsRepository(prisma),
     followUpDigest: new PrismaFollowUpDigestRepository(prisma),
     campaigns: new PrismaCampaignRepository(prisma),
     workflows: new PrismaWorkflowRepository(prisma),

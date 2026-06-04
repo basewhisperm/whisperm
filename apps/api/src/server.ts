@@ -6,6 +6,7 @@ import { ApiError, mapErrorToHttp } from "./errors.js";
 import type { StripeWebhookDependencies } from "./billing/contracts.js";
 import { createActivityCreateHandler, createActivityListHandler, createContactActivitiesHandler, createDealActivitiesHandler, type ActivityRouteDependencies } from "./crm/activities.js";
 import { createDashboardHandler, type DashboardRouteDependencies } from "./crm/dashboard.js";
+import { createReportsHandler, type ReportsRouteDependencies } from "./crm/reports.js";
 import { createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
@@ -54,6 +55,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly deals?: DealRouteDependencies["deals"] | undefined;
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
+  readonly reports?: ReportsRouteDependencies["reports"] | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
   readonly readiness?: ReadinessCheck;
@@ -288,6 +290,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const dealStageMoveHandler = dependencies.deals === undefined ? undefined : createDealStageMoveHandler({ deals: dependencies.deals });
   const dealDetailHandler = dependencies.deals === undefined ? undefined : createDealDetailHandler({ deals: dependencies.deals });
   const dashboardHandler = dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
+  const reportsHandler = dependencies.reports === undefined ? undefined : createReportsHandler({ reports: dependencies.reports });
   const activityCreateHandler = dependencies.activities === undefined ? undefined : createActivityCreateHandler({ activities: dependencies.activities });
   const activityListHandler = dependencies.activities === undefined ? undefined : createActivityListHandler({ activities: dependencies.activities });
   const contactActivitiesHandler = dependencies.activities === undefined ? undefined : createContactActivitiesHandler({ activities: dependencies.activities });
@@ -351,6 +354,16 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           return reply.toInjectResponse();
         }
         await dashboardHandler(request, reply);
+        return reply.toInjectResponse();
+      }
+
+      if (options.method === "GET" && parsedUrl.pathname === "/reports") {
+        if (reportsHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "REPORTS_NOT_CONFIGURED", message: "Reports API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        request.query = parsedUrl.query;
+        await reportsHandler(request, reply);
         return reply.toInjectResponse();
       }
 
