@@ -14,6 +14,8 @@ import { correlationIdMiddleware } from "./http/correlation.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
 import { createStripeWebhookHandler } from "./webhooks/stripe.js";
 import { initWorkspaceTrial, type WorkspaceTrialStore, type InitTrialInput } from "./billing/trial-init.js";
+import { createWorkspace, type WorkspaceProvisioningPort, type CreateWorkspaceInput } from "./billing/workspace-provisioning.js";
+import { computeOnboardingChecklist, type OnboardingStatePort } from "./billing/onboarding.js";
 import { initiateUpgrade, type UpgradeServicePorts, type UpgradeWorkspaceContext } from "./billing/upgrade.js";
 import { createRequireActiveSubscription, type RequireActiveSubscription, TRIAL_EXPIRED } from "./billing/require-active-subscription.js";
 import type { TrialGateSubscriptionReader } from "./billing/trial.js";
@@ -78,6 +80,8 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly trialScheduler?: NotificationSchedulePort | undefined;
   readonly subscriptionReader?: TrialGateSubscriptionReader | undefined;
   readonly upgradePorts?: UpgradeServicePorts | undefined;
+  readonly workspaceProvisioningPort?: WorkspaceProvisioningPort | undefined;
+  readonly onboardingStatePort?: OnboardingStatePort | undefined;
 }
 
 export interface InjectOptions {
@@ -454,14 +458,29 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
       }
 
       if (options.method === "POST" && parsedUrl.pathname === "/workspaces") {
-        if (dependencies.trialStore === undefined || dependencies.trialScheduler === undefined) {
+        if (dependencies.workspaceProvisioningPort === undefined || dependencies.trialStore === undefined || dependencies.trialScheduler === undefined) {
           reply.code(503).send({ ok: false, error: { code: "WORKSPACE_CREATION_NOT_CONFIGURED", message: "Workspace creation is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
         }
-        const body = request.body as InitTrialInput;
-        const result = await initWorkspaceTrial(dependencies.trialStore, dependencies.trialScheduler, body, () => dependencies.now?.() ?? new Date());
-        reply.code(201).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        const body = request.body as CreateWorkspaceInput;
+        const result = await createWorkspace(dependencies.workspaceProvisioningPort, dependencies.trialStore, dependencies.trialScheduler, body, () => dependencies.now?.() ?? new Date());
+        reply.code(result.isNew ? 201 : 200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
         return reply.toInjectResponse();
+      }
+
+      if (options.method === "GET" && parsedUrl.pathname !== null) {
+        const onboardingMatch = /^\/workspaces\/([^/?#]+)\/onboarding\/?$/.exec(parsedUrl.pathname);
+        if (onboardingMatch !== null) {
+          if (dependencies.onboardingStatePort === undefined) {
+            reply.code(503).send({ ok: false, error: { code: "ONBOARDING_NOT_CONFIGURED", message: "Onboarding API is not configured" }, meta: { correlationId: request.correlationId } });
+            return reply.toInjectResponse();
+          }
+          const workspaceId = decodeURIComponent(onboardingMatch[1] ?? "");
+          const userId = firstHeaderValue(request.headers, "x-user-id") ?? "";
+          const checklist = await computeOnboardingChecklist(dependencies.onboardingStatePort, workspaceId, userId);
+          reply.send({ ok: true, data: checklist, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
       }
 
       if (options.method === "POST" && parsedUrl.pathname === "/billing/upgrade") {

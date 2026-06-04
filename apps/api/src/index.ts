@@ -98,3 +98,8 @@ export { createRequireActiveSubscription, TRIAL_EXPIRED } from "./billing/requir
 export type { RequireActiveSubscription } from "./billing/require-active-subscription.js";
 export { buildTrialReminderJobs, scheduleTrialReminderJobs, executeTrialReminderJob } from "@whisperm/notification-runtime";
 export type { TrialReminderMarker, TrialReminderJobPayload, NotificationServicePort, NotificationSchedulePort, TenantCreatedNotificationPayload } from "@whisperm/notification-runtime";
+
+export { createWorkspace, generateWorkspaceSlug, currencyForCountry, DEFAULT_PIPELINE_STAGES } from "./billing/workspace-provisioning.js";
+export type { WorkspaceProvisioningPort, CreateWorkspaceInput, CreateWorkspaceResult, CreatedTenant, CreatedPipeline } from "./billing/workspace-provisioning.js";
+export { computeOnboardingChecklist } from "./billing/onboarding.js";
+export type { OnboardingStatePort, OnboardingChecklist, OnboardingStep, OnboardingStepKey } from "./billing/onboarding.js";
