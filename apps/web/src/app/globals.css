@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-midnight: #1A1A2E;
+  --color-whisper: #534AB7;
+  --color-pulse: #7F77DD;
+  --color-mist: #EEEDFE;
+  --color-growth: #1D9E75;
+  --color-ivory: #F1EFE8;
+
+  --color-background: var(--color-ivory);
+  --color-foreground: var(--color-midnight);
+  --color-border: color-mix(in srgb, var(--color-midnight) 16%, transparent);
+  --color-muted: color-mix(in srgb, var(--color-mist) 72%, white);
+  --color-muted-foreground: color-mix(in srgb, var(--color-midnight) 64%, transparent);
+  --color-primary: var(--color-whisper);
+  --color-primary-foreground: white;
+  --color-secondary: var(--color-mist);
+  --color-secondary-foreground: var(--color-midnight);
+  --color-accent: var(--color-pulse);
+  --color-accent-foreground: white;
+  --color-ring: var(--color-pulse);
+
+  --border-width-hairline: 0.5px;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
