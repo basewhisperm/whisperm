@@ -6,6 +6,7 @@ import { ApiError, mapErrorToHttp } from "./errors.js";
 import type { StripeWebhookDependencies } from "./billing/contracts.js";
 import { createActivityCreateHandler, createActivityListHandler, createContactActivitiesHandler, createDealActivitiesHandler, type ActivityRouteDependencies } from "./crm/activities.js";
 import { createDashboardHandler, type DashboardRouteDependencies } from "./crm/dashboard.js";
+import { createReportsHandler, type ReportsRouteDependencies } from "./crm/reports.js";
 import { createContactCreateHandler, createContactImportHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
