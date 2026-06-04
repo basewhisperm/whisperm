@@ -13,7 +13,7 @@ import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDepen
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
 import { createStripeWebhookHandler } from "./webhooks/stripe.js";
-import { initWorkspaceTrial, type WorkspaceTrialStore, type InitTrialInput } from "./billing/trial-init.js";
+import type { WorkspaceTrialStore } from "./billing/trial-init.js";
 import { createWorkspace, type WorkspaceProvisioningPort, type CreateWorkspaceInput } from "./billing/workspace-provisioning.js";
 import { computeOnboardingChecklist, type OnboardingStatePort } from "./billing/onboarding.js";
 import { initiateUpgrade, type UpgradeServicePorts, type UpgradeWorkspaceContext } from "./billing/upgrade.js";
