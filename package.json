@@ -11,7 +11,8 @@
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "pnpm -r --if-present run test",
     "seed:pipelines": "node prisma/seed.mjs",
-    "build": "pnpm -r --if-present run build"
+    "build": "pnpm -r --if-present run build",
+    "seed:founding-workspaces": "node prisma/founding-workspaces-seed.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
