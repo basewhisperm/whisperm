@@ -325,7 +325,10 @@ const compareModelDescriptors = (left: AiModelDescriptor, right: AiModelDescript
  * 2. Keep only enabled descriptors permitted by allowedProviderIds.
  * 3. Apply preferredProviderKind when supplied.
  * 4. Require every requested capability and enough input/output token capacity.
- * 5. Sort compatible candidates by priority, then costWeight, then providerId:model.
+ * 5. Sort compatible candidates by:
+ *    - priority ascending
+ *    - costWeight ascending
+ *    - providerId:model lexicographic ascending
  *
  * The final lexicographic tie-breaker is intentional so tenants receive a stable
  * route when multiple providers have the same priority and cost. Provider SDK

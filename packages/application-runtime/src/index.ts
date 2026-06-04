@@ -373,6 +373,15 @@ export interface LoadedModuleGraph {
   readonly registry: ServiceRegistry;
 }
 
+/**
+ * Loads runtime modules and validates declared service dependencies.
+ *
+ * This detects duplicate modules, missing module imports, and service-level
+ * dependency cycles through ServiceRegistry validation.
+ *
+ * Module-level circular imports such as A -> B -> A are not detected here;
+ * declared service dependencies are the current safety net for cycle detection.
+ */
 export const loadRuntimeModules = (modules: readonly RuntimeModule[]): LoadedModuleGraph => {
   const seenModules = new Set<string>();
   const loadingModules = new Set<string>();

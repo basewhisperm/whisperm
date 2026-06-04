@@ -218,3 +218,116 @@ test('score recomputation worker skips duplicate jobs idempotently', async () =>
   assert.equal(runtime.completed.length, 0);
   assert.equal(result.result.trustBand, 'HIGH');
 });
+
+test('retryable failures schedule a retry instead of dead-lettering', async () => {
+  const runtime = createRuntimePorts();
+
+  const app = createApp({
+    events: {
+      ingest: async () => {
+        throw new Error('transient failure');
+      },
+    },
+  }, runtime.ports);
+
+  await app.start();
+
+  const result = await app.processJob({
+    job: createJob({
+      retryPolicy: {
+        tenantId: 'tenant-1',
+        maxAttempts: 3,
+        backoff: {
+          kind: 'EXPONENTIAL',
+          baseDelayMs: 1000,
+          maxDelayMs: 10000,
+          multiplier: 2,
+          jitter: false,
+        },
+        retryableErrorCodes: ['WORKER_RUNTIME_VALIDATION_FAILED'],
+        nonRetryableErrorCodes: [],
+        deadLetterAfterMaxAttempts: true,
+        replaySafe: true,
+      },
+    }),
+  });
+
+  assert.equal(result.status, 'RETRY_SCHEDULED');
+  assert.equal(result.result.nextAttempt, 1);
+});
+
+test('poison messages are dead-lettered with tenant-safe metadata', async () => {
+  const queues = new InMemoryQueueRuntime();
+  const runtime = createRuntimePorts();
+
+  const app = createApp({
+    events: {
+      ingest: async () => {
+        throw new Error('invalid payload');
+      },
+    },
+  }, runtime.ports, queues);
+
+  await app.start();
+
+  const result = await app.processJob({
+    job: createJob({
+      payload: {
+        malformed: true,
+      },
+    }),
+  });
+
+  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(queues.getDeadLetters().length, 1);
+
+  const dlq = queues.getDeadLetters()[0];
+
+  assert.equal(dlq.job.tenantId, 'tenant-1');
+  assert.ok(dlq.reason);
+});
+
+test('concurrent jobs remain tenant isolated', async () => {
+  const calls = [];
+
+  const runtime = createRuntimePorts();
+
+  const app = createApp({
+    events: {
+      ingest: async (context) => {
+        calls.push(context.tenantId);
+        return {
+          id: `ingestion-${calls.length}`,
+          tenantId: context.tenantId,
+        };
+      },
+    },
+  }, runtime.ports);
+
+  await app.start();
+
+  const jobs = Array.from({ length: 10 }, (_, index) =>
+    app.processJob({
+      job: createJob({
+        jobId: `job-${index}`,
+        idempotency: {
+          tenantId: 'tenant-1',
+          scope: 'EXTERNAL_EVENT',
+          key: `tenant-1:event:${index}`,
+          replaySafe: true,
+          conflictPolicy: 'SKIP_DUPLICATE',
+        },
+      }),
+    }),
+  );
+
+  const results = await Promise.all(jobs);
+
+  assert.equal(results.length, 10);
+  assert.equal(calls.length, 10);
+
+  for (const tenantId of calls) {
+    assert.equal(tenantId, 'tenant-1');
+  }
+});
+

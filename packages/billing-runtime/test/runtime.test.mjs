@@ -195,6 +195,8 @@ test("quota and rate limit helpers fail closed with replay-safe enforcement deci
   });
   const rateDecision = evaluateRateLimit({ policy: rateLimit, observedQuantity: 11, requestedQuantity: 2, evaluatedAt: now });
   assert.equal(rateDecision.allowed, false);
+  // Effective ceiling should reflect burst capacity rather than the
+  // steady-state limit so callers can display the actual quota window.
   assert.equal(rateDecision.limit, 12);
 
   const sustainedDecision = evaluateRateLimit({

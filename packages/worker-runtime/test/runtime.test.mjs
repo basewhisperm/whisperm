@@ -311,3 +311,44 @@ test("replay-safe execution skips duplicate idempotency claims", async () => {
 
   assert.deepEqual(result, { status: "DUPLICATE_SKIPPED", result: { cached: true } });
 });
+
+test("replay-safe execution propagates idempotency store transient failures", async () => {
+  const calls = [];
+
+  await assert.rejects(
+    async () =>
+      executeReplaySafeJob({
+        job: { ...baseJob, approval: undefined, workflow: undefined },
+        lease: baseLease,
+        token: baseToken,
+        handler: {
+          execute: () => {
+            calls.push("handler");
+            return { ok: true };
+          },
+        },
+        ports: {
+          clock: { now: () => now },
+          idempotency: {
+            claim: () => {
+              calls.push("claim");
+              throw new WorkerRuntimeError({
+                code: "WORKER_RUNTIME_STORAGE_UNAVAILABLE",
+                message: "Idempotency store unavailable",
+                status: 503,
+                correlation,
+              });
+            },
+            complete: () => {
+              calls.push("complete");
+            },
+          },
+        },
+      }),
+    (error) =>
+      error instanceof WorkerRuntimeError &&
+      error.code === "WORKER_RUNTIME_STORAGE_UNAVAILABLE",
+  );
+
+  assert.deepEqual(calls, ["claim"]);
+});
