@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "pnpm --filter @whisperm/types build && next build",
     "lint": "next lint",
-    "typecheck": "pnpm --filter @whisperm/types build && prisma generate && tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm --filter @whisperm/types build && prisma generate --schema=../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
