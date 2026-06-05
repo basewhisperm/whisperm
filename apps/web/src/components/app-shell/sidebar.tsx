@@ -2,24 +2,28 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { UserButton, useUser } from "@clerk/nextjs";
 import { t, type TranslationKey } from "@/lib/i18n";
 import {
   IconBuildingCommunity,
   IconLayoutDashboard,
   IconSettings,
   IconUsers,
+  IconBriefcase,
+  IconChartBar,
 } from "@tabler/icons-react";
 
 const navigationItems = [
   { labelKey: "dashboard.title", icon: IconLayoutDashboard, href: "/dashboard" },
   { labelKey: "contacts.title", icon: IconUsers, href: "/contacts" },
-  { labelKey: "deals.title", icon: IconBuildingCommunity, href: "/deals" },
-  { labelKey: "reports.title", icon: IconBuildingCommunity, href: "/reports" },
+  { labelKey: "deals.title", icon: IconBriefcase, href: "/deals" },
+  { labelKey: "reports.title", icon: IconChartBar, href: "/reports" },
   { labelKey: "settings.title", icon: IconSettings, href: "/settings" },
 ] satisfies readonly { readonly labelKey: TranslationKey; readonly icon: typeof IconLayoutDashboard; readonly href: string }[];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { user } = useUser();
 
   return (
     <aside className="hidden h-dvh w-[196px] shrink-0 border-r-hairline bg-midnight text-ivory md:flex md:flex-col">
@@ -47,13 +51,13 @@ export function Sidebar() {
               <Link
                 className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse ${
                   isActive
-                    ? "bg-ivory/15 text-ivory"
-                    : "text-ivory/78 hover:bg-ivory/10 hover:text-ivory"
+                    ? "bg-whisper text-ivory shadow-sm"
+                    : "text-ivory/70 hover:bg-ivory/10 hover:text-ivory"
                 }`}
                 href={item.href}
                 key={item.labelKey}
               >
-                <Icon aria-hidden="true" className="size-4" stroke={1.8} />
+                <Icon aria-hidden="true" className="size-4" stroke={isActive ? 2 : 1.8} />
                 {t(item.labelKey)}
               </Link>
             );
@@ -62,12 +66,22 @@ export function Sidebar() {
       </nav>
       <div className="border-t-hairline p-4">
         <div className="flex items-center gap-3 rounded-2xl bg-ivory/10 p-3">
-          <div className="flex size-8 items-center justify-center rounded-full bg-whisper text-xs font-semibold text-primary-foreground">
-            WM
-          </div>
-          <div>
-            <p className="text-sm font-medium">{t("appShell.user.operator")}</p>
-            <p className="text-xs text-ivory/65">{t("appShell.user.avatarSlot")}</p>
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: "size-8",
+                userButtonPopoverCard: "shadow-lg",
+              },
+            }}
+            afterSignOutUrl="/sign-in"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-ivory">
+              {user?.firstName ?? user?.emailAddresses[0]?.emailAddress ?? "User"}
+            </p>
+            <p className="truncate text-xs text-ivory/65">
+              {user?.emailAddresses[0]?.emailAddress ?? ""}
+            </p>
           </div>
         </div>
       </div>
