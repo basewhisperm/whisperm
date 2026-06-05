@@ -27,6 +27,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Migration safety check
+        run: |
+          if grep -rn "DROP TABLE" prisma/migrations/ || grep -rn "DROP COLUMN" prisma/migrations/ || grep -rn "TRUNCATE" prisma/migrations/; then
+            echo "DESTRUCTIVE MIGRATION DETECTED - halt deployment"
+            exit 1
+          fi
+          echo "Migration safety check passed - expand-only confirmed"
+
+
       - name: Lint
         run: pnpm lint
 
