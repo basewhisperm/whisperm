@@ -45,7 +45,7 @@ function getStageColor(stage: PipelineStage, index: number): { accent: string; l
     { accent: "#534AB7", light: "var(--color-mist)" },
     { accent: "#15803D", light: "#DCFCE7" },
   ];
-  return COLORS[index % COLORS.length] ?? COLORS[0];
+  return COLORS[index % COLORS.length] ?? { accent: "#534AB7", light: "var(--color-mist)" };
 }
 
 function initials(title?: string | null): string {
