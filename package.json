@@ -16,8 +16,10 @@
     "typecheck:strict": "pnpm --filter @whisperm/types build && pnpm -r --if-present run typecheck"
   },
   "devDependencies": {
+    "@prisma/client": "5",
     "@types/node": "^22.15.30",
     "eslint": "^8.57.0",
+    "prisma": "5",
     "typescript": "^5.8.3"
   }
 }

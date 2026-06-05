@@ -7,13 +7,15 @@
     "dev": "next dev",
     "build": "pnpm --filter @whisperm/types build && next build",
     "lint": "next lint",
-    "typecheck": "pnpm --filter @whisperm/types build && tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm --filter @whisperm/types build && prisma generate --schema=../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@clerk/nextjs": "5",
+    "@prisma/client": "5",
     "@radix-ui/react-slot": "^1.2.3",
     "@tabler/icons-react": "^3.35.0",
+    "@whisperm/repositories": "workspace:^",
     "@whisperm/types": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

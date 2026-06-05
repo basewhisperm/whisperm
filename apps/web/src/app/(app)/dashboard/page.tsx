@@ -1,35 +1,44 @@
 import { IconUsers, IconCurrencyDollar, IconTrophy, IconClock, IconAlertCircle, IconPhone, IconMail, IconCalendar, IconNote } from "@tabler/icons-react";
 
 type HealthStatus = "healthy" | "at-risk" | "idle";
-interface MetricCard { label: string; value: string; delta: string; positive: boolean; icon: typeof IconUsers; }
-interface Contact { id: string; name: string; company: string; lastTouchDays: number; status: HealthStatus; }
-interface Activity { id: string; type: "call" | "email" | "meeting" | "note"; contact: string; description: string; time: string; }
 
-const metrics: MetricCard[] = [
-  { label: "Active Clients", value: "48", delta: "+3 this month", positive: true, icon: IconUsers },
-  { label: "Pipeline Value", value: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(284500), delta: "+12% vs last month", positive: true, icon: IconCurrencyDollar },
-  { label: "Engagements Won", value: "7", delta: "+2 vs last month", positive: true, icon: IconTrophy },
-  { label: "Avg Response Time", value: "4.2h", delta: "+0.8h vs last month", positive: false, icon: IconClock },
-];
+interface DashboardContact {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  company?: string | null;
+  email?: string | null;
+  lastTouchAt?: string | null;
+}
 
-const healthContacts: Contact[] = [
-  { id: "1", name: "Kwame Asante", company: "Asante & Co", lastTouchDays: 18, status: "idle" },
-  { id: "2", name: "Abena Mensah", company: "Mensah Partners", lastTouchDays: 12, status: "at-risk" },
-  { id: "3", name: "Kofi Boateng", company: "Boateng Advisory", lastTouchDays: 21, status: "idle" },
-  { id: "4", name: "Ama Owusu", company: "Owusu Consulting", lastTouchDays: 9, status: "at-risk" },
-  { id: "5", name: "Yaw Darko", company: "Darko & Sons", lastTouchDays: 3, status: "healthy" },
-  { id: "6", name: "Efua Agyeman", company: "Agyeman Group", lastTouchDays: 1, status: "healthy" },
-];
+interface DashboardActivity {
+  id: string;
+  type: string;
+  note?: string | null;
+  createdAt: string;
+  contactId?: string | null;
+}
 
-const activities: Activity[] = [
-  { id: "1", type: "call", contact: "Kwame Asante", description: "Discussed Q2 audit scope", time: "2h ago" },
-  { id: "2", type: "email", contact: "Abena Mensah", description: "Sent proposal for tax advisory", time: "4h ago" },
-  { id: "3", type: "meeting", contact: "Ama Owusu", description: "Onboarding kickoff call", time: "Yesterday" },
-  { id: "4", type: "note", contact: "Yaw Darko", description: "Client requested monthly reporting", time: "Yesterday" },
-  { id: "5", type: "email", contact: "Efua Agyeman", description: "Follow-up on engagement letter", time: "2 days ago" },
-];
+interface DashboardData {
+  activeContacts: number;
+  pipelineValue: number;
+  healthContacts: DashboardContact[];
+  followUpAlerts: DashboardContact[];
+  activities: DashboardActivity[];
+}
 
-const followUpAlerts = healthContacts.filter(c => c.lastTouchDays >= 7).sort((a, b) => b.lastTouchDays - a.lastTouchDays);
+function getHealthStatus(lastTouchAt?: string | null): HealthStatus {
+  if (!lastTouchAt) return "idle";
+  const days = Math.floor((Date.now() - new Date(lastTouchAt).getTime()) / 86400000);
+  if (days <= 7) return "healthy";
+  if (days <= 14) return "at-risk";
+  return "idle";
+}
+
+function getDaysSince(lastTouchAt?: string | null): number {
+  if (!lastTouchAt) return 999;
+  return Math.floor((Date.now() - new Date(lastTouchAt).getTime()) / 86400000);
+}
 
 function getHealthConfig(status: HealthStatus) {
   switch (status) {
@@ -39,97 +48,132 @@ function getHealthConfig(status: HealthStatus) {
   }
 }
 
-function getActivityIcon(type: Activity["type"]) {
-  switch (type) {
-    case "call":    return IconPhone;
-    case "email":   return IconMail;
-    case "meeting": return IconCalendar;
-    case "note":    return IconNote;
+function getContactName(contact: DashboardContact): string {
+  const name = [contact.firstName, contact.lastName].filter(Boolean).join(" ");
+  return name || contact.email || contact.company || "Unknown";
+}
+
+function getActivityIcon(type: string) {
+  switch (type.toUpperCase()) {
+    case "CALL":    return IconPhone;
+    case "EMAIL":   return IconMail;
+    case "MEETING": return IconCalendar;
+    default:        return IconNote;
   }
 }
 
-function MetricCardUI({ card }: { card: MetricCard }) {
-  const Icon = card.icon;
-  return (
-    <div className="rounded-2xl bg-secondary p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{card.label}</p>
-        <div className="flex size-8 items-center justify-center rounded-xl" style={{ background: "var(--color-mist)" }}>
-          <Icon className="size-4" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
-        </div>
-      </div>
-      <p className="mt-3 text-[26px] font-semibold tracking-tight text-foreground">{card.value}</p>
-      <p className={`mt-1 text-xs ${card.positive ? "text-[var(--color-growth)]" : "text-red-500"}`}>{card.delta}</p>
-    </div>
-  );
+async function getDashboardData(): Promise<DashboardData> {
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/dashboard`, {
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) throw new Error("Failed to fetch");
+    return res.json();
+  } catch {
+    return { activeContacts: 0, pipelineValue: 0, healthContacts: [], followUpAlerts: [], activities: [] };
+  }
 }
 
-function HealthBar({ contact }: { contact: Contact }) {
-  const { color, fill, label } = getHealthConfig(contact.status);
-  return (
-    <div className="flex items-center gap-4 py-3" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between">
-          <p className="truncate text-sm font-medium text-foreground">{contact.name}</p>
-          <span className="ml-2 shrink-0 text-xs text-muted-foreground">{contact.lastTouchDays}d ago</span>
-        </div>
-        <p className="truncate text-xs text-muted-foreground">{contact.company}</p>
-      </div>
-      <div className="flex w-28 shrink-0 flex-col gap-1">
-        <span className="text-[11px] font-medium uppercase tracking-wide" style={{ color }}>{label}</span>
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full" style={{ width: `${fill}%`, background: color }} />
-        </div>
-      </div>
-    </div>
-  );
-}
+export default async function DashboardPage() {
+  const data = await getDashboardData();
 
-function ActivityItem({ activity }: { activity: Activity }) {
-  const Icon = getActivityIcon(activity.type);
-  return (
-    <div className="flex items-start gap-3 py-3" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
-      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg" style={{ background: "var(--color-mist)" }}>
-        <Icon className="size-3.5" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-foreground">{activity.contact}</p>
-        <p className="text-xs text-muted-foreground">{activity.description}</p>
-      </div>
-      <span className="shrink-0 text-xs text-muted-foreground">{activity.time}</span>
-    </div>
-  );
-}
+  const metrics = [
+    { label: "Active Clients", value: String(data.activeContacts), delta: "+0 this month", positive: true, icon: IconUsers },
+    { label: "Pipeline Value", value: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(data.pipelineValue), delta: "Open deals", positive: true, icon: IconCurrencyDollar },
+    { label: "Follow-up Alerts", value: String(data.followUpAlerts.length), delta: "Clients idle 7+ days", positive: data.followUpAlerts.length === 0, icon: IconTrophy },
+    { label: "Activities", value: String(data.activities.length), delta: "Recent logged", positive: true, icon: IconClock },
+  ];
 
-export default function DashboardPage() {
+  const sortedHealth = [...data.healthContacts].sort((a, b) => getDaysSince(b.lastTouchAt) - getDaysSince(a.lastTouchAt));
+
   return (
     <div className="space-y-6">
-      {followUpAlerts.length > 0 && (
+      {data.followUpAlerts.length > 0 && (
         <div className="flex items-start gap-3 rounded-2xl p-4" style={{ background: "#FEF3C7", border: "0.5px solid #FCD34D" }}>
           <IconAlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" stroke={1.8} />
           <div>
-            <p className="text-sm font-medium text-amber-900">{followUpAlerts.length} client{followUpAlerts.length > 1 ? "s" : ""} need follow-up</p>
-            <p className="mt-0.5 text-xs text-amber-700">{followUpAlerts.map(c => c.name).join(", ")} {followUpAlerts.length > 1 ? "have" : "has"} had no activity in 7+ days.</p>
+            <p className="text-sm font-medium text-amber-900">{data.followUpAlerts.length} client{data.followUpAlerts.length > 1 ? "s" : ""} need follow-up</p>
+            <p className="mt-0.5 text-xs text-amber-700">{data.followUpAlerts.map(getContactName).join(", ")} {data.followUpAlerts.length > 1 ? "have" : "has"} had no activity in 7+ days.</p>
           </div>
         </div>
       )}
+
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        {metrics.map((card) => <MetricCardUI card={card} key={card.label} />)}
+        {metrics.map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.label} className="rounded-2xl bg-secondary p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{card.label}</p>
+                <div className="flex size-8 items-center justify-center rounded-xl" style={{ background: "var(--color-mist)" }}>
+                  <Icon className="size-4" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
+                </div>
+              </div>
+              <p className="mt-3 text-[26px] font-semibold tracking-tight text-foreground">{card.value}</p>
+              <p className={`mt-1 text-xs ${card.positive ? "text-[var(--color-growth)]" : "text-red-500"}`}>{card.delta}</p>
+            </div>
+          );
+        })}
       </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <div className="mb-1 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
             <h2 className="text-sm font-semibold text-foreground">Client Health</h2>
-            <span className="text-xs text-muted-foreground">{healthContacts.length} clients</span>
+            <span className="text-xs text-muted-foreground">{data.healthContacts.length} clients</span>
           </div>
-          {healthContacts.map((contact) => <HealthBar contact={contact} key={contact.id} />)}
+          {sortedHealth.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">No contacts yet — add your first client to see health tracking.</p>
+          ) : (
+            sortedHealth.map((contact) => {
+              const status = getHealthStatus(contact.lastTouchAt);
+              const { color, fill, label } = getHealthConfig(status);
+              const days = getDaysSince(contact.lastTouchAt);
+              return (
+                <div key={contact.id} className="flex items-center gap-4 py-3" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <p className="truncate text-sm font-medium text-foreground">{getContactName(contact)}</p>
+                      <span className="ml-2 shrink-0 text-xs text-muted-foreground">{days === 999 ? "Never" : `${days}d ago`}</span>
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">{contact.company ?? contact.email ?? ""}</p>
+                  </div>
+                  <div className="flex w-28 shrink-0 flex-col gap-1">
+                    <span className="text-[11px] font-medium uppercase tracking-wide" style={{ color }}>{label}</span>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full" style={{ width: `${fill}%`, background: color }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
+
         <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <div className="mb-1 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
             <h2 className="text-sm font-semibold text-foreground">Recent Activity</h2>
-            <span className="text-xs text-muted-foreground">Last 5 activities</span>
+            <span className="text-xs text-muted-foreground">Last {data.activities.length} activities</span>
           </div>
-          {activities.map((activity) => <ActivityItem activity={activity} key={activity.id} />)}
+          {data.activities.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">No activities yet — log your first interaction to see the feed.</p>
+          ) : (
+            data.activities.map((activity) => {
+              const Icon = getActivityIcon(activity.type);
+              return (
+                <div key={activity.id} className="flex items-start gap-3 py-3" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
+                  <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg" style={{ background: "var(--color-mist)" }}>
+                    <Icon className="size-3.5" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground">{activity.note ?? activity.type}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(activity.createdAt).toLocaleDateString()}</p>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
