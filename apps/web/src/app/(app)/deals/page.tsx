@@ -1,132 +1,124 @@
 "use client";
 
-import { useState } from "react";
-import { IconPlus, IconX, IconCurrencyDollar, IconUser, IconChevronDown } from "@tabler/icons-react";
+import { useState, useEffect } from "react";
+import { IconPlus, IconX, IconCurrencyDollar, IconUser } from "@tabler/icons-react";
 
-type Stage = "Prospect" | "Qualified" | "Proposal" | "Engagement" | "Renewal";
+interface PipelineStage {
+  id: string;
+  name: string;
+  position: number;
+  color?: string | null;
+}
+
+interface Pipeline {
+  id: string;
+  name: string;
+  stages: PipelineStage[];
+}
 
 interface Deal {
   id: string;
-  contact: string;
-  company: string;
-  value: number;
-  currency: string;
-  owner: string;
-  probability: number;
-  stage: Stage;
+  tenantId: string;
+  title?: string | null;
+  value?: number | null;
+  currency?: string | null;
+  probability?: number | null;
+  pipelineId: string;
+  pipelineStageId: string;
+  contactId?: string | null;
+  ownerId?: string | null;
+  closedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
-const STAGES: Stage[] = ["Prospect", "Qualified", "Proposal", "Engagement", "Renewal"];
-
-const STAGE_COLORS: Record<Stage, { accent: string; light: string }> = {
-  Prospect:   { accent: "#4338CA", light: "#EEF2FF" },
-  Qualified:  { accent: "#1D4ED8", light: "#EFF6FF" },
-  Proposal:   { accent: "#B45309", light: "#FEF3C7" },
-  Engagement: { accent: "var(--color-whisper)", light: "var(--color-mist)" },
-  Renewal:    { accent: "#15803D", light: "#DCFCE7" },
-};
-
-const INITIAL_DEALS: Deal[] = [
-  { id: "1", contact: "Kwame Asante", company: "Asante & Co", value: 12000, currency: "USD", owner: "Operator", probability: 80, stage: "Engagement" },
-  { id: "2", contact: "Abena Mensah", company: "Mensah Partners", value: 8500, currency: "USD", owner: "Operator", probability: 60, stage: "Proposal" },
-  { id: "3", contact: "Kofi Boateng", company: "Boateng Advisory", value: 5000, currency: "USD", owner: "Operator", probability: 40, stage: "Qualified" },
-  { id: "4", contact: "Ama Owusu", company: "Owusu Consulting", value: 3200, currency: "USD", owner: "Operator", probability: 20, stage: "Prospect" },
-  { id: "5", contact: "Yaw Darko", company: "Darko & Sons", value: 15000, currency: "USD", owner: "Operator", probability: 90, stage: "Renewal" },
-  { id: "6", contact: "Efua Agyeman", company: "Agyeman Group", value: 9800, currency: "USD", owner: "Operator", probability: 75, stage: "Engagement" },
-  { id: "7", contact: "Nana Amponsah", company: "Amponsah & Associates", value: 6500, currency: "USD", owner: "Operator", probability: 45, stage: "Qualified" },
-  { id: "8", contact: "Akosua Frimpong", company: "Frimpong Tax", value: 4200, currency: "USD", owner: "Operator", probability: 55, stage: "Proposal" },
-];
-
-function initials(name: string) {
-  return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+function formatValue(value?: number | null, currency?: string | null) {
+  if (!value) return new Intl.NumberFormat("en-US", { style: "currency", currency: currency ?? "USD", maximumFractionDigits: 0 }).format(0);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency ?? "USD", maximumFractionDigits: 0 }).format(value);
 }
 
-function formatValue(value: number, currency: string) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+function getStageColor(stage: PipelineStage, index: number): { accent: string; light: string } {
+  const COLORS = [
+    { accent: "#4338CA", light: "#EEF2FF" },
+    { accent: "#1D4ED8", light: "#EFF6FF" },
+    { accent: "#B45309", light: "#FEF3C7" },
+    { accent: "#534AB7", light: "var(--color-mist)" },
+    { accent: "#15803D", light: "#DCFCE7" },
+  ];
+  return COLORS[index % COLORS.length] ?? COLORS[0];
 }
 
-function DealCard({ deal, onClick }: { deal: Deal; onClick: () => void }) {
-  const { accent } = STAGE_COLORS[deal.stage];
+function initials(title?: string | null): string {
+  if (!title) return "?";
+  return title.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+}
+
+function DealCard({ deal, accent, onClick }: { deal: Deal; accent: string; onClick: () => void }) {
   return (
-    <div
-      onClick={onClick}
-      className="cursor-pointer rounded-2xl bg-background p-4 transition hover:shadow-md"
-      style={{ border: "0.5px solid hsl(var(--border))" }}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: accent }}>
-            {initials(deal.contact)}
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground leading-tight">{deal.contact}</p>
-            <p className="text-xs text-muted-foreground">{deal.company}</p>
-          </div>
+    <div onClick={onClick} className="cursor-pointer rounded-2xl bg-background p-4 transition hover:shadow-md" style={{ border: "0.5px solid hsl(var(--border))" }}>
+      <div className="flex items-center gap-2">
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: accent }}>
+          {initials(deal.title)}
         </div>
+        <p className="text-sm font-medium text-foreground leading-tight truncate">{deal.title ?? "Untitled deal"}</p>
       </div>
       <div className="mt-3 flex items-center justify-between">
         <span className="text-sm font-semibold text-foreground">{formatValue(deal.value, deal.currency)}</span>
-        <span className="text-xs text-muted-foreground">{deal.owner}</span>
       </div>
-      <div className="mt-2">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[11px] text-muted-foreground">Probability</span>
-          <span className="text-[11px] font-medium" style={{ color: accent }}>{deal.probability}%</span>
+      {deal.probability != null && (
+        <div className="mt-2">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] text-muted-foreground">Probability</span>
+            <span className="text-[11px] font-medium" style={{ color: accent }}>{deal.probability}%</span>
+          </div>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full" style={{ width: `${deal.probability}%`, background: accent }} />
+          </div>
         </div>
-        <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full transition-all" style={{ width: `${deal.probability}%`, background: accent }} />
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function DealDetail({ deal, onClose, onStageChange }: { deal: Deal; onClose: () => void; onStageChange: (id: string, stage: Stage) => void }) {
-  const { accent } = STAGE_COLORS[deal.stage];
+function DealDetail({ deal, stages, onClose, onStageChange }: { deal: Deal; stages: PipelineStage[]; onClose: () => void; onStageChange: (dealId: string, stageId: string) => void }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-start justify-between p-5" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
         <div>
-          <p className="font-semibold text-foreground">{deal.contact}</p>
-          <p className="text-xs text-muted-foreground">{deal.company}</p>
+          <p className="font-semibold text-foreground">{deal.title ?? "Untitled deal"}</p>
+          <p className="text-xs text-muted-foreground">{formatValue(deal.value, deal.currency)}</p>
         </div>
-        <button onClick={onClose} className="rounded-lg p-1 hover:bg-muted">
-          <IconX className="size-4 text-muted-foreground" stroke={1.8} />
-        </button>
+        <button onClick={onClose} className="rounded-lg p-1 hover:bg-muted"><IconX className="size-4 text-muted-foreground" stroke={1.8} /></button>
       </div>
       <div className="space-y-4 p-5">
         <div className="flex items-center gap-2 text-sm">
           <IconCurrencyDollar className="size-3.5 text-muted-foreground" stroke={1.8} />
           <span className="font-semibold text-foreground">{formatValue(deal.value, deal.currency)}</span>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <IconUser className="size-3.5 text-muted-foreground" stroke={1.8} />
-          <span className="text-foreground">{deal.owner}</span>
-        </div>
+        {deal.probability != null && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-muted-foreground">Probability</span>
+              <span className="text-xs font-medium" style={{ color: "var(--color-whisper)" }}>{deal.probability}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full" style={{ width: `${deal.probability}%`, background: "var(--color-whisper)" }} />
+            </div>
+          </div>
+        )}
         <div>
           <p className="mb-2 text-xs font-medium text-muted-foreground">Move to stage</p>
           <div className="flex flex-wrap gap-2">
-            {STAGES.map(s => (
-              <button
-                key={s}
-                onClick={() => onStageChange(deal.id, s)}
-                className="rounded-full px-3 py-1 text-xs font-medium transition"
-                style={deal.stage === s
-                  ? { background: STAGE_COLORS[s].accent, color: "#fff" }
-                  : { background: STAGE_COLORS[s].light, color: STAGE_COLORS[s].accent }}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-muted-foreground">Probability</span>
-            <span className="text-xs font-medium" style={{ color: accent }}>{deal.probability}%</span>
-          </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full" style={{ width: `${deal.probability}%`, background: accent }} />
+            {stages.map((s, i) => {
+              const { accent, light } = getStageColor(s, i);
+              return (
+                <button key={s.id} onClick={() => onStageChange(deal.id, s.id)}
+                  className="rounded-full px-3 py-1 text-xs font-medium transition"
+                  style={deal.pipelineStageId === s.id ? { background: accent, color: "#fff" } : { background: light, color: accent }}>
+                  {s.name}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -135,82 +127,81 @@ function DealDetail({ deal, onClose, onStageChange }: { deal: Deal; onClose: () 
 }
 
 export default function DealsPage() {
-  const [deals, setDeals] = useState<Deal[]>(INITIAL_DEALS);
+  const [pipeline, setPipeline] = useState<Pipeline | null>(null);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Deal | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<Stage | null>(null);
 
-  function stageDeals(stage: Stage) {
-    return deals.filter(d => d.stage === stage);
-  }
+  useEffect(() => {
+    fetch("/api/deals")
+      .then(r => r.json())
+      .then(data => { setPipeline(data.pipeline); setDeals(data.deals ?? []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
 
-  function stageTotal(stage: Stage) {
-    return stageDeals(stage).reduce((sum, d) => sum + d.value, 0);
-  }
-
-  function handleDragStart(id: string) {
-    setDragging(id);
-  }
-
-  function handleDrop(stage: Stage) {
+  function handleDrop(stageId: string) {
     if (!dragging) return;
-    setDeals(prev => prev.map(d => d.id === dragging ? { ...d, stage } : d));
-    if (selected?.id === dragging) setSelected(prev => prev ? { ...prev, stage } : null);
+    setDeals(prev => prev.map(d => d.id === dragging ? { ...d, pipelineStageId: stageId } : d));
+    if (selected?.id === dragging) setSelected(prev => prev ? { ...prev, pipelineStageId: stageId } : null);
     setDragging(null);
     setDragOver(null);
   }
 
-  function handleStageChange(id: string, stage: Stage) {
-    setDeals(prev => prev.map(d => d.id === id ? { ...d, stage } : d));
-    setSelected(prev => prev?.id === id ? { ...prev, stage } : prev);
+  function handleStageChange(dealId: string, stageId: string) {
+    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, pipelineStageId: stageId } : d));
+    setSelected(prev => prev?.id === dealId ? { ...prev, pipelineStageId: stageId } : prev);
   }
+
+  function stageDeals(stageId: string) {
+    return deals.filter(d => d.pipelineStageId === stageId);
+  }
+
+  function stageTotal(stageId: string) {
+    return stageDeals(stageId).reduce((sum, d) => sum + (d.value ?? 0), 0);
+  }
+
+  if (loading) return <p className="text-sm text-muted-foreground">Loading pipeline…</p>;
+
+  if (!pipeline) return (
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <p className="text-sm font-medium text-foreground">No pipeline found</p>
+      <p className="mt-1 text-xs text-muted-foreground">A pipeline will be created automatically for your workspace.</p>
+    </div>
+  );
 
   return (
     <div className="flex gap-4">
-      {/* Kanban board */}
       <div className="min-w-0 flex-1 overflow-x-auto">
         <div className="flex gap-3 pb-4" style={{ minWidth: "fit-content" }}>
-          {STAGES.map(stage => {
-            const { accent, light } = STAGE_COLORS[stage];
-            const stageList = stageDeals(stage);
-            const isDragTarget = dragOver === stage;
+          {pipeline.stages.map((stage, index) => {
+            const { accent, light } = getStageColor(stage, index);
+            const stageList = stageDeals(stage.id);
+            const isDragTarget = dragOver === stage.id;
             return (
-              <div
-                key={stage}
-                className="flex w-60 shrink-0 flex-col rounded-2xl transition-colors"
+              <div key={stage.id} className="flex w-60 shrink-0 flex-col rounded-2xl transition-colors"
                 style={{ background: isDragTarget ? light : "hsl(var(--secondary))", border: isDragTarget ? `2px solid ${accent}` : "0.5px solid hsl(var(--border))" }}
-                onDragOver={e => { e.preventDefault(); setDragOver(stage); }}
+                onDragOver={e => { e.preventDefault(); setDragOver(stage.id); }}
                 onDragLeave={() => setDragOver(null)}
-                onDrop={() => handleDrop(stage)}
-              >
-                {/* Column header */}
+                onDrop={() => handleDrop(stage.id)}>
                 <div className="flex items-center justify-between px-3 py-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold" style={{ color: accent }}>{stage}</span>
-                    <span className="flex size-4 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: accent }}>{stageList.length}</span>
+                    <span className="text-xs font-semibold" style={{ color: accent }}>{stage.name}</span>
+                    <span className="flex size-4 items-center justify-center rounded-full text-[10px] font-semibold text-white" style={{ background: accent }}>{stageList.length}</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">{formatValue(stageTotal(stage), "USD")}</span>
+                  <span className="text-xs text-muted-foreground">{formatValue(stageTotal(stage.id), "USD")}</span>
                 </div>
-
-                {/* Cards */}
                 <div className="flex flex-1 flex-col gap-2 px-2 pb-2">
+                  {stageList.length === 0 && (
+                    <p className="px-2 py-4 text-center text-xs text-muted-foreground">No deals</p>
+                  )}
                   {stageList.map(deal => (
-                    <div
-                      key={deal.id}
-                      draggable
-                      onDragStart={() => handleDragStart(deal.id)}
-                      onDragEnd={() => { setDragging(null); setDragOver(null); }}
-                      style={{ opacity: dragging === deal.id ? 0.4 : 1 }}
-                    >
-                      <DealCard deal={deal} onClick={() => setSelected(deal)} />
+                    <div key={deal.id} draggable onDragStart={() => setDragging(deal.id)} onDragEnd={() => { setDragging(null); setDragOver(null); }} style={{ opacity: dragging === deal.id ? 0.4 : 1 }}>
+                      <DealCard deal={deal} accent={accent} onClick={() => setSelected(deal)} />
                     </div>
                   ))}
-
-                  {/* Quick add */}
-                  <button
-                    className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs text-muted-foreground transition hover:bg-background"
-                    style={{ border: "0.5px dashed hsl(var(--border))" }}
-                  >
+                  <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs text-muted-foreground transition hover:bg-background" style={{ border: "0.5px dashed hsl(var(--border))" }}>
                     <IconPlus className="size-3" stroke={1.8} /> Add deal
                   </button>
                 </div>
@@ -219,11 +210,9 @@ export default function DealsPage() {
           })}
         </div>
       </div>
-
-      {/* Detail drawer */}
       {selected && (
         <div className="h-fit w-72 shrink-0 overflow-hidden rounded-2xl bg-background" style={{ border: "2px solid var(--color-whisper)" }}>
-          <DealDetail deal={selected} onClose={() => setSelected(null)} onStageChange={handleStageChange} />
+          <DealDetail deal={selected} stages={pipeline.stages} onClose={() => setSelected(null)} onStageChange={handleStageChange} />
         </div>
       )}
     </div>
