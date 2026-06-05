@@ -1,5 +1,8 @@
-import { t, type TranslationKey } from "@/lib/i18n";
+"use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { t, type TranslationKey } from "@/lib/i18n";
 import {
   IconBuildingCommunity,
   IconLayoutDashboard,
@@ -8,20 +11,21 @@ import {
 } from "@tabler/icons-react";
 
 const navigationItems = [
-  { labelKey: "dashboard.title", icon: IconLayoutDashboard },
-  { labelKey: "contacts.title", icon: IconUsers },
-  { labelKey: "deals.title", icon: IconBuildingCommunity },
-  { labelKey: "reports.title", icon: IconBuildingCommunity },
-  { labelKey: "settings.title", icon: IconSettings },
-] satisfies readonly { readonly labelKey: TranslationKey; readonly icon: typeof IconLayoutDashboard }[];
+  { labelKey: "dashboard.title", icon: IconLayoutDashboard, href: "/dashboard" },
+  { labelKey: "contacts.title", icon: IconUsers, href: "/contacts" },
+  { labelKey: "deals.title", icon: IconBuildingCommunity, href: "/deals" },
+  { labelKey: "reports.title", icon: IconBuildingCommunity, href: "/reports" },
+  { labelKey: "settings.title", icon: IconSettings, href: "/settings" },
+] satisfies readonly { readonly labelKey: TranslationKey; readonly icon: typeof IconLayoutDashboard; readonly href: string }[];
 
 export function Sidebar() {
+  const pathname = usePathname();
+
   return (
     <aside className="hidden h-dvh w-[196px] shrink-0 border-r-hairline bg-midnight text-ivory md:flex md:flex-col">
       <div className="border-b-hairline px-5 py-5">
         <p className="text-lg font-semibold tracking-tight">{t("app.name")}</p>
       </div>
-
       <div className="px-4 py-4">
         <div className="rounded-2xl border-hairline border-ivory/15 bg-ivory/10 p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
@@ -31,7 +35,6 @@ export function Sidebar() {
           <p className="mt-1 text-xs text-ivory/70">{t("appShell.workspace.switcherSlot")}</p>
         </div>
       </div>
-
       <nav aria-label={t("navigation.primary")} className="flex-1 px-3 py-2">
         <p className="px-2 text-xs font-medium uppercase tracking-[0.16em] text-ivory/50">
           {t("navigation.section.crm")}
@@ -39,21 +42,24 @@ export function Sidebar() {
         <div className="mt-3 space-y-1">
           {navigationItems.map((item) => {
             const Icon = item.icon;
-
+            const isActive = pathname === item.href;
             return (
-              <a
-                className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-ivory/78 transition hover:bg-ivory/10 hover:text-ivory focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-                href="#"
+              <Link
+                className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse ${
+                  isActive
+                    ? "bg-ivory/15 text-ivory"
+                    : "text-ivory/78 hover:bg-ivory/10 hover:text-ivory"
+                }`}
+                href={item.href}
                 key={item.labelKey}
               >
                 <Icon aria-hidden="true" className="size-4" stroke={1.8} />
                 {t(item.labelKey)}
-              </a>
+              </Link>
             );
           })}
         </div>
       </nav>
-
       <div className="border-t-hairline p-4">
         <div className="flex items-center gap-3 rounded-2xl bg-ivory/10 p-3">
           <div className="flex size-8 items-center justify-center rounded-full bg-whisper text-xs font-semibold text-primary-foreground">
