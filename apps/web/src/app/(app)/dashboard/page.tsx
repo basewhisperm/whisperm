@@ -7,7 +7,7 @@ interface Activity { id: string; type: "call" | "email" | "meeting" | "note"; co
 
 const metrics: MetricCard[] = [
   { label: "Active Clients", value: "48", delta: "+3 this month", positive: true, icon: IconUsers },
-  { label: "Pipeline Value", value: "284500", delta: "+12% vs last month", positive: true, icon: IconCurrencyDollar },
+  { label: "Pipeline Value", value: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(284500), delta: "+12% vs last month", positive: true, icon: IconCurrencyDollar },
   { label: "Engagements Won", value: "7", delta: "+2 vs last month", positive: true, icon: IconTrophy },
   { label: "Avg Response Time", value: "4.2h", delta: "+0.8h vs last month", positive: false, icon: IconClock },
 ];
