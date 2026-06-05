@@ -34,7 +34,7 @@ const STAGE_STYLES: Record<string, { bg: string; color: string }> = {
   Renewal:    { bg: "#DCFCE7", color: "#15803D" },
 };
 
-function StageBadge({ stage }: { stage?: string | null }) {
+function StageBadge({ stage }: { stage?: string | null | undefined }) {
   if (!stage) return null;
   const s = STAGE_STYLES[stage] ?? { bg: "#F3F4F6", color: "#6B7280" };
   return (
@@ -97,7 +97,7 @@ export default function ContactsPage() {
     .filter(c => {
       const q = search.toLowerCase();
       const name = getContactName(c).toLowerCase();
-      return (stageFilter === "All" || c.stage === stageFilter) &&
+      return (stageFilter === "All" || (c.stage ?? "") === stageFilter) &&
         (name.includes(q) || (c.company ?? "").toLowerCase().includes(q) || (c.email ?? "").toLowerCase().includes(q));
     })
     .sort((a, b) => {
