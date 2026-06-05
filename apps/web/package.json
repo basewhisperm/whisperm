@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "pnpm --filter @whisperm/types build && next build",
     "lint": "next lint",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm --filter @whisperm/types build && tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
