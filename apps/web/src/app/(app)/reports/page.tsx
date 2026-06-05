@@ -75,8 +75,8 @@ const SUMMARY_STATS: Record<DateRange, { avgDaysToClose: number; renewalRate: nu
 };
 
 function formatK(value: number) {
-  if (value >= 1000) return `$${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}k`;
-  return `$${value}`;
+  if (value >= 1000) return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 }
 
 function BarChart({ data }: { data: { stage: string; value: number; color: string }[] }) {
@@ -87,7 +87,7 @@ function BarChart({ data }: { data: { stage: string; value: number; color: strin
         <div key={d.stage} className="flex flex-1 flex-col items-center gap-2">
           <span className="text-xs font-medium" style={{ color: d.color }}>{formatK(d.value)}</span>
           <div className="w-full overflow-hidden rounded-t-lg transition-all" style={{ height: `${Math.max((d.value / max) * 160, 8)}px`, background: d.color, opacity: 0.85 }} />
-          <span className="text-[10px] text-muted-foreground text-center leading-tight">{d.stage}</span>
+          <span className="text-[11px] text-muted-foreground text-center leading-tight">{d.stage}</span>
         </div>
       ))}
     </div>

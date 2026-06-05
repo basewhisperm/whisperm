@@ -187,7 +187,7 @@ export default function DealsPage() {
                 <div className="flex items-center justify-between px-3 py-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold" style={{ color: accent }}>{stage}</span>
-                    <span className="flex size-4 items-center justify-center rounded-full text-[10px] font-semibold text-white" style={{ background: accent }}>{stageList.length}</span>
+                    <span className="flex size-4 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: accent }}>{stageList.length}</span>
                   </div>
                   <span className="text-xs text-muted-foreground">{formatValue(stageTotal(stage), "USD")}</span>
                 </div>

@@ -129,7 +129,7 @@ export default function SettingsPage() {
                 <span className="text-xs text-muted-foreground w-4 text-right">{i + 1}</span>
                 <span className="text-sm font-medium text-foreground">{stage}</span>
                 {DEFAULT_STAGES.includes(stage) && (
-                  <span className="text-[10px] text-muted-foreground">(default)</span>
+                  <span className="text-[11px] text-muted-foreground">(default)</span>
                 )}
               </div>
               {!DEFAULT_STAGES.includes(stage) && (
