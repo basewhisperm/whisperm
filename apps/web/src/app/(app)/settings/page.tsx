@@ -82,7 +82,7 @@ export default function SettingsPage() {
     if (!inviteEmail.trim()) return;
     const newMember: TeamMember = {
       id: String(Date.now()),
-      name: inviteEmail.split("@")[0] ?? inviteEmail,
+      name: (inviteEmail.split("@")[0] ?? inviteEmail) as string,
       email: inviteEmail.trim(),
       role: inviteRole,
     };
@@ -110,7 +110,7 @@ export default function SettingsPage() {
                     <p className="text-xs text-muted-foreground">{setting.description}</p>
                   </div>
                 </div>
-                <Toggle enabled={toggles[setting.id] ?? false} onChange={() => toggleSetting(setting.id)} />
+                <Toggle enabled={Boolean(toggles[setting.id])} onChange={() => toggleSetting(setting.id)} />
               </div>
             );
           })}
@@ -165,7 +165,7 @@ export default function SettingsPage() {
             <div key={m.id} className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ border: "0.5px solid hsl(var(--border))" }}>
               <div className="flex items-center gap-3">
                 <div className="flex size-7 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: "var(--color-whisper)" }}>
-                  {m.name[0]?.toUpperCase() ?? "?"}
+                  {(m.name[0] ?? "?").toUpperCase()}
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">{m.name}</p>
