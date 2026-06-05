@@ -6,4 +6,4 @@ export {
   type CurrencyDisplayInput,
   type SupportedCurrency,
   type WorkspaceCountry,
-} from "../../../../packages/types/src/i18n";
+} from "@whisperm/types";
