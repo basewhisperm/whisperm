@@ -8,7 +8,7 @@
   },
   "scripts": {
     "lint": "pnpm -r --if-present run lint",
-    "typecheck": "pnpm --filter @whisperm/types build && pnpm -r --if-present run typecheck",
+    "typecheck": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/notification-runtime build && pnpm -r --if-present run typecheck",
     "test": "pnpm -r --if-present run test",
     "seed:pipelines": "node prisma/seed.mjs",
     "build": "pnpm -r --if-present run build",
