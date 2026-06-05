@@ -20,7 +20,14 @@ const TOGGLE_SETTINGS: ToggleSetting[] = [
 
 const DEFAULT_STAGES = ["Prospect", "Qualified", "Proposal", "Engagement", "Renewal"];
 
-const TEAM_MEMBERS = [
+interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: "Admin" | "Member";
+}
+
+const INITIAL_MEMBERS: TeamMember[] = [
   { id: "1", name: "Operator", email: "operator@whisperm.io", role: "Admin" },
 ];
 
@@ -50,7 +57,7 @@ export default function SettingsPage() {
 
   const [stages, setStages] = useState<string[]>(DEFAULT_STAGES);
   const [newStage, setNewStage] = useState("");
-  const [members, setMembers] = useState(TEAM_MEMBERS);
+  const [members, setMembers] = useState<TeamMember[]>(INITIAL_MEMBERS);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"Admin" | "Member">("Member");
 
@@ -73,31 +80,27 @@ export default function SettingsPage() {
 
   function inviteMember() {
     if (!inviteEmail.trim()) return;
-    setMembers(prev => [...prev, {
+    const newMember: TeamMember = {
       id: String(Date.now()),
-      name: inviteEmail.split("@")[0],
+      name: inviteEmail.split("@")[0] ?? inviteEmail,
       email: inviteEmail.trim(),
       role: inviteRole,
-    }]);
+    };
+    setMembers(prev => [...prev, newMember]);
     setInviteEmail("");
   }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-
-      {/* Notifications & features */}
       <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
         <h2 className="mb-4 text-sm font-semibold text-foreground" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
           Workspace preferences
         </h2>
         <div className="space-y-1">
-          {TOGGLE_SETTINGS.map((setting, i) => {
+          {TOGGLE_SETTINGS.map((setting) => {
             const Icon = setting.icon;
             return (
-              <div
-                key={setting.id}
-                className="flex items-center justify-between rounded-xl px-3 py-3 hover:bg-muted"
-              >
+              <div key={setting.id} className="flex items-center justify-between rounded-xl px-3 py-3 hover:bg-muted">
                 <div className="flex items-center gap-3">
                   <div className="flex size-7 shrink-0 items-center justify-center rounded-lg" style={{ background: "var(--color-mist)" }}>
                     <Icon className="size-3.5" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
@@ -107,14 +110,13 @@ export default function SettingsPage() {
                     <p className="text-xs text-muted-foreground">{setting.description}</p>
                   </div>
                 </div>
-                <Toggle enabled={toggles[setting.id]} onChange={() => toggleSetting(setting.id)} />
+                <Toggle enabled={toggles[setting.id] ?? false} onChange={() => toggleSetting(setting.id)} />
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Pipeline stages */}
       <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
         <div className="mb-4 flex items-center gap-2" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
           <IconLayoutKanban className="size-4" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
@@ -147,17 +149,12 @@ export default function SettingsPage() {
             onChange={e => setNewStage(e.target.value)}
             onKeyDown={e => e.key === "Enter" && addStage()}
           />
-          <button
-            onClick={addStage}
-            className="flex h-9 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-white transition hover:opacity-90"
-            style={{ background: "var(--color-whisper)" }}
-          >
+          <button onClick={addStage} className="flex h-9 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-white transition hover:opacity-90" style={{ background: "var(--color-whisper)" }}>
             <IconPlus className="size-3.5" stroke={1.8} /> Add
           </button>
         </div>
       </div>
 
-      {/* Team members */}
       <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
         <div className="mb-4 flex items-center gap-2" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
           <IconUsers className="size-4" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
@@ -168,7 +165,7 @@ export default function SettingsPage() {
             <div key={m.id} className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ border: "0.5px solid hsl(var(--border))" }}>
               <div className="flex items-center gap-3">
                 <div className="flex size-7 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: "var(--color-whisper)" }}>
-                  {m.name[0].toUpperCase()}
+                  {m.name[0]?.toUpperCase() ?? "?"}
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">{m.name}</p>
@@ -197,16 +194,11 @@ export default function SettingsPage() {
             <option>Member</option>
             <option>Admin</option>
           </select>
-          <button
-            onClick={inviteMember}
-            className="flex h-9 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-white transition hover:opacity-90"
-            style={{ background: "var(--color-whisper)" }}
-          >
+          <button onClick={inviteMember} className="flex h-9 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-white transition hover:opacity-90" style={{ background: "var(--color-whisper)" }}>
             <IconPlus className="size-3.5" stroke={1.8} /> Invite
           </button>
         </div>
       </div>
-
     </div>
   );
 }
