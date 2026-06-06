@@ -1,9 +1,0 @@
-{
-  "buildCommand": "cd apps/web && pnpm --filter @whisperm/types build && prisma generate --schema=../../prisma/schema.prisma && pnpm build",
-  "outputDirectory": "apps/web/.next",
-  "installCommand": "pnpm install",
-  "framework": "nextjs",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
-  ]
-}
