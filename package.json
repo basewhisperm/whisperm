@@ -14,11 +14,15 @@
     "build": "pnpm -r --if-present run build",
     "seed:founding-workspaces": "node prisma/founding-workspaces-seed.mjs",
     "typecheck:strict": "pnpm --filter @whisperm/types build && pnpm -r --if-present run typecheck",
-    "postinstall": "node node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/build/index.js generate"
+    "postinstall": "prisma generate"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
     "eslint": "^8.57.0",
+    "prisma": "5.22.0",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0"
   }
 }
