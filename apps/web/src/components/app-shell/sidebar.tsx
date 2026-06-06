@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton, useUser } from "@clerk/nextjs";
 import { t, type TranslationKey } from "@/lib/i18n";
+import { WorkspaceSelector } from "@/components/ui/workspace-selector";
 import {
-  IconBuildingCommunity,
   IconLayoutDashboard,
   IconSettings,
   IconUsers,
@@ -31,13 +31,7 @@ export function Sidebar() {
         <p className="text-lg font-semibold tracking-tight">{t("app.name")}</p>
       </div>
       <div className="px-4 py-4">
-        <div className="rounded-2xl border-hairline border-ivory/15 bg-ivory/10 p-3">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <IconBuildingCommunity aria-hidden="true" className="size-4" stroke={1.8} />
-            {t("appShell.workspace.label")}
-          </div>
-          <p className="mt-1 text-xs text-ivory/70">{t("appShell.workspace.switcherSlot")}</p>
-        </div>
+        <WorkspaceSelector />
       </div>
       <nav aria-label={t("navigation.primary")} className="flex-1 px-3 py-2">
         <p className="px-2 text-xs font-medium uppercase tracking-[0.16em] text-ivory/50">
@@ -67,12 +61,7 @@ export function Sidebar() {
       <div className="border-t-hairline p-4">
         <div className="flex items-center gap-3 rounded-2xl bg-ivory/10 p-3">
           <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "size-8",
-                userButtonPopoverCard: "shadow-lg",
-              },
-            }}
+            appearance={{ elements: { avatarBox: "size-8" } }}
             afterSignOutUrl="/sign-in"
           />
           <div className="min-w-0 flex-1">
