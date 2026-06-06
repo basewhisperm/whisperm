@@ -117,7 +117,7 @@ function TypePicker({ onPick }: { onPick: (type: RecordType) => void }) {
           style={{ border: "0.5px solid hsl(var(--border))" }}
         >
           <div className="flex size-8 items-center justify-center rounded-xl" style={{ background: "var(--color-mist)" }}>
-            <Icon className="size-4" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
+            <Icon aria-hidden="true" className="size-4" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
           </div>
           <div>
             <p className="text-sm font-semibold text-foreground">{label}</p>
@@ -147,7 +147,7 @@ export function NewRecordModal({ open, onClose }: NewRecordModalProps) {
         <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
           <h2 className="text-base font-semibold text-foreground">{title}</h2>
           <button onClick={onClose} className="rounded-lg p-1 hover:bg-muted">
-            <IconX className="size-4 text-muted-foreground" stroke={1.8} />
+            <IconX aria-hidden="true" className="size-4 text-muted-foreground" stroke={1.8} />
           </button>
         </div>
         <div className="p-6">
