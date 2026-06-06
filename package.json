@@ -13,7 +13,8 @@
     "seed:pipelines": "node prisma/seed.mjs",
     "build": "pnpm -r --if-present run build",
     "seed:founding-workspaces": "node prisma/founding-workspaces-seed.mjs",
-    "typecheck:strict": "pnpm --filter @whisperm/types build && pnpm -r --if-present run typecheck"
+    "typecheck:strict": "pnpm --filter @whisperm/types build && pnpm -r --if-present run typecheck",
+    "postinstall": "prisma generate"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
