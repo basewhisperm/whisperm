@@ -1,5 +1,5 @@
 {
-  "buildCommand": "pnpm --filter @whisperm/types build && npx prisma@5 generate --schema=../../prisma/schema.prisma && pnpm build",
+  "buildCommand": "pnpm --filter @whisperm/types build && pnpm dlx prisma@5 generate --schema=../../prisma/schema.prisma && pnpm build",
   "outputDirectory": ".next",
   "framework": "nextjs"
 }
