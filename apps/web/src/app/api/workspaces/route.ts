@@ -1,15 +1,8 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getTenantForCurrentUser } from "@/lib/get-tenant";
 
 export async function GET() {
-  const { userId } = auth();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const workspaces = await prisma.tenant.findMany({
-    orderBy: { createdAt: "asc" },
-    select: { id: true, name: true, slug: true },
-  });
-
-  return NextResponse.json({ workspaces });
+  const tenant = await getTenantForCurrentUser();
+  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return NextResponse.json({ workspaces: [{ id: tenant.id, name: tenant.name, slug: tenant.slug }] });
 }

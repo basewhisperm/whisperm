@@ -1,14 +1,11 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { PrismaReportsRepository } from "@whisperm/repositories";
 
 export async function GET(request: NextRequest) {
-  const { userId } = auth();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const tenant = await prisma.tenant.findFirst({ orderBy: { createdAt: "asc" } });
-  if (!tenant) return NextResponse.json({ error: "No workspace found" }, { status: 404 });
+  const tenant = await getTenantForCurrentUser();
+  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const context = { tenantId: tenant.id };
   const repo = new PrismaReportsRepository(prisma as any);
