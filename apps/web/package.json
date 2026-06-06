@@ -8,7 +8,9 @@
     "build": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && next build",
     "lint": "next lint",
     "typecheck": "pnpm --filter @whisperm/types build && prisma generate --schema=../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@clerk/nextjs": "5",
@@ -26,6 +28,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "autoprefixer": "^10.4.21",
