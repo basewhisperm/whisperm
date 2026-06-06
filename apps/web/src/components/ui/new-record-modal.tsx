@@ -59,7 +59,7 @@ function ContactForm({ onClose }: { onClose: () => void }) {
               className="h-9 w-full rounded-xl bg-secondary px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[var(--color-pulse)]"
               style={{ border: "0.5px solid hsl(var(--border))" }}
               value={form[key as keyof NewContactForm]}
-              onChange={e => setForm(prev => ({ ...prev, [key]: e.target.value }))}
+              onChange={e => { const k = key as keyof NewContactForm; setForm(prev => ({ ...prev, [k]: e.target.value })); }}
               placeholder={label}
             />
           </div>
@@ -73,7 +73,7 @@ function ContactForm({ onClose }: { onClose: () => void }) {
             className="h-9 w-full rounded-xl bg-secondary px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[var(--color-pulse)]"
             style={{ border: "0.5px solid hsl(var(--border))" }}
             value={form[key as keyof NewContactForm]}
-            onChange={e => setForm(prev => ({ ...prev, [key]: e.target.value }))}
+            onChange={e => { const k = key as keyof NewContactForm; setForm(prev => ({ ...prev, [k]: e.target.value })); }}
             placeholder={label}
           />
         </div>

@@ -34,9 +34,7 @@ export async function POST(request: NextRequest) {
     lastName: body.lastName || undefined,
     email: body.email || undefined,
     phone: body.phone || undefined,
-    company: body.company || undefined,
-    stage: body.stage || "Prospect",
-    source: body.source || undefined,
+    stage: body.stage || undefined,
   });
 
   return NextResponse.json(contact, { status: 201 });
