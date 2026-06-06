@@ -14,6 +14,10 @@ jobs:
           fetch-depth: 0
 
       - name: Push to mirror
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
         run: |
-          git remote add mirror https://x-access-token:${{ secrets.MIRROR_TOKEN }}@github.com/basetrustlayer-cmd/whisperm.git
+          git config --global user.email "mirror@whisperm.io"
+          git config --global user.name "WhispeRM Mirror"
+          git remote add mirror https://basetrustlayer-cmd:${MIRROR_TOKEN}@github.com/basetrustlayer-cmd/whisperm.git
           git push mirror main --force
