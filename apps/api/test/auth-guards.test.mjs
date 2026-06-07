@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AuthError,
+  createRefreshTokenPlaceholder,
   hasRequiredRole,
   loadTenantMembershipMiddleware,
   roleGuardMiddleware,
@@ -142,4 +143,30 @@ test("tenant isolation guard fails closed when header and membership tenant diff
     () => tenantIsolationGuardMiddleware()(request),
     (error) => error instanceof AuthError && error.code === "TENANT_CONTEXT_MISMATCH"
   );
+});
+
+test("refresh token placeholder records denied audit event and fails closed", async () => {
+  const auditEvents = [];
+  const refreshTokenService = createRefreshTokenPlaceholder({
+    async record(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  await assert.rejects(
+    async () =>
+      refreshTokenService.refresh({
+        refreshToken: "refresh-token-1",
+        tenantId: "tenant-1",
+        correlationId: "corr-1"
+      }),
+    (error) => error instanceof AuthError && error.code === "AUTH_INVALID_TOKEN" && error.statusCode === 501
+  );
+
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0].action, "auth.refresh_token.placeholder");
+  assert.equal(auditEvents[0].correlationId, "corr-1");
+  assert.equal(auditEvents[0].outcome, "DENIED");
+  assert.equal(auditEvents[0].reasonCode, "AUTH_INVALID_TOKEN");
+  assert.ok(auditEvents[0].occurredAt instanceof Date);
 });

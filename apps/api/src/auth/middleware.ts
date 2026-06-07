@@ -72,9 +72,10 @@ export const tenantIsolationGuardMiddleware = (): FastifyHookHandler => (request
  * STUB: Refresh-token rotation is not implemented yet.
  *
  * This fail-closed service exists only so auth routes can depend on the
- * RefreshTokenService interface before the real provider is wired.
+ * RefreshTokenService interface before the real provider is wired. It is not
+ * an operational implementation.
  *
- * Do not expose this as a public refresh-token implementation.
+ * Do not use this as a production or public refresh-token implementation.
  * It always records a denied audit event and returns AUTH_INVALID_TOKEN.
  */
 export const createRefreshTokenPlaceholder = (auditLogger: AuditLogger): RefreshTokenService => ({
