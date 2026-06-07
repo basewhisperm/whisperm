@@ -155,3 +155,12 @@ All contributors and agents must optimize for safety, determinism, tenant isolat
 - Do not introduce breaking API/schema/event changes without migration strategy.
 - Do not modify unrelated files.
 
+
+---
+
+## 8) Delegation Concurrency Enforcement Scope
+
+- `maxConcurrentDelegations` is validated by `agentCapabilityContractSchema` at schema parse time only.
+- Schema parsing validates the configured delegation-concurrency contract; it does not enforce active delegation count at runtime.
+- The coordination/delegation executor is responsible for runtime enforcement of active delegation counts before claiming or starting delegated work.
+- Schema-time assertions are not a substitute for executor-level coordination, persistence locks, idempotency, and tenant-scoped active-count checks.
