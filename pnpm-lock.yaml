@@ -31,7 +31,7 @@ importers:
         specifier: workspace:^
         version: link:../../packages/billing-runtime
       '@whisperm/notification-runtime':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../packages/notification-runtime
       '@whisperm/types':
         specifier: workspace:*
