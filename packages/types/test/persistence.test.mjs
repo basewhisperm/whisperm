@@ -94,6 +94,21 @@ test("persistence schemas validate tenant-scoped audit, execution, AI, ingestion
   assert.equal(vectorDocument.embeddingDimension, 1536);
 });
 
+test("idempotencyRecordSchema accepts already-expired records — expiry is application-layer concern", () => {
+  const expiredRecord = idempotencyRecordSchema.parse({
+    tenantId: "tenant-1",
+    scope: "JOB",
+    key: "tenant-1:job-expired",
+    requestHash: "hash-1",
+    state: "EXPIRED",
+    expiresAt: "2020-01-01T00:00:00.000Z",
+    correlation: { correlationId: "corr-1" },
+  });
+
+  assert.equal(expiredRecord.state, "EXPIRED");
+  assert.equal(expiredRecord.expiresAt, "2020-01-01T00:00:00.000Z");
+});
+
 test("tenant scope guard fails closed for missing or mismatched persistence resources", () => {
   assert.doesNotThrow(() => assertTenantScope({ tenantId: "tenant-1" }, { tenantId: "tenant-1" }));
 

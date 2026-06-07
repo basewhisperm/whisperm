@@ -89,6 +89,11 @@ export const idempotencyKeyStateValues = ["IN_PROGRESS", "COMPLETED", "FAILED", 
 export const idempotencyKeyStateSchema = z.enum(idempotencyKeyStateValues);
 export type IdempotencyKeyState = z.infer<typeof idempotencyKeyStateSchema>;
 
+// expiresAt is stored and validated at parse time only for format correctness.
+// Expiry enforcement (rejecting records where expiresAt < now) is the
+// responsibility of the IdempotencyKey repository layer, not the schema.
+// Schema-layer expiry checks would require injecting clock state into Zod,
+// which violates the deterministic, stateless contract of these schemas.
 export const idempotencyRecordSchema = z.object({
   tenantId: z.string().min(1),
   scope: z.string().min(1),
