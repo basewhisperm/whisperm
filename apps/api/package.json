@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/billing-runtime build && pnpm run build && node --test test/*.test.mjs test/*.test.js",
+    "test": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/billing-runtime build && pnpm --filter @whisperm/notification-runtime build && pnpm run build && node --test test/*.test.mjs test/*.test.js",
     "perf:load": "pnpm run build && node scripts/performance-load.mjs"
   },
   "dependencies": {
