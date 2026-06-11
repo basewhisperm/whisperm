@@ -9,6 +9,7 @@ import { createDashboardHandler, type DashboardRouteDependencies } from "./crm/d
 import { createReportsHandler, type ReportsRouteDependencies } from "./crm/reports.js";
 import { createContactCreateHandler, createContactImportHandler, createContactListHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
+import { createMarketplaceCaptureCreateHandler, type MarketplaceCaptureRouteDependencies } from "./marketplace-acquisition/captures.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { applySecurityHeaders, sanitizeRequestBody, authRateLimiter, getClientIp } from "./http/security.js";
@@ -70,6 +71,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly contactQuota?: ContactRouteDependencies["quota"] | undefined;
   readonly deals?: DealRouteDependencies["deals"] | undefined;
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
+  readonly marketplaceCaptures?: MarketplaceCaptureRouteDependencies["marketplaceCaptures"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
   readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
@@ -186,6 +188,7 @@ const routeTemplate = (method: string, pathname: string): string => {
   if (method === "GET" && pathname === "/healthz") return "/healthz";
   if (method === "GET" && pathname === "/readyz") return "/readyz";
   if (method === "POST" && pathname === "/contacts/import") return "/contacts/import";
+  if (method === "POST" && pathname === "/marketplace-acquisition/captures") return "/marketplace-acquisition/captures";
   if (method === "POST" && pathname === "/webhooks/stripe") return "/webhooks/stripe";
   if (method === "POST" && pathname === "/webhooks/paystack") return "/webhooks/paystack";
   if (method === "GET" && pathname === "/dashboard") return "/dashboard";
@@ -368,6 +371,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const dashboardHandler = dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
   const reportsHandler = dependencies.reports === undefined ? undefined : createReportsHandler({ reports: dependencies.reports });
   const activityCreateHandler = dependencies.activities === undefined ? undefined : createActivityCreateHandler({ activities: dependencies.activities });
+  const marketplaceCaptureCreateHandler = dependencies.marketplaceCaptures === undefined ? undefined : createMarketplaceCaptureCreateHandler({ marketplaceCaptures: dependencies.marketplaceCaptures });
   const activityListHandler = dependencies.activities === undefined ? undefined : createActivityListHandler({ activities: dependencies.activities });
   const contactActivitiesHandler = dependencies.activities === undefined ? undefined : createContactActivitiesHandler({ activities: dependencies.activities });
   const dealActivitiesHandler = dependencies.activities === undefined ? undefined : createDealActivitiesHandler({ activities: dependencies.activities });
@@ -481,6 +485,15 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         if (tenantId.length > 0) {
           await requireActiveSubscription(tenantId);
         }
+      }
+
+      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
+        if (marketplaceCaptureCreateHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_CAPTURE_NOT_CONFIGURED", message: "Marketplace capture API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        await marketplaceCaptureCreateHandler(request, reply);
+        return reply.toInjectResponse();
       }
 
             const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);

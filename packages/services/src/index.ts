@@ -14,6 +14,8 @@ import {
   billingUsageRecordSchema,
   type ContactRepository,
   type ActivityRepository,
+  type MarketplaceCaptureRepository,
+  type CreateMarketplaceCaptureInput,
   type ActivityListFilters,
   type ActivityRecord,
   activityRecordSchema,
@@ -101,6 +103,10 @@ import {
   type PersistenceCorrelationMetadata,
   persistenceCorrelationMetadataSchema,
   type TenantScoped,
+  createMarketplaceCaptureRequestSchema,
+  type CreateMarketplaceCaptureRequest,
+  type MarketplaceCaptureResponse,
+  marketplaceCaptureRecordSchema,
 } from "@whisperm/types";
 
 const metadataSchema = z.record(z.string(), z.unknown());
@@ -187,6 +193,7 @@ export interface ServiceRepositories {
   readonly contacts: ContactRepository;
   readonly deals: DealsRepository;
   readonly activities: ActivityRepository;
+  readonly marketplaceCaptures?: MarketplaceCaptureRepository | undefined;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -939,6 +946,128 @@ export class BillingService {
 }
 
 
+
+const normalizeOptionalNullableText = (value: string | null | undefined): string | undefined => normalizeOptionalText(value ?? undefined);
+
+const normalizeOptionalUrl = (value: string | null | undefined): string | undefined => normalizeOptionalNullableText(value);
+
+const sourceHostFromCapture = (input: CreateMarketplaceCaptureRequest): string | undefined => {
+  const explicit = normalizeOptionalNullableText(input.sourceHost);
+  if (explicit !== undefined) return explicit.toLowerCase();
+  try {
+    return new URL(input.listingUrl).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
+};
+
+const sellerDisplayNameFromCapture = (input: CreateMarketplaceCaptureRequest): string | undefined =>
+  normalizeOptionalNullableText(input.sellerDisplayName) ?? normalizeOptionalNullableText(input.sellerName);
+
+const sellerProfileUrlFromCapture = (input: CreateMarketplaceCaptureRequest): string | undefined =>
+  normalizeOptionalUrl(input.sourceSellerUrl) ?? normalizeOptionalUrl(input.sellerProfileUrl);
+
+const marketplaceContactMetadata = (input: CreateMarketplaceCaptureRequest): JsonObject => {
+  const sellerDisplayName = sellerDisplayNameFromCapture(input);
+  const sellerProfileUrl = sellerProfileUrlFromCapture(input);
+  const sourceHost = sourceHostFromCapture(input);
+  return withoutUndefined({
+    marketplaceAcquisition: withoutUndefined({
+      source: "marketplace-acquisition",
+      sourceHost,
+      sellerDisplayName,
+      sellerProfileUrl,
+    }) as JsonObject,
+  }) as JsonObject;
+};
+
+const marketplaceCaptureMetadata = (input: CreateMarketplaceCaptureRequest): JsonObject | undefined => {
+  const sourceHost = sourceHostFromCapture(input);
+  const sellerEmail = normalizeOptionalNullableText(input.sellerEmail);
+  const sellerPhone = normalizeOptionalNullableText(input.sellerPhone);
+  const metadata = withoutUndefined({
+    ...(input.metadata ?? {}),
+    sourceHost,
+    sellerEmail,
+    sellerPhone,
+  }) as JsonObject;
+  return Object.keys(metadata).length === 0 ? undefined : metadata;
+};
+
+export class MarketplaceCaptureService {
+  constructor(private readonly deps: ServiceDependencies) {}
+
+  async create(contextInput: ServiceContext, input: CreateMarketplaceCaptureRequest): Promise<MarketplaceCaptureResponse> {
+    const context = ensureContext(contextInput);
+    const repository = this.deps.marketplaceCaptures;
+    if (repository === undefined) {
+      throw new ServiceError({ code: "SERVICE_REPOSITORY_FAILED", message: "Marketplace capture repository is not configured", status: 503, correlation: context.correlation });
+    }
+    const data = ensureTenantInput(context, exactInput(parseContract(createMarketplaceCaptureRequestSchema, input, context.correlation)));
+    const sellerDisplayName = sellerDisplayNameFromCapture(data);
+    const sellerProfileUrl = sellerProfileUrlFromCapture(data);
+    const sourceHost = sourceHostFromCapture(data);
+    const email = normalizeOptionalNullableText(data.sellerEmail);
+    const phone = normalizeOptionalNullableText(data.sellerPhone);
+
+    return runWrite(this.deps, context, async (repositories) => {
+      if (repositories.marketplaceCaptures === undefined) {
+        throw new ServiceError({ code: "SERVICE_REPOSITORY_FAILED", message: "Marketplace capture repository is not configured", status: 503, correlation: context.correlation });
+      }
+      const captureInput: CreateMarketplaceCaptureInput = exactInput({
+        tenantId: context.tenantId,
+        marketplaceSourceId: data.marketplaceSourceId,
+        externalId: data.externalId,
+        listingUrl: data.listingUrl,
+        title: data.title,
+        description: data.description,
+        price: data.price,
+        currency: data.currency,
+        sellerName: sellerDisplayName,
+        sellerProfileUrl,
+        status: "CAPTURED",
+        metadata: marketplaceCaptureMetadata(data),
+      });
+      const capture = marketplaceCaptureRecordSchema.parse(await repositories.marketplaceCaptures.create(contextToTenantScope(context), captureInput));
+      const existingContact = await repositories.contacts.findMarketplaceSellerContact(contextToTenantScope(context), exactInput({
+        tenantId: context.tenantId,
+        sellerProfileUrl,
+        sourceHost,
+        sellerDisplayName,
+        email,
+        phone,
+      }));
+      const contact = existingContact ?? await repositories.contacts.createMarketplaceSellerContact(contextToTenantScope(context), exactInput({
+        tenantId: context.tenantId,
+        email,
+        phone,
+        firstName: sellerDisplayName ?? "Marketplace Seller",
+        stage: "PROSPECT",
+        metadata: marketplaceContactMetadata(data),
+      }));
+      const linkedCapture = marketplaceCaptureRecordSchema.parse(await repositories.marketplaceCaptures.linkCaptureToContact(contextToTenantScope(context), capture.id, contact.id));
+      if (context.actorId !== undefined) {
+        await repositories.activities.create(contextToTenantScope(context), {
+          tenantId: context.tenantId,
+          contactId: contact.id,
+          createdById: context.actorId,
+          type: "NOTE",
+          note: `Captured listing from ${sourceHost ?? "marketplace"}`,
+          metadata: { activityType: "MARKETPLACE_CAPTURED", captureId: capture.id, sourceHost },
+        });
+      }
+      await appendAudit(repositories, context, { action: "MARKETPLACE_CAPTURED", targetType: "MARKETPLACE_CAPTURE", targetId: capture.id, metadata: { contactId: contact.id, contactLinkage: existingContact === null ? "created" : "matched" } });
+      return {
+        id: linkedCapture.id,
+        contactId: contact.id,
+        contactLinkage: existingContact === null ? "created" : "matched",
+        listingUrl: linkedCapture.listingUrl,
+        status: linkedCapture.status,
+      };
+    });
+  }
+}
+
 const boardPageInputSchema = z.object({ limit: z.number().int().min(1).max(100).optional(), cursors: z.record(idSchema, idSchema.optional()).optional() }).strict();
 const createDealInputSchema = z.object({ tenantId: idSchema, pipelineStageId: idSchema, contactId: idSchema.nullable().optional(), ownerId: idSchema.nullable().optional(), externalId: idSchema.nullable().optional(), title: idSchema, value: z.union([z.number(), z.string()]).nullable().optional(), currency: z.string().min(3).max(3).optional(), probability: z.number().int().min(0).max(100).nullable().optional(), closedAt: isoDateSchema.nullable().optional(), metadata: metadataSchema.nullable().optional() }).strict();
 const moveDealStageInputSchema = z.object({ stageId: idSchema, expectedUpdatedAt: isoDateSchema }).strict();
@@ -1081,6 +1210,7 @@ export interface WhispeRMServices {
   readonly contacts: ContactService;
   readonly deals: DealService;
   readonly activities: ActivityService;
+  readonly marketplaceCaptures: MarketplaceCaptureService;
   readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
   readonly workflows: WorkflowService;
@@ -1097,6 +1227,7 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   contacts: new ContactService(dependencies),
   deals: new DealService(dependencies),
   activities: new ActivityService(dependencies),
+  marketplaceCaptures: new MarketplaceCaptureService(dependencies),
   scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
   workflows: new WorkflowService(dependencies),
