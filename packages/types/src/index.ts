@@ -205,7 +205,6 @@ export * from "./ai.js";
 export * from "./prompts.js";
 export * from "./planning.js";
 export * from "./crm.js";
-export * from "./marketplace-acquisition.js";
 export * from "./i18n.js";
 
 export * from "./tool-runtime.js";

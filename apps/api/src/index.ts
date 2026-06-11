@@ -114,6 +114,3 @@ export { sanitizeString, sanitizeRequestBody, createRateLimiter, authRateLimiter
 export type { RateLimiter, RateLimiterOptions } from "./http/security.js";
 export { OAuthError, buildGoogleAuthorizationUrl, createGoogleOAuthHandler, createOAuthCallbackRouteHandler, createOAuthInitiateRouteHandler, generateOAuthState } from "./auth/oauth.js";
 export type { GoogleOAuthConfig, GoogleOAuthDependencies, GoogleOAuthHandler, GoogleUserInfo, OAuthCallbackResult, OAuthErrorCode, OAuthHttpClient, OAuthRouteResult, OAuthSessionService, OAuthSessionToken, OAuthStateStore, OAuthTenantRecord, OAuthTokenResponse, OAuthUserRecord, OAuthUserRepository } from "./auth/oauth.js";
-
-export { createMarketplaceCaptureHandler } from "./marketplace-acquisition/capture.js";
-export type { MarketplaceCaptureRouteContext, MarketplaceCaptureRouteDependencies, MarketplaceCaptureServicePort } from "./marketplace-acquisition/capture.js";
