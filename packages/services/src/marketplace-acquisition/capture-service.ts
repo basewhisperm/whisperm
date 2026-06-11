@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { MarketplaceAcquisitionRepository, MarketplaceCaptureRecord, CreateMarketplaceCaptureInput } from "@whisperm/repositories";
+import type { ContactRecord, MarketplaceAcquisitionRepository, MarketplaceCaptureRecord, CreateMarketplaceCaptureInput } from "@whisperm/repositories";
 import {
   marketplaceCaptureCreateRequestSchema,
   marketplaceCaptureResponseSchema,
@@ -32,6 +32,11 @@ export interface MarketplaceCaptureRepositoryPort {
   findMarketplaceCaptureBySourceUrl(context: TenantScoped, sourceUrl: string): Promise<MarketplaceCaptureRecord | null>;
 }
 
+export interface MarketplaceCaptureContactMatchingPort {
+  findByEmails?(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]>;
+  list?(context: TenantScoped, pagination?: { readonly limit?: number | undefined }): Promise<{ readonly items: readonly ContactRecord[] }>;
+}
+
 export interface MarketplaceCaptureAuditPort {
   append?(context: TenantScoped, input: {
     readonly tenantId: string;
@@ -47,6 +52,7 @@ export interface MarketplaceCaptureAuditPort {
 
 export interface MarketplaceCaptureServiceDependencies {
   readonly marketplaceAcquisition: MarketplaceCaptureRepositoryPort | MarketplaceAcquisitionRepository;
+  readonly contacts?: MarketplaceCaptureContactMatchingPort | undefined;
   readonly auditLogs?: MarketplaceCaptureAuditPort | undefined;
 }
 
@@ -87,10 +93,62 @@ const toResponse = (record: MarketplaceCaptureRecord): MarketplaceCaptureRespons
   id: record.id,
   tenantId: record.tenantId,
   sourceListingUrl: record.sourceListingUrl,
+  contactId: record.contactId,
+  sellerName: record.sellerName,
+  sellerProfileUrl: record.sellerProfileUrl,
   title: record.title,
   status: record.status,
   createdAt: record.createdAt,
 });
+
+const readText = (value: unknown): string | undefined => typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+const rawText = (rawExtract: Readonly<Record<string, unknown>>, keys: readonly string[]): string | undefined => {
+  for (const key of keys) {
+    const value = readText(rawExtract[key]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+};
+
+const normalizeEmail = (email: string | undefined): string | undefined => email === undefined ? undefined : email.trim().toLowerCase();
+const normalizeName = (name: string | undefined): string | undefined => name === undefined ? undefined : name.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim().replace(/\s+/gu, " ");
+
+const contactDisplayName = (contact: ContactRecord): string | undefined => {
+  const parts = [contact.firstName, contact.lastName].flatMap((part) => part === undefined || part === null ? [] : [part]);
+  return parts.length === 0 ? undefined : parts.join(" ");
+};
+
+const extractSellerProfileUrl = (rawExtract: Readonly<Record<string, unknown>>): string | undefined => {
+  const url = rawText(rawExtract, ["sellerProfileUrl", "sellerUrl", "profileUrl"]);
+  if (url === undefined) return undefined;
+  try {
+    return new URL(url).toString();
+  } catch {
+    return undefined;
+  }
+};
+
+const extractSeller = (request: MarketplaceCaptureCreateRequest): { readonly name?: string | undefined; readonly email?: string | undefined; readonly profileUrl?: string | undefined } => {
+  const rawExtract = request.rawExtract;
+  const name = rawText(rawExtract, ["sellerName", "seller", "dealerName", "contactName"]);
+  const email = normalizeEmail(rawText(rawExtract, ["sellerEmail", "contactEmail", "email"]));
+  return { name, email, profileUrl: extractSellerProfileUrl(rawExtract) };
+};
+
+const findBestContactMatch = async (contacts: MarketplaceCaptureContactMatchingPort | undefined, context: TenantScoped, seller: ReturnType<typeof extractSeller>): Promise<ContactRecord | undefined> => {
+  if (contacts === undefined) return undefined;
+  if (seller.email !== undefined && contacts.findByEmails !== undefined) {
+    const emailMatches = await contacts.findByEmails(context, [seller.email]);
+    const exactEmailMatch = emailMatches.find((contact) => normalizeEmail(contact.email ?? undefined) === seller.email);
+    if (exactEmailMatch !== undefined) return exactEmailMatch;
+  }
+
+  const sellerName = normalizeName(seller.name);
+  if (sellerName === undefined || contacts.list === undefined) return undefined;
+  const listed = await contacts.list(context, { limit: 100 });
+  return listed.items.find((contact) => normalizeName(contactDisplayName(contact)) === sellerName);
+};
 
 export class MarketplaceCaptureService {
   constructor(private readonly dependencies: MarketplaceCaptureServiceDependencies) {}
@@ -106,10 +164,15 @@ export class MarketplaceCaptureService {
     }
 
     const price = parsePriceText(request.priceText);
+    const seller = extractSeller(request);
+    const contactMatch = await findBestContactMatch(this.dependencies.contacts, tenantScope(context), seller);
     const input: CreateMarketplaceCaptureInput = {
       tenantId: context.tenantId,
       sourceListingUrl,
       sourceHost,
+      contactId: contactMatch?.id,
+      sellerName: seller.name,
+      sellerProfileUrl: seller.profileUrl,
       title: request.title,
       description: truncateDescription(request.description),
       priceText: request.priceText,
@@ -129,7 +192,7 @@ export class MarketplaceCaptureService {
       targetId: created.id,
       correlationId: context.correlation.correlationId,
       requestId: context.correlation.requestId,
-      metadata: { sourceHost: created.sourceHost },
+      metadata: { sourceHost: created.sourceHost, contactId: created.contactId ?? null },
     });
     return { capture: toResponse(created), isNew: true };
   }

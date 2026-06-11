@@ -17,6 +17,9 @@ export const marketplaceCaptureRecordSchema = z.object({
   tenantId: z.string().min(1),
   sourceListingUrl: z.string().url(),
   sourceHost: z.string().min(1),
+  contactId: z.string().min(1).nullable().optional(),
+  sellerName: z.string().min(1).nullable().optional(),
+  sellerProfileUrl: z.string().url().nullable().optional(),
   title: z.string().min(1),
   description: z.string().nullable().optional(),
   priceText: z.string().nullable().optional(),
@@ -29,7 +32,7 @@ export const marketplaceCaptureRecordSchema = z.object({
   updatedAt: isoDateSchema,
 }).strict();
 export type MarketplaceCaptureRecord = z.output<typeof marketplaceCaptureRecordSchema>;
-export type CreateMarketplaceCaptureInput = TenantScoped & Pick<MarketplaceCaptureRecord, "sourceListingUrl" | "sourceHost" | "title" | "status"> & Partial<Pick<MarketplaceCaptureRecord, "description" | "priceText" | "priceAmount" | "currency" | "imageUrls" | "rawExtract">>;
+export type CreateMarketplaceCaptureInput = TenantScoped & Pick<MarketplaceCaptureRecord, "sourceListingUrl" | "sourceHost" | "title" | "status"> & Partial<Pick<MarketplaceCaptureRecord, "contactId" | "sellerName" | "sellerProfileUrl" | "description" | "priceText" | "priceAmount" | "currency" | "imageUrls" | "rawExtract">>;
 
 export interface MarketplaceAcquisitionRepository {
   createMarketplaceCapture(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>;

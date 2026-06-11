@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createWhispeRMServices, ServiceError } from "../dist/index.js";
+import { createWhispeRMServices, MarketplaceCaptureService, ServiceError } from "../dist/index.js";
 
 const now = "2026-05-29T00:00:00.000Z";
 const correlation = { correlationId: "corr-1", requestId: "req-1" };
@@ -470,4 +470,92 @@ test("deal detail returns deal contact and activity", async () => {
   assert.equal(detail.deal.id, "deal-1");
   assert.equal(detail.contact.email, "lead@example.com");
   assert.deepEqual(detail.activity, []);
+});
+
+test("marketplace capture service matches sellers to existing contacts by email per tenant", async () => {
+  const createdInputs = [];
+  const service = new MarketplaceCaptureService({
+    marketplaceAcquisition: {
+      async findMarketplaceCaptureBySourceUrl(scope, sourceUrl) {
+        assert.deepEqual(scope, { tenantId: "tenant-a" });
+        assert.equal(sourceUrl, "https://market.example/listings/123");
+        return null;
+      },
+      async createMarketplaceCapture(scope, input) {
+        assert.deepEqual(scope, { tenantId: "tenant-a" });
+        createdInputs.push(input);
+        return { id: "capture-1", ...input, createdAt: now, updatedAt: now };
+      }
+    },
+    contacts: {
+      async findByEmails(scope, emails) {
+        assert.deepEqual(scope, { tenantId: "tenant-a" });
+        assert.deepEqual(emails, ["seller@example.com"]);
+        return [{ id: "contact-1", tenantId: scope.tenantId, email: "seller@example.com", phone: null, firstName: "Seller", lastName: "One", externalId: null, stage: "PROSPECT", metadata: {}, createdAt: now, updatedAt: now }];
+      }
+    }
+  });
+
+  const result = await service.createCapture(context, {
+    sourceUrl: "https://market.example/listings/123",
+    sourceHost: "market.example",
+    title: "2019 Freightliner Cascadia",
+    description: "Clean sleeper truck",
+    priceText: "$45,000",
+    imageUrls: [],
+    rawExtract: { sellerName: "Seller One", sellerEmail: "Seller@Example.com", sellerProfileUrl: "https://market.example/sellers/one" }
+  });
+
+  assert.equal(result.isNew, true);
+  assert.equal(result.capture.contactId, "contact-1");
+  assert.equal(result.capture.sellerName, "Seller One");
+  assert.equal(result.capture.sellerProfileUrl, "https://market.example/sellers/one");
+  assert.equal(createdInputs[0].tenantId, "tenant-a");
+  assert.equal(createdInputs[0].contactId, "contact-1");
+  assert.equal(createdInputs[0].sellerName, "Seller One");
+});
+
+test("marketplace capture service preserves idempotency before contact matching", async () => {
+  let contactLookups = 0;
+  const existing = {
+    id: "capture-existing",
+    tenantId: "tenant-a",
+    sourceListingUrl: "https://market.example/listings/123",
+    sourceHost: "market.example",
+    contactId: "contact-existing",
+    sellerName: "Seller One",
+    sellerProfileUrl: "https://market.example/sellers/one",
+    title: "2019 Freightliner Cascadia",
+    description: null,
+    priceText: null,
+    priceAmount: null,
+    currency: null,
+    imageUrls: [],
+    rawExtract: {},
+    status: "CAPTURED",
+    createdAt: now,
+    updatedAt: now
+  };
+  const service = new MarketplaceCaptureService({
+    marketplaceAcquisition: {
+      async findMarketplaceCaptureBySourceUrl() { return existing; },
+      async createMarketplaceCapture() { assert.fail("duplicate captures must not be created"); }
+    },
+    contacts: {
+      async findByEmails() { contactLookups += 1; return []; }
+    }
+  });
+
+  const result = await service.createCapture(context, {
+    sourceUrl: "https://market.example/listings/123",
+    sourceHost: "market.example",
+    title: "2019 Freightliner Cascadia",
+    imageUrls: [],
+    rawExtract: { sellerEmail: "seller@example.com" }
+  });
+
+  assert.equal(result.isNew, false);
+  assert.equal(result.capture.id, "capture-existing");
+  assert.equal(result.capture.contactId, "contact-existing");
+  assert.equal(contactLookups, 0);
 });
