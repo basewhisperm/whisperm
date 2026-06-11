@@ -270,6 +270,9 @@ model Contact {
   leadEvents    LeadEvent[]
   deals         Deal[]
   activities    Activity[]
+  marketplaceCaptures MarketplaceCapture[]
+  sellerVerifications MarketplaceSellerVerification[]
+  renderConversions RenderConversion[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, externalId])
@@ -627,6 +630,8 @@ model Deal {
   pipelineStage PipelineStage @relation(fields: [tenantId, pipelineId, pipelineStageId], references: [tenantId, pipelineId, id], onDelete: Restrict)
   owner         TenantUser?   @relation("DealOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
   activities    Activity[]
+  marketplaceCaptures MarketplaceCapture[]
+  renderConversions RenderConversion[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, externalId])
@@ -1084,4 +1089,205 @@ model InboxEvent {
   @@index([tenantId, state, receivedAt])
   @@index([tenantId, eventType, receivedAt])
   @@index([tenantId, correlationId])
+}
+
+
+// Marketplace acquisition foundation models — additive and tenant-scoped.
+// Claim-token persistence stores only token hashes; raw activation tokens must
+// remain outside durable storage.
+
+model MarketplaceSource {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  key       String
+  name      String
+  sourceUrl String?
+  isActive  Boolean  @default(true)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  captures            MarketplaceCapture[]
+  providerConnections ProviderConnection[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+}
+
+model MarketplaceCapture {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid
+  marketplaceSourceId String?  @db.Uuid
+  contactId           String?  @db.Uuid
+  dealId              String?  @db.Uuid
+  externalId          String?
+  listingUrl          String
+  title               String
+  description         String?
+  price               Decimal? @db.Decimal(18, 4)
+  currency            String?
+  sellerName          String?
+  sellerProfileUrl    String?
+  status              String   @default("CAPTURED")
+  capturedAt          DateTime @default(now())
+  metadata            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant              Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceSource   MarketplaceSource?              @relation(fields: [tenantId, marketplaceSourceId], references: [tenantId, id], onDelete: Restrict)
+  contact             Contact?                        @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  deal                Deal?                           @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+  claimTokens         MarketplaceClaimToken[]
+  sellerVerifications MarketplaceSellerVerification[]
+  renderConversions   RenderConversion[]
+  notificationLogs    NotificationDeliveryLog[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, marketplaceSourceId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, marketplaceSourceId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, dealId])
+  @@index([tenantId, externalId])
+  @@index([tenantId, status, capturedAt])
+}
+
+model MarketplaceClaimToken {
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @db.Uuid
+  marketplaceCaptureId String    @db.Uuid
+  tokenHash            String
+  status               String    @default("PENDING")
+  expiresAt            DateTime
+  claimedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant             Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture MarketplaceCapture        @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+  notificationLogs   NotificationDeliveryLog[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, tokenHash])
+  @@index([tenantId])
+  @@index([tenantId, marketplaceCaptureId])
+  @@index([tenantId, status, expiresAt])
+}
+
+model MarketplaceSellerVerification {
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @db.Uuid
+  marketplaceCaptureId String    @db.Uuid
+  contactId            String?   @db.Uuid
+  status               String    @default("PENDING")
+  method               String?
+  verifiedAt           DateTime?
+  evidence             Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture MarketplaceCapture @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+  contact            Contact?           @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  renderConversions  RenderConversion[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId])
+  @@index([tenantId, marketplaceCaptureId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, status, createdAt])
+}
+
+model RenderConversion {
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @db.Uuid
+  marketplaceCaptureId String?   @db.Uuid
+  sellerVerificationId String?   @db.Uuid
+  contactId            String?   @db.Uuid
+  dealId               String?   @db.Uuid
+  externalId           String?
+  status               String    @default("PENDING")
+  convertedAt          DateTime?
+  metadata             Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant             Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture MarketplaceCapture?            @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Restrict)
+  sellerVerification MarketplaceSellerVerification? @relation(fields: [tenantId, sellerVerificationId], references: [tenantId, id], onDelete: Restrict)
+  contact            Contact?                       @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  deal               Deal?                          @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, marketplaceCaptureId])
+  @@index([tenantId, sellerVerificationId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, dealId])
+  @@index([tenantId, status, createdAt])
+}
+
+model ProviderConnection {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @db.Uuid
+  marketplaceSourceId String?   @db.Uuid
+  providerKey         String
+  providerType        String
+  externalAccountId   String?
+  displayName         String?
+  status              String    @default("ACTIVE")
+  scopes              Json?
+  metadata            Json?
+  connectedAt         DateTime?
+  disconnectedAt      DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceSource MarketplaceSource?        @relation(fields: [tenantId, marketplaceSourceId], references: [tenantId, id], onDelete: Restrict)
+  notificationLogs  NotificationDeliveryLog[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, providerKey, externalAccountId])
+  @@index([tenantId])
+  @@index([tenantId, marketplaceSourceId])
+  @@index([tenantId, providerKey])
+  @@index([tenantId, providerType, status])
+}
+
+model NotificationDeliveryLog {
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @db.Uuid
+  marketplaceCaptureId String?   @db.Uuid
+  claimTokenId         String?   @db.Uuid
+  providerConnectionId String?   @db.Uuid
+  channel              String
+  recipientHash        String?
+  templateKey          String?
+  status               String    @default("PENDING")
+  externalMessageId    String?
+  deliveredAt          DateTime?
+  failedAt             DateTime?
+  errorMessage         String?
+  metadata             Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture MarketplaceCapture?    @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+  claimToken         MarketplaceClaimToken? @relation(fields: [tenantId, claimTokenId], references: [tenantId, id], onDelete: Cascade)
+  providerConnection ProviderConnection?    @relation(fields: [tenantId, providerConnectionId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, providerConnectionId, externalMessageId])
+  @@index([tenantId])
+  @@index([tenantId, marketplaceCaptureId])
+  @@index([tenantId, claimTokenId])
+  @@index([tenantId, providerConnectionId])
+  @@index([tenantId, channel, status, createdAt])
 }
