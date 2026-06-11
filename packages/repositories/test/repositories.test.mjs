@@ -141,32 +141,14 @@ test("transaction runner passes the transaction-scoped Prisma client to work", a
   assert.equal(result, true);
 });
 
-test("factory wires required repository interfaces", () => {
+test("factory wires all repository interfaces", () => {
   const repositories = createPrismaRepositories(createClient());
-  const keys = Object.keys(repositories);
 
-  [
-    "activities",
-    "approvals",
-    "auditLogs",
-    "billing",
-    "campaigns",
-    "contacts",
-    "dashboard",
-    "deals",
-    "events",
-    "executions",
-    "followUpDigest",
-    "marketplaceAcquisition",
-    "reports",
-    "pipelines",
-    "tenants",
-    "users",
-    "workflows"
-  ].forEach((repository) => {
-    assert.ok(keys.includes(repository), `Missing repository: ${repository}`);
-  });
+  assert.deepEqual(Object.keys(repositories).sort(), [
+    "activities", "approvals", "auditLogs", "billing", "campaigns", "contacts", "dashboard", "deals", "events", "executions", "followUpDigest", "reports", "pipelines", "tenants", "users", "workflows"
+  ].sort());
 });
+
 
 test("dashboard repository scopes metrics contacts and activity reads by tenant", async () => {
   const prisma = createClient();
@@ -199,6 +181,7 @@ test("dashboard repository scopes metrics contacts and activity reads by tenant"
   assert.deepEqual(prisma.activity.calls[0].args.where, { tenantId: "tenant-a" });
   assert.deepEqual(prisma.activity.calls[0].args.take, 10);
 });
+
 
 test("reports repository scopes plan and real-time aggregate reads by tenant", async () => {
   const prisma = createClient();
@@ -247,6 +230,7 @@ test("reports repository scopes plan and real-time aggregate reads by tenant", a
   assert.deepEqual(prisma.deal.calls[1].args.where, { tenantId: "tenant-a", closedAt: { gte: period.startDate, lt: period.endDate } });
 });
 
+
 test("follow-up digest repository scopes workspace recipients and idle contacts", async () => {
   const prisma = createClient();
   prisma.tenant.findMany = async (args) => {
@@ -271,6 +255,7 @@ test("follow-up digest repository scopes workspace recipients and idle contacts"
   assert.deepEqual(prisma.tenantUser.calls[0].args.where, { tenantId: "tenant-a", isActive: true, role: { in: ["OWNER", "ADMIN"] } });
   assert.deepEqual(prisma.contact.calls[0].args.where, { tenantId: "tenant-a", OR: [{ lastTouchAt: null }, { lastTouchAt: { lt: new Date("2026-05-22T00:00:00.000Z") } }] });
 });
+
 
 test("tenant-scoped contact reads include tenantId and lead events stay contact-scoped", async () => {
   const prisma = createClient();
@@ -301,6 +286,7 @@ test("contact bulk import repository methods are tenant-scoped", async () => {
   assert.deepEqual(prisma.contact.calls[1].args.where, { tenantId: "tenant-a" });
   assert.deepEqual(prisma.contact.calls[2].args.where, { tenantId: "tenant-a", email: { in: ["existing@example.com"] } });
 });
+
 
 test("pipeline_seed_creates_one_default_pipeline_per_workspace", async () => {
   const { seedDefaultPipelines } = await import("../../../prisma/pipeline-seed.mjs");
