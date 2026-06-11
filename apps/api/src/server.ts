@@ -10,6 +10,7 @@ import { createReportsHandler, type ReportsRouteDependencies } from "./crm/repor
 import { createContactCreateHandler, createContactImportHandler, createContactListHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
+import { createMarketplaceCaptureHandler, type MarketplaceAcquisitionRouteDependencies } from "./marketplace-acquisition.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { applySecurityHeaders, sanitizeRequestBody, authRateLimiter, getClientIp } from "./http/security.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
@@ -72,6 +73,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
+  readonly marketplaceAcquisition?: MarketplaceAcquisitionRouteDependencies["marketplaceAcquisition"] | undefined;
   readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
@@ -186,6 +188,7 @@ const routeTemplate = (method: string, pathname: string): string => {
   if (method === "GET" && pathname === "/healthz") return "/healthz";
   if (method === "GET" && pathname === "/readyz") return "/readyz";
   if (method === "POST" && pathname === "/contacts/import") return "/contacts/import";
+  if (method === "POST" && pathname === "/marketplace-acquisition/captures") return "/marketplace-acquisition/captures";
   if (method === "POST" && pathname === "/webhooks/stripe") return "/webhooks/stripe";
   if (method === "POST" && pathname === "/webhooks/paystack") return "/webhooks/paystack";
   if (method === "GET" && pathname === "/dashboard") return "/dashboard";
@@ -367,6 +370,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const dealDetailHandler = dependencies.deals === undefined ? undefined : createDealDetailHandler({ deals: dependencies.deals });
   const dashboardHandler = dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
   const reportsHandler = dependencies.reports === undefined ? undefined : createReportsHandler({ reports: dependencies.reports });
+  const marketplaceCaptureHandler = dependencies.marketplaceAcquisition === undefined ? undefined : createMarketplaceCaptureHandler({ marketplaceAcquisition: dependencies.marketplaceAcquisition });
   const activityCreateHandler = dependencies.activities === undefined ? undefined : createActivityCreateHandler({ activities: dependencies.activities });
   const activityListHandler = dependencies.activities === undefined ? undefined : createActivityListHandler({ activities: dependencies.activities });
   const contactActivitiesHandler = dependencies.activities === undefined ? undefined : createContactActivitiesHandler({ activities: dependencies.activities });
@@ -427,6 +431,15 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         }
         request.params = { ...workspaceTeamRoute.params, routeName: workspaceTeamRoute.name };
         await teamManagementHandler(request, reply);
+        return reply.toInjectResponse();
+      }
+
+      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
+        if (marketplaceCaptureHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Marketplace Acquisition API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        await marketplaceCaptureHandler(request, reply);
         return reply.toInjectResponse();
       }
 

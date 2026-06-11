@@ -86,6 +86,7 @@ export interface PrismaPersistenceClient {
   readonly pipelineStage: PrismaDelegate;
   readonly deal: PrismaDelegate;
   readonly activity: PrismaDelegate;
+  readonly marketplaceCapture: PrismaDelegate;
   readonly subscription: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
@@ -228,6 +229,26 @@ export interface ActivityListFilters {
   readonly from?: string | undefined;
   readonly to?: string | undefined;
 }
+
+export const marketplaceCaptureRecordSchema = baseRecordSchema.extend({
+  marketplaceSourceId: z.string().min(1).nullable().optional(),
+  contactId: z.string().min(1).nullable().optional(),
+  dealId: z.string().min(1).nullable().optional(),
+  externalId: z.string().min(1).nullable().optional(),
+  listingUrl: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1).nullable().optional(),
+  price: decimalLikeSchema.nullable().optional(),
+  currency: z.string().min(1).nullable().optional(),
+  sellerName: z.string().min(1).nullable().optional(),
+  sellerProfileUrl: z.string().min(1).nullable().optional(),
+  status: z.string().min(1),
+  capturedAt: isoDateSchema,
+  metadata: metadataSchema.nullable().optional()
+}).required({ updatedAt: true }).strict();
+export type MarketplaceCaptureRecord = z.output<typeof marketplaceCaptureRecordSchema>;
+export type CreateMarketplaceCaptureInput = TenantScoped & Pick<MarketplaceCaptureRecord, "listingUrl" | "title"> & Partial<Pick<MarketplaceCaptureRecord, "marketplaceSourceId" | "contactId" | "dealId" | "externalId" | "description" | "price" | "currency" | "sellerName" | "sellerProfileUrl" | "status" | "capturedAt" | "metadata">>;
+export type UpdateMarketplaceCaptureInput = Partial<Pick<MarketplaceCaptureRecord, "contactId" | "dealId" | "status" | "metadata">>;
 export interface ActivityCreateContext extends TenantScoped {
   readonly actorId?: string | undefined;
   readonly correlation?: PersistenceCorrelationMetadata | undefined;
@@ -475,9 +496,10 @@ export interface TenantRepository extends RepositoryTransactionRunner {
 }
 export interface UserRepository { create(context: TenantScoped, input: CreateUserInput): Promise<User>; findById(context: TenantScoped, id: string): Promise<User | null>; findByEmail(context: TenantScoped, email: string): Promise<User | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<User>>; update(context: TenantScoped, id: string, input: UpdateUserInput): Promise<User>; }
 export interface ContactRepository { create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord>; createMany(context: TenantScoped, inputs: readonly CreateContactInput[]): Promise<number>; count(context: TenantScoped): Promise<number>; findById(context: TenantScoped, id: string): Promise<ContactRecord | null>; findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]>; list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>>; update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord>; listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>>; }
-export interface PipelineRepository { findByWorkspace(workspaceId: string): Promise<PipelineRecord | null>; updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord>; }
-export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
+export interface PipelineRepository { findByWorkspace(workspaceId: string): Promise<PipelineRecord | null>; findByDefaultKey(workspaceId: string, defaultKey: string): Promise<PipelineRecord | null>; updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord>; }
+export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findByExternalId(workspaceId: string, externalId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
 export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
+export interface MarketplaceCaptureRepository { create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; findByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>; update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; }
 
 export interface DashboardContactRecord { readonly id: string; readonly firstName?: string | null | undefined; readonly lastName?: string | null | undefined; readonly company?: string | null | undefined; readonly email?: string | null | undefined; readonly lastTouchAt?: string | null | undefined; }
 export interface DashboardActivityRecord { readonly id: string; readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined; readonly type: string; readonly note?: string | null | undefined; readonly createdById: string; readonly createdAt: string; }
@@ -626,6 +648,15 @@ export class PrismaPipelineRepository implements PipelineRepository {
     const stages = await this.prisma.pipelineStage.findMany({ where: withTenant(context, { pipelineId: parsed.id }), orderBy: { position: "asc" } });
     return pipelineRecordSchema.parse({ ...parsed, stages: stages.map((stage) => parseRecord(pipelineStageRecordSchema, stage)) });
   }
+  async findByDefaultKey(workspaceId: string, defaultKey: string): Promise<PipelineRecord | null> {
+    const context = workspaceContext(workspaceId);
+    ensureContext(context);
+    const pipeline = await this.prisma.pipeline.findFirst({ where: withTenant(context, { defaultKey }) });
+    if (pipeline === null) return null;
+    const parsed = parseRecord(pipelineRecordSchema.omit({ stages: true }), pipeline);
+    const stages = await this.prisma.pipelineStage.findMany({ where: withTenant(context, { pipelineId: parsed.id }), orderBy: { position: "asc" } });
+    return pipelineRecordSchema.parse({ ...parsed, stages: stages.map((stage) => parseRecord(pipelineStageRecordSchema, stage)) });
+  }
   async updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord> {
     const context = workspaceContext(workspaceId);
     ensureContext(context);
@@ -689,6 +720,12 @@ export class PrismaDealsRepository implements DealsRepository {
     const context = workspaceContext(workspaceId);
     ensureContext(context);
     const row = await this.prisma.deal.findFirst({ where: byTenantId(context, dealId) });
+    return row === null ? null : parseRecord(dealRecordSchema, row);
+  }
+  async findByExternalId(workspaceId: string, externalId: string): Promise<DealRecord | null> {
+    const context = workspaceContext(workspaceId);
+    ensureContext(context);
+    const row = await this.prisma.deal.findFirst({ where: withTenant(context, { externalId }) });
     return row === null ? null : parseRecord(dealRecordSchema, row);
   }
   async findBoardByPipeline(workspaceId: string, pipelineId: string, pagination: BoardPaginationRequest = {}): Promise<PipelineBoardRecord | null> {
@@ -1023,6 +1060,32 @@ export class PrismaFollowUpDigestRepository implements FollowUpDigestRepository 
   }
 }
 
+export class PrismaMarketplaceCaptureRepository implements MarketplaceCaptureRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord> {
+    ensureTenantInput(context, input);
+    try {
+      return parseRecord(marketplaceCaptureRecordSchema, await this.prisma.marketplaceCapture.create({ data: dataWithDefined({ status: "CAPTURED", ...input }) }));
+    } catch (error) { return mapPrismaError(error, "Marketplace capture already exists"); }
+  }
+
+  async findByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.marketplaceCapture.findFirst({ where: withTenant(context, { listingUrl }) });
+    return row === null ? null : parseRecord(marketplaceCaptureRecordSchema, row);
+  }
+
+  async update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord> {
+    ensureContext(context);
+    const result = await this.prisma.marketplaceCapture.updateMany({ where: byTenantId(context, captureId), data: dataWithDefined(input) });
+    if (result.count !== 1) notFound("Marketplace capture not found", { captureId });
+    const row = await this.prisma.marketplaceCapture.findFirst({ where: byTenantId(context, captureId) });
+    if (row === null) notFound("Marketplace capture not found", { captureId });
+    return parseRecord(marketplaceCaptureRecordSchema, row);
+  }
+}
+
 export class PrismaActivityRepository implements ActivityRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
 
@@ -1142,6 +1205,7 @@ export interface PrismaRepositories {
   readonly billing: BillingRepository;
   readonly auditLogs: AuditLogRepository;
   readonly activities: ActivityRepository;
+  readonly marketplaceCaptures: MarketplaceCaptureRepository;
   readonly dashboard: DashboardRepository;
   readonly followUpDigest: FollowUpDigestRepository;
   readonly reports: ReportsRepository;
@@ -1156,6 +1220,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     pipelines: new PrismaPipelineRepository(prisma),
     deals: new PrismaDealsRepository(prisma),
     activities: new PrismaActivityRepository(prisma),
+    marketplaceCaptures: new PrismaMarketplaceCaptureRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
     reports: new PrismaReportsRepository(prisma),
     followUpDigest: new PrismaFollowUpDigestRepository(prisma),

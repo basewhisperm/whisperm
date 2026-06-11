@@ -64,6 +64,8 @@ export { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHa
 export { createDashboardHandler, createDashboardService } from "./crm/dashboard.js";
 export { createReportsHandler, createReportsService, resolveReportPeriod, reportPeriods } from "./crm/reports.js";
 export type { ActivityRouteContext, ActivityRouteDependencies, ActivityServicePort } from "./crm/activities.js";
+export { createMarketplaceCaptureHandler } from "./marketplace-acquisition.js";
+export type { MarketplaceAcquisitionRouteContext, MarketplaceAcquisitionRouteDependencies, MarketplaceAcquisitionServicePort, MarketplaceCaptureResponse } from "./marketplace-acquisition.js";
 export type { DashboardActivityFeedItem, DashboardActivityRecord, DashboardContactRecord, DashboardFollowUpAlert, DashboardHealthPanelItem, DashboardReadModel, DashboardResponse, DashboardRouteContext, DashboardRouteDependencies, DashboardServicePort } from "./crm/dashboard.js";
 export type { AverageDaysToCloseReport, ClientAcquisitionSourceItem, RenewalRateReport, ReportDateRange, ReportPeriod, ReportPeriodRange, ReportPlan, ReportRouteContext, ReportsReadModel, ReportsResponse, ReportsRouteDependencies, ReportsServicePort, RevenueByStageItem } from "./crm/reports.js";
 export type { DealRouteContext, DealRouteDependencies, DealServicePort } from "./crm/deals.js";
