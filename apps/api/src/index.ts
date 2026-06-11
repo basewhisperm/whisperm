@@ -23,6 +23,8 @@ export {
   tenantIsolationGuardMiddleware,
 } from "./auth/middleware.js";
 export { assertRequiredRole, hasRequiredRole, roleRank } from "./auth/roles.js";
+export { hasPermission, marketplaceAcquisitionPermissions, permissionMinimumRoles, requirePermission } from "./auth/permissions.js";
+export type { MarketplaceAcquisitionPermission, Permission } from "./auth/permissions.js";
 export { noopAuditLogger, tenantRoles } from "./auth/types.js";
 export type {
   AuditLogEntry,
