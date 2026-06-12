@@ -434,14 +434,6 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         return reply.toInjectResponse();
       }
 
-      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
-        if (marketplaceCaptureHandler === undefined) {
-          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Marketplace Acquisition API is not configured" }, meta: { correlationId: request.correlationId } });
-          return reply.toInjectResponse();
-        }
-        await marketplaceCaptureHandler(request, reply);
-        return reply.toInjectResponse();
-      }
 
       if (options.method === "POST" && parsedUrl.pathname === "/contacts/import") {
         if (contactImportHandler === undefined) {
@@ -496,7 +488,16 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         }
       }
 
-            const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
+      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
+        if (marketplaceCaptureHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Marketplace Acquisition API is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        await marketplaceCaptureHandler(request, reply);
+        return reply.toInjectResponse();
+      }
+
+      const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
       if (crmRoute !== null) {
         const isActivityRoute = crmRoute.name === "activityCreate" || crmRoute.name === "activityList" || crmRoute.name === "contactActivities" || crmRoute.name === "dealActivities";
         const isContactRoute = crmRoute.name === "contactCreate" || crmRoute.name === "contactList";
