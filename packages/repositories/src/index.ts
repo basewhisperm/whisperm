@@ -11,8 +11,8 @@ import {
   type TenantScoped,
 } from "@whisperm/types";
 
-export { PersistenceError } from "@whisperm/types";
 
+export { PersistenceError } from "@whisperm/types";
 export type JsonObject = Readonly<Record<string, unknown>>;
 export type SortDirection = "asc" | "desc";
 
