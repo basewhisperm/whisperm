@@ -61,8 +61,6 @@ export type {
 } from "./server.js";
 
 export { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler } from "./crm/deals.js";
-export { createMarketplaceCaptureCreateHandler } from "./marketplace-acquisition/captures.js";
-export type { MarketplaceCaptureRouteContext, MarketplaceCaptureRouteDependencies, MarketplaceCaptureServicePort } from "./marketplace-acquisition/captures.js";
 export { createDashboardHandler, createDashboardService } from "./crm/dashboard.js";
 export { createReportsHandler, createReportsService, resolveReportPeriod, reportPeriods } from "./crm/reports.js";
 export type { ActivityRouteContext, ActivityRouteDependencies, ActivityServicePort } from "./crm/activities.js";
