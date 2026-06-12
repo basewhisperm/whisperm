@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { PrismaMarketplaceAcquisitionRepository, type MarketplaceAcquisitionRepository } from "./marketplace-acquisition.js";
+
 import {
   PersistenceError,
   type MarketplaceCaptureRecord,
@@ -90,6 +92,7 @@ export interface PrismaPersistenceClient {
   readonly activity: PrismaDelegate;
   readonly marketplaceCapture: PrismaDelegate;
   readonly subscription: PrismaDelegate;
+  readonly marketplaceCapture: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
 
@@ -1197,6 +1200,7 @@ export interface PrismaRepositories {
   readonly dashboard: DashboardRepository;
   readonly followUpDigest: FollowUpDigestRepository;
   readonly reports: ReportsRepository;
+  readonly marketplaceAcquisition: MarketplaceAcquisitionRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -1218,6 +1222,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     executions: new PrismaExecutionRepository(prisma),
     events: new PrismaEventRepository(prisma),
     billing: new PrismaBillingRepository(auditLogs),
+    marketplaceAcquisition: new PrismaMarketplaceAcquisitionRepository(prisma),
     auditLogs
   };
 };
@@ -1229,3 +1234,5 @@ export const prismaTenantWhere = {
   assertTenantScope: ensureTenantInput,
   dateToIso
 } as const;
+
+export * from "./marketplace-acquisition.js";
