@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
+
 import {
   type ApprovalDecisionRecord,
   approvalDecisionRecordSchema,
@@ -1293,3 +1295,6 @@ export {
   type FollowUpDigestWorkspace,
   type WeeklyFollowUpDigestResult,
 } from "./notifications/follow-up-digest.js";
+
+export { MarketplaceCaptureService, MarketplaceCaptureServiceError } from "./marketplace-acquisition/capture-service.js";
+export type { MarketplaceCaptureServiceContext, MarketplaceCaptureServiceDependencies, MarketplaceCaptureServiceResult, MarketplaceCaptureRepositoryPort } from "./marketplace-acquisition/capture-service.js";

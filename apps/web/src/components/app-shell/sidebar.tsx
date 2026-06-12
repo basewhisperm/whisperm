@@ -11,6 +11,7 @@ import {
   IconUsers,
   IconBriefcase,
   IconChartBar,
+  IconBookmark,
 } from "@tabler/icons-react";
 
 const navigationItems = [
@@ -18,6 +19,7 @@ const navigationItems = [
   { labelKey: "contacts.title", icon: IconUsers, href: "/contacts" },
   { labelKey: "deals.title", icon: IconBriefcase, href: "/deals" },
   { labelKey: "reports.title", icon: IconChartBar, href: "/reports" },
+  { labelKey: "marketplaceCapture.title", icon: IconBookmark, href: "/marketplace-acquisition/capture" },
   { labelKey: "settings.title", icon: IconSettings, href: "/settings" },
 ] satisfies readonly { readonly labelKey: TranslationKey; readonly icon: typeof IconLayoutDashboard; readonly href: string }[];
 
