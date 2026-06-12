@@ -191,14 +191,14 @@ const routeTemplate = (method: string, pathname: string): string => {
   if (method === "GET" && pathname === "/healthz") return "/healthz";
   if (method === "GET" && pathname === "/readyz") return "/readyz";
   if (method === "POST" && pathname === "/contacts/import") return "/contacts/import";
-  if (method === "POST" && pathname === "/marketplace-acquisition/captures") return "/marketplace-acquisition/captures";
+  if (method === "POST" && pathname === "/marketplace-acquisition/capture") return "/marketplace-acquisition/capture";
   if (method === "POST" && pathname === "/webhooks/stripe") return "/webhooks/stripe";
   if (method === "POST" && pathname === "/webhooks/paystack") return "/webhooks/paystack";
   if (method === "GET" && pathname === "/dashboard") return "/dashboard";
   if (method === "GET" && pathname === "/reports") return "/reports";
   if (method === "POST" && pathname === "/workspaces") return "/workspaces";
   if (method === "POST" && pathname === "/billing/upgrade") return "/billing/upgrade";
-  if (method === "POST" && pathname === "/marketplace-acquisition/captures") return "/marketplace-acquisition/captures";
+  if (method === "POST" && pathname === "/marketplace-acquisition/capture") return "/marketplace-acquisition/capture";
   if (method === "GET" && /^\/workspaces\/[^/?#]+\/onboarding\/?$/u.test(pathname)) return "/workspaces/:id/onboarding";
   const crmRoute = parseCrmRoute(method, pathname);
   if (crmRoute?.name === "pipelineBoard") return "/pipelines/:id/board";
@@ -495,7 +495,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         return reply.toInjectResponse();
       }
 
-      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
+      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/capture") {
         if (marketplaceCaptureHandler === undefined) {
           reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_CAPTURE_NOT_CONFIGURED", message: "Marketplace capture API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
@@ -511,7 +511,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         }
       }
 
-      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
+      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/capture") {
         if (marketplaceCaptureCreateHandler === undefined) {
           reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_CAPTURE_NOT_CONFIGURED", message: "Marketplace capture API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
