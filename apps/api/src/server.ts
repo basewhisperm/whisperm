@@ -9,7 +9,6 @@ import { createDashboardHandler, type DashboardRouteDependencies } from "./crm/d
 import { createReportsHandler, type ReportsRouteDependencies } from "./crm/reports.js";
 import { createContactCreateHandler, createContactImportHandler, createContactListHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
-import { createMarketplaceCaptureCreateHandler, type MarketplaceCaptureRouteDependencies } from "./marketplace-acquisition/captures.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { applySecurityHeaders, sanitizeRequestBody, authRateLimiter, getClientIp } from "./http/security.js";
@@ -74,12 +73,10 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly contactQuota?: ContactRouteDependencies["quota"] | undefined;
   readonly deals?: DealRouteDependencies["deals"] | undefined;
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
-  readonly marketplaceCaptures?: MarketplaceCaptureRouteDependencies["marketplaceCaptures"] | undefined;
   readonly verifyAccessToken?: AccessTokenVerifier | undefined;
   readonly tenantMembershipLoader?: TenantMembershipLoader | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
-  readonly marketplaceCaptures?: MarketplaceCaptureRouteDependencies["captures"] | undefined;
   readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
@@ -390,11 +387,9 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const dashboardHandler = dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
   const reportsHandler = dependencies.reports === undefined ? undefined : createReportsHandler({ reports: dependencies.reports });
   const activityCreateHandler = dependencies.activities === undefined ? undefined : createActivityCreateHandler({ activities: dependencies.activities });
-  const marketplaceCaptureCreateHandler = dependencies.marketplaceCaptures === undefined ? undefined : createMarketplaceCaptureCreateHandler({ marketplaceCaptures: dependencies.marketplaceCaptures });
   const activityListHandler = dependencies.activities === undefined ? undefined : createActivityListHandler({ activities: dependencies.activities });
   const contactActivitiesHandler = dependencies.activities === undefined ? undefined : createContactActivitiesHandler({ activities: dependencies.activities });
   const dealActivitiesHandler = dependencies.activities === undefined ? undefined : createDealActivitiesHandler({ activities: dependencies.activities });
-  const marketplaceCaptureHandler = dependencies.marketplaceCaptures === undefined ? undefined : createMarketplaceCaptureHandler({ captures: dependencies.marketplaceCaptures });
   let server: Server | undefined;
 
   const inject = async (options: InjectOptions): Promise<InjectResponse> => {
