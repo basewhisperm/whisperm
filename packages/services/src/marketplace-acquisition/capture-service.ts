@@ -72,14 +72,11 @@ const truncateDescription = (description: string | undefined): string | undefine
 const parsePriceText = (priceText: string | undefined): { readonly priceAmount?: string | undefined; readonly currency?: string | undefined } => {
   if (priceText === undefined) return {};
   const normalized = priceText.trim();
-  const match = /^(?<symbol>[$€£])\s?(?<amount>\d{1,9}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,9}(?:\.\d{1,2})?)$/u.exec(normalized);
+  const match = /^(?<currencyCode>[A-Z]{3})\s?(?<amount>\d{1,9}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,9}(?:\.\d{1,2})?)$/u.exec(normalized);
   if (match?.groups === undefined) return {};
-  const currencyBySymbol: Readonly<Record<string, string>> = { "$": "USD", "€": "EUR", "£": "GBP" };
-  const symbol = match.groups.symbol;
+  const currency = match.groups.currencyCode;
   const amount = match.groups.amount;
-  if (symbol === undefined || amount === undefined) return {};
-  const currency = currencyBySymbol[symbol];
-  if (currency === undefined) return {};
+  if (currency === undefined || amount === undefined) return {};
   return { priceAmount: amount.replace(/,/gu, ""), currency };
 };
 

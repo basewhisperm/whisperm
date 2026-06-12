@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
+
 import {
   type ApprovalDecisionRecord,
   approvalDecisionRecordSchema,
@@ -14,6 +16,7 @@ import {
   billingUsageRecordSchema,
   type ContactRepository,
   type ActivityRepository,
+  type MarketplaceAcquisitionRepository,
   type ActivityListFilters,
   type ActivityRecord,
   activityRecordSchema,
@@ -187,6 +190,7 @@ export interface ServiceRepositories {
   readonly contacts: ContactRepository;
   readonly deals: DealsRepository;
   readonly activities: ActivityRepository;
+  readonly marketplaceAcquisition: MarketplaceAcquisitionRepository;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -1081,6 +1085,7 @@ export interface WhispeRMServices {
   readonly contacts: ContactService;
   readonly deals: DealService;
   readonly activities: ActivityService;
+  readonly marketplaceCaptures: MarketplaceCaptureService;
   readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
   readonly workflows: WorkflowService;
@@ -1097,6 +1102,7 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   contacts: new ContactService(dependencies),
   deals: new DealService(dependencies),
   activities: new ActivityService(dependencies),
+  marketplaceCaptures: new MarketplaceCaptureService(dependencies),
   scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
   workflows: new WorkflowService(dependencies),
