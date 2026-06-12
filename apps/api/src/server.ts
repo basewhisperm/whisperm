@@ -11,7 +11,6 @@ import { createReportsHandler, type ReportsRouteDependencies } from "./crm/repor
 import { createContactCreateHandler, createContactImportHandler, createContactListHandler, type ContactRouteDependencies } from "./crm/contacts.js";
 import { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler, type DealRouteDependencies } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
-import { createMarketplaceCaptureHandler, type MarketplaceAcquisitionRouteDependencies } from "./marketplace-acquisition.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { applySecurityHeaders, sanitizeRequestBody, authRateLimiter, getClientIp } from "./http/security.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
@@ -78,7 +77,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly tenantMembershipLoader?: TenantMembershipLoader | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
-  readonly marketplaceAcquisition?: MarketplaceAcquisitionRouteDependencies["marketplaceAcquisition"] | undefined;
+  readonly marketplaceCaptures?: MarketplaceCaptureRouteDependencies["captures"] | undefined;
   readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
@@ -430,7 +429,6 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const dealDetailHandler = dependencies.deals === undefined ? undefined : createDealDetailHandler({ deals: dependencies.deals });
   const dashboardHandler = dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
   const reportsHandler = dependencies.reports === undefined ? undefined : createReportsHandler({ reports: dependencies.reports });
-  const marketplaceCaptureHandler = dependencies.marketplaceAcquisition === undefined ? undefined : createMarketplaceCaptureHandler({ marketplaceAcquisition: dependencies.marketplaceAcquisition });
   const activityCreateHandler = dependencies.activities === undefined ? undefined : createActivityCreateHandler({ activities: dependencies.activities });
   const activityListHandler = dependencies.activities === undefined ? undefined : createActivityListHandler({ activities: dependencies.activities });
   const contactActivitiesHandler = dependencies.activities === undefined ? undefined : createContactActivitiesHandler({ activities: dependencies.activities });
@@ -508,10 +506,12 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           return reply.toInjectResponse();
         }
 
-
-      if (options.method === "POST" && parsedUrl.pathname === "/contacts/import") {
-        if (contactImportHandler === undefined) {
-          reply.code(503).send({ ok: false, error: { code: "CONTACT_IMPORT_NOT_CONFIGURED", message: "Contact import is not configured" }, meta: { correlationId: request.correlationId } });
+        if (options.method === "POST" && parsedUrl.pathname === "/webhooks/stripe") {
+          if (stripeWebhookHandler === undefined) {
+            reply.code(503).send({ ok: false, error: { code: "STRIPE_WEBHOOK_NOT_CONFIGURED", message: "Stripe webhook is not configured" }, meta: { correlationId: request.correlationId } });
+            return reply.toInjectResponse();
+          }
+          await stripeWebhookHandler(request, reply);
           return reply.toInjectResponse();
         }
 
@@ -559,21 +559,44 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           }
         }
 
-      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
-        if (marketplaceCaptureHandler === undefined) {
-          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Marketplace Acquisition API is not configured" }, meta: { correlationId: request.correlationId } });
-          return reply.toInjectResponse();
-        }
-        await marketplaceCaptureHandler(request, reply);
-        return reply.toInjectResponse();
-      }
+        const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
+        if (crmRoute !== null) {
+          const isActivityRoute =
+            crmRoute.name === "activityCreate" ||
+            crmRoute.name === "activityList" ||
+            crmRoute.name === "contactActivities" ||
+            crmRoute.name === "dealActivities";
+          const isContactRoute = crmRoute.name === "contactCreate" || crmRoute.name === "contactList";
 
-      const crmRoute = parseCrmRoute(options.method, parsedUrl.pathname);
-      if (crmRoute !== null) {
-        const isActivityRoute = crmRoute.name === "activityCreate" || crmRoute.name === "activityList" || crmRoute.name === "contactActivities" || crmRoute.name === "dealActivities";
-        const isContactRoute = crmRoute.name === "contactCreate" || crmRoute.name === "contactList";
-        if (isContactRoute && dependencies.contacts === undefined) {
-          reply.code(503).send({ ok: false, error: { code: "CONTACTS_NOT_CONFIGURED", message: "Contacts API is not configured" }, meta: { correlationId: request.correlationId } });
+          if (isContactRoute && dependencies.contacts === undefined) {
+            reply.code(503).send({ ok: false, error: { code: "CONTACTS_NOT_CONFIGURED", message: "Contacts API is not configured" }, meta: { correlationId: request.correlationId } });
+            return reply.toInjectResponse();
+          }
+
+          if (!isActivityRoute && !isContactRoute && dependencies.deals === undefined) {
+            reply.code(503).send({ ok: false, error: { code: "DEALS_NOT_CONFIGURED", message: "Deals API is not configured" }, meta: { correlationId: request.correlationId } });
+            return reply.toInjectResponse();
+          }
+
+          if (isActivityRoute && dependencies.activities === undefined) {
+            reply.code(503).send({ ok: false, error: { code: "ACTIVITIES_NOT_CONFIGURED", message: "Activities API is not configured" }, meta: { correlationId: request.correlationId } });
+            return reply.toInjectResponse();
+          }
+
+          request.params = crmRoute.params;
+          request.query = parsedUrl.query;
+
+          if (crmRoute.name === "pipelineBoard" && pipelineBoardHandler !== undefined) await pipelineBoardHandler(request, reply);
+          if (crmRoute.name === "dealCreate" && dealCreateHandler !== undefined) await dealCreateHandler(request, reply);
+          if (crmRoute.name === "dealMoveStage" && dealStageMoveHandler !== undefined) await dealStageMoveHandler(request, reply);
+          if (crmRoute.name === "dealDetail" && dealDetailHandler !== undefined) await dealDetailHandler(request, reply);
+          if (crmRoute.name === "activityCreate" && activityCreateHandler !== undefined) await activityCreateHandler(request, reply);
+          if (crmRoute.name === "contactCreate" && contactCreateHandler !== undefined) await contactCreateHandler(request, reply);
+          if (crmRoute.name === "contactList" && contactListHandler !== undefined) await contactListHandler(request, reply);
+          if (crmRoute.name === "activityList" && activityListHandler !== undefined) await activityListHandler(request, reply);
+          if (crmRoute.name === "contactActivities" && contactActivitiesHandler !== undefined) await contactActivitiesHandler(request, reply);
+          if (crmRoute.name === "dealActivities" && dealActivitiesHandler !== undefined) await dealActivitiesHandler(request, reply);
+
           return reply.toInjectResponse();
         }
 
