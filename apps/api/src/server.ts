@@ -25,6 +25,8 @@ import type { NotificationSchedulePort } from "@whisperm/notification-runtime";
 import { createPaystackWebhookHandler } from "./webhooks/paystack.js";
 import type { PaystackWebhookDependencies } from "./billing/contracts.js";
 import { createWorkspaceTeamManagementHandler, parseWorkspaceTeamRoute, type WorkspaceTeamManagementDependencies } from "./workspaces/team-management.js";
+import { authMiddleware, loadTenantMembershipMiddleware, type AccessTokenVerifier } from "./auth/middleware.js";
+import type { TenantMembershipLoader } from "./auth/types.js";
 
 export interface ApiKeyAuthenticationInput {
   readonly apiKey: string;
@@ -72,6 +74,8 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly deals?: DealRouteDependencies["deals"] | undefined;
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly marketplaceCaptures?: MarketplaceCaptureRouteDependencies["marketplaceCaptures"] | undefined;
+  readonly verifyAccessToken?: AccessTokenVerifier | undefined;
+  readonly tenantMembershipLoader?: TenantMembershipLoader | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
   readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
@@ -253,6 +257,18 @@ const verifyHmac = (dependencies: ApiServerDependencies) => async (request: Muta
   if (!verified) {
     throw new ApiError({ code: "HMAC_SIGNATURE_INVALID", message: "SDK event signature is invalid" });
   }
+};
+
+const authenticateTenantMember = async (dependencies: ApiServerDependencies, request: MutableRequest): Promise<void> => {
+  if (request.auth !== undefined) {
+    return;
+  }
+  if (dependencies.verifyAccessToken === undefined || dependencies.tenantMembershipLoader === undefined) {
+    return;
+  }
+
+  await authMiddleware(dependencies.verifyAccessToken)(request, new MemoryReply());
+  await loadTenantMembershipMiddleware(dependencies.tenantMembershipLoader)(request, new MemoryReply());
 };
 
 const tenantIsolationValidation = (request: MutableRequest): void => {
@@ -492,6 +508,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_CAPTURE_NOT_CONFIGURED", message: "Marketplace capture API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
         }
+        await authenticateTenantMember(dependencies, request);
         await marketplaceCaptureCreateHandler(request, reply);
         return reply.toInjectResponse();
       }
