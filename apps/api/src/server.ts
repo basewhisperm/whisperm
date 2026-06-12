@@ -73,7 +73,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
-  readonly marketplaceCaptures?: MarketplaceCaptureRouteDependencies["captures"] | undefined;
+  readonly marketplaceCapture?: MarketplaceCaptureRouteDependencies["capture"] | undefined;
   readonly workspaceTeamManagement?: WorkspaceTeamManagementDependencies | undefined;
   readonly apiKeyAuthenticator: ApiKeyAuthenticator;
   readonly hmacVerifier: HmacVerifier;
@@ -194,7 +194,7 @@ const routeTemplate = (method: string, pathname: string): string => {
   if (method === "GET" && pathname === "/reports") return "/reports";
   if (method === "POST" && pathname === "/workspaces") return "/workspaces";
   if (method === "POST" && pathname === "/billing/upgrade") return "/billing/upgrade";
-  if (method === "POST" && pathname === "/marketplace-acquisition/captures") return "/marketplace-acquisition/captures";
+  if (method === "POST" && pathname === "/marketplace-acquisition/capture") return "/marketplace-acquisition/capture";
   if (method === "GET" && /^\/workspaces\/[^/?#]+\/onboarding\/?$/u.test(pathname)) return "/workspaces/:id/onboarding";
   const crmRoute = parseCrmRoute(method, pathname);
   if (crmRoute?.name === "pipelineBoard") return "/pipelines/:id/board";
@@ -374,7 +374,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const activityListHandler = dependencies.activities === undefined ? undefined : createActivityListHandler({ activities: dependencies.activities });
   const contactActivitiesHandler = dependencies.activities === undefined ? undefined : createContactActivitiesHandler({ activities: dependencies.activities });
   const dealActivitiesHandler = dependencies.activities === undefined ? undefined : createDealActivitiesHandler({ activities: dependencies.activities });
-  const marketplaceCaptureHandler = dependencies.marketplaceCaptures === undefined ? undefined : createMarketplaceCaptureHandler({ captures: dependencies.marketplaceCaptures });
+  const marketplaceCaptureHandler = dependencies.marketplaceCapture === undefined ? undefined : createMarketplaceCaptureHandler({ captures: dependencies.marketplaceCapture });
   let server: Server | undefined;
 
   const inject = async (options: InjectOptions): Promise<InjectResponse> => {
@@ -480,7 +480,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         return reply.toInjectResponse();
       }
 
-      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
+      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/capture") {
         if (marketplaceCaptureHandler === undefined) {
           reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_CAPTURE_NOT_CONFIGURED", message: "Marketplace capture API is not configured" }, meta: { correlationId: request.correlationId } });
           return reply.toInjectResponse();
