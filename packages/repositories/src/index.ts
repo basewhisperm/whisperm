@@ -4,8 +4,6 @@ import { PrismaMarketplaceAcquisitionRepository, type MarketplaceAcquisitionRepo
 
 import {
   PersistenceError,
-  type MarketplaceCaptureRecord,
-  marketplaceCaptureRecordSchema,
   type PersistenceCorrelationMetadata,
   assertTenantScope,
   contactStageSchema,
@@ -90,7 +88,6 @@ export interface PrismaPersistenceClient {
   readonly pipelineStage: PrismaDelegate;
   readonly deal: PrismaDelegate;
   readonly activity: PrismaDelegate;
-  readonly marketplaceCapture: PrismaDelegate;
   readonly subscription: PrismaDelegate;
   readonly marketplaceCapture: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
@@ -163,16 +160,6 @@ export const contactRecordSchema = baseRecordSchema.extend({
 export type ContactRecord = z.output<typeof contactRecordSchema>;
 export type CreateContactInput = TenantScoped & Partial<Pick<ContactRecord, "externalId" | "email" | "phone" | "firstName" | "lastName" | "stage" | "metadata">>;
 export type UpdateContactInput = Partial<Pick<ContactRecord, "externalId" | "email" | "phone" | "firstName" | "lastName" | "stage" | "metadata">> & OptimisticLock;
-
-export interface MarketplaceSellerContactMatchInput extends TenantScoped {
-  readonly sellerProfileUrl?: string | undefined;
-  readonly sourceHost?: string | undefined;
-  readonly sellerDisplayName?: string | undefined;
-  readonly email?: string | undefined;
-  readonly phone?: string | undefined;
-}
-export type CreateMarketplaceSellerContactInput = TenantScoped & Partial<Pick<ContactRecord, "email" | "phone" | "firstName" | "lastName" | "stage" | "metadata">>;
-export type CreateMarketplaceCaptureInput = TenantScoped & Pick<MarketplaceCaptureRecord, "listingUrl" | "title" | "status"> & Partial<Pick<MarketplaceCaptureRecord, "marketplaceSourceId" | "externalId" | "description" | "price" | "currency" | "sellerName" | "sellerProfileUrl" | "metadata">>;
 
 export const pipelineStageRecordSchema = baseRecordSchema.extend({
   pipelineId: z.string().min(1),
@@ -490,11 +477,10 @@ export interface TenantRepository extends RepositoryTransactionRunner {
   update(id: string, input: UpdateTenantInput): Promise<Tenant>;
 }
 export interface UserRepository { create(context: TenantScoped, input: CreateUserInput): Promise<User>; findById(context: TenantScoped, id: string): Promise<User | null>; findByEmail(context: TenantScoped, email: string): Promise<User | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<User>>; update(context: TenantScoped, id: string, input: UpdateUserInput): Promise<User>; }
-export interface ContactRepository { create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord>; createMany(context: TenantScoped, inputs: readonly CreateContactInput[]): Promise<number>; count(context: TenantScoped): Promise<number>; findById(context: TenantScoped, id: string): Promise<ContactRecord | null>; findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]>; findMarketplaceSellerContact(context: TenantScoped, input: MarketplaceSellerContactMatchInput): Promise<ContactRecord | null>; createMarketplaceSellerContact(context: TenantScoped, input: CreateMarketplaceSellerContactInput): Promise<ContactRecord>; list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>>; update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord>; listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>>; }
+export interface ContactRepository { create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord>; createMany(context: TenantScoped, inputs: readonly CreateContactInput[]): Promise<number>; count(context: TenantScoped): Promise<number>; findById(context: TenantScoped, id: string): Promise<ContactRecord | null>; findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]>; list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>>; update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord>; listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>>; }
 export interface PipelineRepository { findByWorkspace(workspaceId: string): Promise<PipelineRecord | null>; updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord>; }
 export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
 export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
-export interface MarketplaceCaptureRepository { create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; linkCaptureToContact(context: TenantScoped, captureId: string, contactId: string): Promise<MarketplaceCaptureRecord>; }
 
 export interface DashboardContactRecord { readonly id: string; readonly firstName?: string | null | undefined; readonly lastName?: string | null | undefined; readonly company?: string | null | undefined; readonly email?: string | null | undefined; readonly lastTouchAt?: string | null | undefined; }
 export interface DashboardActivityRecord { readonly id: string; readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined; readonly type: string; readonly note?: string | null | undefined; readonly createdById: string; readonly createdAt: string; }
@@ -618,24 +604,6 @@ export class PrismaContactRepository implements ContactRepository {
   async count(context: TenantScoped): Promise<number> { ensureContext(context); const result = await this.prisma.contact.count?.({ where: { tenantId: context.tenantId } }); if (result === undefined) throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Contact count is not supported by this Prisma client", status: 503 }); return result; }
   async findById(context: TenantScoped, id: string): Promise<ContactRecord | null> { ensureContext(context); const result = await this.prisma.contact.findFirst({ where: byTenantId(context, id) }); return result === null ? null : parseRecord(contactRecordSchema, result); }
   async findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]> { ensureContext(context); if (emails.length === 0) return []; const rows = await this.prisma.contact.findMany({ where: { tenantId: context.tenantId, email: { in: [...new Set(emails)] } } }); return rows.map((row) => parseRecord(contactRecordSchema, row)); }
-  async findMarketplaceSellerContact(context: TenantScoped, input: MarketplaceSellerContactMatchInput): Promise<ContactRecord | null> {
-    ensureTenantInput(context, input);
-    if (input.sellerProfileUrl !== undefined) {
-      const row = await this.prisma.contact.findFirst({ where: withTenant(context, { metadata: { path: ["marketplaceAcquisition", "sellerProfileUrl"], equals: input.sellerProfileUrl } }), orderBy: { id: "asc" } });
-      if (row !== null) return parseRecord(contactRecordSchema, row);
-    }
-    if (input.sellerDisplayName !== undefined && input.sourceHost !== undefined) {
-      const row = await this.prisma.contact.findFirst({ where: withTenant(context, { AND: [{ metadata: { path: ["marketplaceAcquisition", "sellerDisplayName"], equals: input.sellerDisplayName } }, { metadata: { path: ["marketplaceAcquisition", "sourceHost"], equals: input.sourceHost } }] }), orderBy: { id: "asc" } });
-      if (row !== null) return parseRecord(contactRecordSchema, row);
-    }
-    const or: PrismaWhere[] = [];
-    if (input.email !== undefined) or.push({ email: input.email });
-    if (input.phone !== undefined) or.push({ phone: input.phone });
-    if (or.length === 0) return null;
-    const row = await this.prisma.contact.findFirst({ where: withTenant(context, { OR: or }), orderBy: { id: "asc" } });
-    return row === null ? null : parseRecord(contactRecordSchema, row);
-  }
-  async createMarketplaceSellerContact(context: TenantScoped, input: CreateMarketplaceSellerContactInput): Promise<ContactRecord> { ensureTenantInput(context, input); try { return parseRecord(contactRecordSchema, await this.prisma.contact.create({ data: dataWithDefined(input) })); } catch (error) { return mapPrismaError(error, "Marketplace seller contact already exists"); } }
   async list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>> { ensureContext(context); const args = pageArgs(page); const rows = await this.prisma.contact.findMany({ where: cursorWhere(context, args.cursor), take: args.take, orderBy: { id: "asc" } }); return paginate(rows.map((row) => parseRecord(contactRecordSchema, row)), args.take - 1); }
   async update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord> { ensureContext(context); return updateOptimistic(this.prisma.contact, contactRecordSchema, context, id, input); }
   async listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>> { ensureContext(context); const args = pageArgs(page); const rows = await this.prisma.leadEvent.findMany({ where: cursorWhere(context, args.cursor, { contactId }), take: args.take, orderBy: { id: "asc" } }); return paginate(rows.map((row) => parseRecord(leadEventRecordSchema, row)), args.take - 1); }
@@ -843,25 +811,6 @@ export class PrismaDealsRepository implements DealsRepository {
   private async listActivities(context: TenantScoped, dealId: string): Promise<Page<ActivityRecord>> {
     const rows = await this.prisma.activity.findMany({ where: withTenant(context, { dealId }), take: 51, orderBy: { id: "asc" } });
     return paginate(rows.map((row) => parseRecord(activityRecordSchema, row)), 50);
-  }
-}
-
-
-export class PrismaMarketplaceCaptureRepository implements MarketplaceCaptureRepository {
-  constructor(private readonly prisma: PrismaPersistenceClient) {}
-  async create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord> {
-    ensureTenantInput(context, input);
-    try {
-      return parseRecord(marketplaceCaptureRecordSchema, await this.prisma.marketplaceCapture.create({ data: dataWithDefined(input) }));
-    } catch (error) { return mapPrismaError(error, "Marketplace capture already exists"); }
-  }
-  async linkCaptureToContact(context: TenantScoped, captureId: string, contactId: string): Promise<MarketplaceCaptureRecord> {
-    ensureContext(context);
-    const result = await this.prisma.marketplaceCapture.updateMany({ where: withTenant(context, { id: captureId }), data: { contactId, status: "CAPTURED" } });
-    if (result.count !== 1) notFound("Marketplace capture not found", { captureId });
-    const row = await this.prisma.marketplaceCapture.findFirst({ where: byTenantId(context, captureId) });
-    if (row === null) notFound("Marketplace capture not found", { captureId });
-    return parseRecord(marketplaceCaptureRecordSchema, row);
   }
 }
 
@@ -1196,7 +1145,6 @@ export interface PrismaRepositories {
   readonly billing: BillingRepository;
   readonly auditLogs: AuditLogRepository;
   readonly activities: ActivityRepository;
-  readonly marketplaceCaptures: MarketplaceCaptureRepository;
   readonly dashboard: DashboardRepository;
   readonly followUpDigest: FollowUpDigestRepository;
   readonly reports: ReportsRepository;
@@ -1212,7 +1160,6 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     pipelines: new PrismaPipelineRepository(prisma),
     deals: new PrismaDealsRepository(prisma),
     activities: new PrismaActivityRepository(prisma),
-    marketplaceCaptures: new PrismaMarketplaceCaptureRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
     reports: new PrismaReportsRepository(prisma),
     followUpDigest: new PrismaFollowUpDigestRepository(prisma),
