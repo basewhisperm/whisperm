@@ -74,7 +74,7 @@ const validPayload = (overrides = {}) => ({
   sourceHost: "market.example",
   title: "2019 Freightliner Cascadia",
   description: "Clean sleeper truck",
-  priceText: "$45,000",
+  priceText: "USD $45,000",
   imageUrls: ["https://market.example/images/1.jpg"],
   rawExtract: {
     seller: "Dealer A",
