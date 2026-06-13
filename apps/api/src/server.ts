@@ -115,6 +115,20 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly upgradePorts?: UpgradeServicePorts | undefined;
   readonly workspaceProvisioningPort?: WorkspaceProvisioningPort | undefined;
   readonly onboardingStatePort?: OnboardingStatePort | undefined;
+    readonly marketplaceAcquisition?: {
+    capture(
+      context: {
+        readonly tenantId: string;
+        readonly actorId?: string | undefined;
+        readonly correlation: {
+          readonly correlationId: string;
+          readonly requestId?: string | undefined;
+          readonly causationId?: string | undefined;
+        };
+      },
+      input: Record<string, unknown>,
+    ): Promise<unknown>;
+  } | undefined;
 }
 
 export interface InjectOptions {
@@ -280,6 +294,7 @@ const parseCrmRoute = (
 
 const routeTemplate = (method: string, pathname: string): string => {
   if (method === "GET" && pathname === "/healthz") return "/healthz";
+  if (method === "POST" && pathname === "/marketplace-acquisition/captures") return "/marketplace-acquisition/captures";
   if (method === "GET" && pathname === "/readyz") return "/readyz";
   if (method === "POST" && pathname === "/contacts/import") return "/contacts/import";
   if (method === "POST" && pathname === "/webhooks/stripe") return "/webhooks/stripe";
@@ -798,7 +813,55 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
         return reply.toInjectResponse();
       }
+      if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {
+        if (dependencies.marketplaceAcquisition === undefined) {
+          reply.code(503).send({
+            ok: false,
+            error: {
+              code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED",
+              message: "Marketplace Acquisition is not configured",
+            },
+            meta: { correlationId: request.correlationId },
+          });
+          return reply.toInjectResponse();
+        }
 
+        const tenantId = firstHeaderValue(request.headers, "x-tenant-id")?.trim();
+        const actorId = firstHeaderValue(request.headers, "x-user-id")?.trim();
+
+        if (!tenantId || !actorId) {
+          throw new ApiError({
+            code: "TENANT_CONTEXT_MISMATCH",
+            message: "Marketplace capture requires authenticated tenant and actor context",
+          });
+        }
+
+        if (requireActiveSubscription !== undefined) {
+          await requireActiveSubscription(tenantId);
+        }
+
+        const result = await dependencies.marketplaceAcquisition.capture(
+          {
+            tenantId,
+            actorId,
+            correlation: {
+              correlationId: request.correlationId ?? "unknown",
+            },
+          },
+          {
+            ...(request.body as Record<string, unknown>),
+            tenantId,
+          },
+        );
+
+        reply.code(201).send({
+          ok: true,
+          data: result,
+          meta: { correlationId: request.correlationId },
+        });
+
+        return reply.toInjectResponse();
+      }
       reply.code(404).send({
         ok: false,
         error: { code: "NOT_FOUND", message: "Route not found" },
