@@ -1,10 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
+import { AuthError } from "../auth/errors.js";
+import { assertRequiredRole } from "../auth/roles.js";
+import { tenantRoles, type TenantRole } from "../auth/types.js";
 import { evaluateTeamMemberQuota, type BillingQuotaContext, type BillingQuotaPlan } from "../billing/quota.js";
 import { ApiError } from "../errors.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike } from "../http/fastify.js";
-import { assertRequiredRole } from "../auth/roles.js";
-import { tenantRoles, type TenantRole } from "../auth/types.js";
 
 const invitationTtlMs = 48 * 60 * 60 * 1000;
 const acceptPathPrefix = "/invitations/";
@@ -140,12 +141,12 @@ const requireWorkspaceAccess = async (store: TeamManagementStore, workspaceId: s
   const tenantId = firstHeaderValue(request.headers, "x-tenant-id")?.trim();
   const actorId = firstHeaderValue(request.headers, "x-user-id")?.trim();
   if (tenantId === undefined || actorId === undefined || tenantId.length === 0 || actorId.length === 0 || workspaceId !== tenantId) {
-    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace tenant context is required", statusCode: 403 });
+    throw new AuthError({ code: "AUTH_FORBIDDEN", message: "Workspace tenant context is required" });
   }
   const workspace = await store.findWorkspace({ tenantId });
   const actor = await store.findMember({ tenantId, userId: actorId });
   if (workspace === null || actor === null || !actor.isActive) {
-    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace membership is required", statusCode: 403 });
+    throw new AuthError({ code: "AUTH_FORBIDDEN", message: "Workspace membership is required" });
   }
   assertRequiredRole(actor.role, "ADMIN");
   return { tenantId, actor, workspace };
@@ -233,7 +234,7 @@ const changeRole = async (dependencies: WorkspaceTeamManagementDependencies, req
   const body = parseRoleBody(request.body);
   const target = await dependencies.store.findMember({ tenantId, userId: targetUserId });
   if (target === null || !target.isActive) {
-    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Target member does not belong to workspace", statusCode: 403 });
+    throw new AuthError({ code: "AUTH_FORBIDDEN", message: "Target member does not belong to workspace" });
   }
   const member = await dependencies.store.updateMember({ tenantId, userId: targetUserId, role: body.role });
   await dependencies.store.appendAudit({ tenantId, actorId: actor.id, action: "member.role_changed", targetType: "TENANT_USER", targetId: member.id, correlationId: request.correlationId ?? request.id ?? "unknown", metadata: { previousRole: target.role, role: member.role } });
@@ -247,7 +248,7 @@ const removeMember = async (dependencies: WorkspaceTeamManagementDependencies, r
   if (actor.id === targetUserId) throw new ApiError({ code: "REQUEST_BODY_INVALID", message: "Cannot remove your own account", statusCode: 400 });
   const target = await dependencies.store.findMember({ tenantId, userId: targetUserId });
   if (target === null || !target.isActive) {
-    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Target member does not belong to workspace", statusCode: 403 });
+    throw new AuthError({ code: "AUTH_FORBIDDEN", message: "Target member does not belong to workspace" });
   }
   const member = await dependencies.store.updateMember({ tenantId, userId: targetUserId, isActive: false });
   await dependencies.store.appendAudit({ tenantId, actorId: actor.id, action: "member.removed", targetType: "TENANT_USER", targetId: member.id, correlationId: request.correlationId ?? request.id ?? "unknown", metadata: { email: target.email, role: target.role } });
@@ -260,5 +261,5 @@ export const createWorkspaceTeamManagementHandler = (dependencies: WorkspaceTeam
   if (routeName === "inviteAccept") return acceptInvitation(dependencies, request, reply);
   if (routeName === "roleChange") return changeRole(dependencies, request, reply);
   if (routeName === "memberRemove") return removeMember(dependencies, request, reply);
-  throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace team route is invalid", statusCode: 403 });
+  throw new AuthError({ code: "AUTH_FORBIDDEN", message: "Workspace team route is invalid" });
 };
