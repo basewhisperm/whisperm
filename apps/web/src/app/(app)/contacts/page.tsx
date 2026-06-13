@@ -1,7 +1,3 @@
-"use client";
-
-import { useState, useEffect } from "react";
-import {
   IconSearch, IconUpload, IconPhone, IconMail,
   IconCalendar, IconNote, IconX, IconChevronUp, IconChevronDown,
   IconUser,
@@ -30,13 +26,18 @@ const STAGE_STYLES: Record<string, { bg: string; color: string }> = {
   Prospect:   { bg: "#EEF2FF", color: "#4338CA" },
   Qualified:  { bg: "#EFF6FF", color: "#1D4ED8" },
   Proposal:   { bg: "#FEF3C7", color: "#B45309" },
+  Prospect:   { bg: "var(--color-mist)", color: "var(--color-whisper)" },
+  Qualified:  { bg: "var(--color-secondary)", color: "var(--color-pulse)" },
+  Proposal:   { bg: "var(--color-muted)", color: "var(--color-health-amber)" },
   Engagement: { bg: "var(--color-mist)", color: "var(--color-whisper)" },
   Renewal:    { bg: "#DCFCE7", color: "#15803D" },
+  Renewal:    { bg: "var(--color-secondary)", color: "var(--color-growth)" },
 };
 
 function StageBadge({ stage }: { stage?: string | null | undefined }) {
   if (!stage) return null;
   const s = STAGE_STYLES[stage] ?? { bg: "#F3F4F6", color: "#6B7280" };
+  const s = STAGE_STYLES[stage] ?? { bg: "var(--color-muted)", color: "var(--color-muted-foreground)" };
   return (
     <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide" style={{ background: s.bg, color: s.color }}>
       {stage}
@@ -64,10 +65,13 @@ function lastTouchLabel(lastTouchAt?: string | null): string {
 
 function lastTouchColor(lastTouchAt?: string | null): string {
   if (!lastTouchAt) return "#EF4444";
+  if (!lastTouchAt) return "var(--color-health-red)";
   const days = Math.floor((Date.now() - new Date(lastTouchAt).getTime()) / 86400000);
   if (days <= 7) return "var(--color-growth)";
   if (days <= 14) return "#F59E0B";
   return "#EF4444";
+  if (days <= 14) return "var(--color-health-amber)";
+  return "var(--color-health-red)";
 }
 
 export default function ContactsPage() {
@@ -93,13 +97,7 @@ export default function ContactsPage() {
     else { setSortKey(key); setSortDir("asc"); }
   }
 
-  const filtered = contacts
-    .filter(c => {
-      const q = search.toLowerCase();
-      const name = getContactName(c).toLowerCase();
-      return (stageFilter === "All" || (c.stage ?? "") === stageFilter) &&
-        (name.includes(q) || (c.company ?? "").toLowerCase().includes(q) || (c.email ?? "").toLowerCase().includes(q));
-    })
+@@ -103,118 +103,118 @@ export default function ContactsPage() {
     .sort((a, b) => {
       let av: string | number, bv: string | number;
       switch (sortKey) {
@@ -126,12 +124,14 @@ export default function ContactsPage() {
             <input
               className="h-9 w-full rounded-xl bg-secondary pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[var(--color-pulse)]"
               style={{ border: "0.5px solid hsl(var(--border))" }}
+              style={{ border: "0.5px solid var(--color-border)" }}
               placeholder="Search contacts…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
           </div>
           <button className="flex h-9 items-center gap-2 rounded-xl px-3 text-sm text-muted-foreground hover:bg-secondary" style={{ border: "0.5px solid hsl(var(--border))" }}>
+          <button className="flex h-9 items-center gap-2 rounded-xl px-3 text-sm text-muted-foreground hover:bg-secondary" style={{ border: "0.5px solid var(--color-border)" }}>
             <IconUpload className="size-3.5" stroke={1.8} /> Import CSV
           </button>
         </div>
@@ -139,11 +139,13 @@ export default function ContactsPage() {
           {stages.map(s => (
             <button key={s} onClick={() => setStageFilter(s)} className="rounded-full px-3 py-1 text-xs font-medium transition"
               style={stageFilter === s ? { background: "var(--color-whisper)", color: "#fff" } : { background: "hsl(var(--secondary))", color: "hsl(var(--muted-foreground))", border: "0.5px solid hsl(var(--border))" }}>
+              style={stageFilter === s ? { background: "var(--color-whisper)", color: "var(--color-primary-foreground)" } : { background: "var(--color-secondary)", color: "var(--color-muted-foreground)", border: "0.5px solid var(--color-border)" }}>
               {s}
             </button>
           ))}
         </div>
         <div className="overflow-hidden rounded-2xl" style={{ border: "0.5px solid hsl(var(--border))" }}>
+        <div className="overflow-hidden rounded-2xl" style={{ border: "0.5px solid var(--color-border)" }}>
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-secondary text-left text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -164,6 +166,7 @@ export default function ContactsPage() {
                 </td></tr>
               ) : filtered.map((contact) => (
                 <tr key={contact.id} className="cursor-pointer hover:bg-secondary" style={{ borderTop: "0.5px solid hsl(var(--border))" }} onClick={() => setSelected(contact)}>
+                <tr key={contact.id} className="cursor-pointer hover:bg-secondary" style={{ borderTop: "0.5px solid var(--color-border)" }} onClick={() => setSelected(contact)}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
                       <div className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: "var(--color-whisper)" }}>
@@ -191,6 +194,7 @@ export default function ContactsPage() {
         <div className="h-fit w-80 shrink-0 overflow-hidden rounded-2xl bg-background" style={{ border: "2px solid var(--color-whisper)" }}>
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between p-5" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
+            <div className="flex items-start justify-between p-5" style={{ borderBottom: "0.5px solid var(--color-border)" }}>
               <div className="flex items-center gap-3">
                 <div className="flex size-10 items-center justify-center rounded-full text-sm font-semibold text-white" style={{ background: "var(--color-whisper)" }}>{getInitials(selected)}</div>
                 <div>
@@ -201,6 +205,7 @@ export default function ContactsPage() {
               <button onClick={() => setSelected(null)} className="rounded-lg p-1 hover:bg-muted"><IconX className="size-4 text-muted-foreground" stroke={1.8} /></button>
             </div>
             <div className="space-y-3 p-5" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
+            <div className="space-y-3 p-5" style={{ borderBottom: "0.5px solid var(--color-border)" }}>
               {selected.email && <div className="flex items-center gap-2 text-sm"><IconMail className="size-3.5 shrink-0 text-muted-foreground" stroke={1.8} /><a href={`mailto:${selected.email}`} className="text-[var(--color-whisper)] hover:underline">{selected.email}</a></div>}
               {selected.phone && <div className="flex items-center gap-2 text-sm"><IconPhone className="size-3.5 shrink-0 text-muted-foreground" stroke={1.8} /><span className="text-foreground">{selected.phone}</span></div>}
               <div className="flex items-center gap-2"><StageBadge stage={selected.stage} /><span className="text-xs text-muted-foreground">· Last touch {lastTouchLabel(selected.lastTouchAt)}</span></div>

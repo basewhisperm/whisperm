@@ -23,6 +23,7 @@ const DATE_RANGES: { label: string; value: DateRange }[] = [
 ];
 
 const STAGE_COLORS = ["#534AB7", "#1D4ED8", "#B45309", "#15803D", "#4338CA"];
+const STAGE_COLORS = ["var(--color-whisper)", "var(--color-pulse)", "var(--color-health-amber)", "var(--color-growth)", "var(--color-midnight)"];
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
@@ -35,6 +36,7 @@ function BarChart({ data }: { data: RevenueByStage[] }) {
     <div className="flex h-48 items-end gap-3">
       {data.map((d, i) => {
         const color = STAGE_COLORS[i % STAGE_COLORS.length] ?? "#534AB7";
+        const color = STAGE_COLORS[i % STAGE_COLORS.length] ?? "var(--color-whisper)";
         return (
           <div key={d.stageId} className="flex flex-1 flex-col items-center gap-2">
             <span className="text-xs font-medium" style={{ color }}>{formatCurrency(d.revenue)}</span>
@@ -54,6 +56,7 @@ function AcquisitionChart({ data }: { data: AcquisitionSource[] }) {
     <div className="space-y-4">
       {data.map((d, i) => {
         const color = STAGE_COLORS[i % STAGE_COLORS.length] ?? "#534AB7";
+        const color = STAGE_COLORS[i % STAGE_COLORS.length] ?? "var(--color-whisper)";
         const pct = total > 0 ? Math.round((d.count / total) * 100) : 0;
         return (
           <div key={d.source}>
@@ -96,6 +99,7 @@ export default function ReportsPage() {
         {DATE_RANGES.map(r => (
           <button key={r.value} onClick={() => setRange(r.value)} className="rounded-full px-4 py-1.5 text-xs font-medium transition"
             style={range === r.value ? { background: "var(--color-whisper)", color: "#fff" } : { background: "hsl(var(--secondary))", color: "hsl(var(--muted-foreground))", border: "0.5px solid hsl(var(--border))" }}>
+            style={range === r.value ? { background: "var(--color-whisper)", color: "var(--color-primary-foreground)" } : { background: "var(--color-secondary)", color: "var(--color-muted-foreground)", border: "0.5px solid var(--color-border)" }}>
             {r.label}
           </button>
         ))}
@@ -107,6 +111,7 @@ export default function ReportsPage() {
           { label: "Renewal Rate", value: renewalRate != null ? `${Math.round(renewalRate * 100)}` : "—", unit: renewalRate != null ? "%" : "", positive: true },
         ].map(stat => (
           <div key={stat.label} className="rounded-2xl bg-secondary p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
+          <div key={stat.label} className="rounded-2xl bg-secondary p-5" style={{ border: "0.5px solid var(--color-border)" }}>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
             <p className="mt-3 text-[28px] font-semibold tracking-tight text-foreground">
               {loading ? "…" : stat.value}<span className="text-base font-normal text-muted-foreground ml-1">{stat.unit}</span>
@@ -119,6 +124,8 @@ export default function ReportsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <div className="mb-4 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
+        <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
+          <div className="mb-4 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid var(--color-border)" }}>
             <h2 className="text-sm font-semibold text-foreground">Revenue by Pipeline Stage</h2>
             <span className="text-xs text-muted-foreground">
               {data ? formatCurrency(data.revenueByStage.reduce((s, d) => s + d.revenue, 0)) : "—"}
@@ -129,6 +136,8 @@ export default function ReportsPage() {
 
         <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <div className="mb-4 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
+        <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
+          <div className="mb-4 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid var(--color-border)" }}>
             <h2 className="text-sm font-semibold text-foreground">Client Acquisition Sources</h2>
             <span className="text-xs text-muted-foreground">
               {data ? `${data.acquisitionSources.reduce((s, d) => s + d.count, 0)} total` : "—"}

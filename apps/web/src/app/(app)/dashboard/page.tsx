@@ -1,23 +1,4 @@
-import { IconUsers, IconCurrencyDollar, IconTrophy, IconClock, IconAlertCircle, IconPhone, IconMail, IconCalendar, IconNote } from "@tabler/icons-react";
-
-type HealthStatus = "healthy" | "at-risk" | "idle";
-
-interface DashboardContact {
-  id: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  company?: string | null;
-  email?: string | null;
-  lastTouchAt?: string | null;
-}
-
-interface DashboardActivity {
-  id: string;
-  type: string;
-  note?: string | null;
-  createdAt: string;
-  contactId?: string | null;
-}
+@@ -21,161 +21,161 @@ interface DashboardActivity {
 
 interface DashboardData {
   activeContacts: number;
@@ -45,6 +26,8 @@ function getHealthConfig(status: HealthStatus) {
     case "healthy": return { color: "var(--color-growth)", fill: 85, label: "Healthy" };
     case "at-risk": return { color: "#F59E0B", fill: 45, label: "At risk" };
     case "idle":    return { color: "#EF4444", fill: 18, label: "Idle" };
+    case "at-risk": return { color: "var(--color-health-amber)", fill: 45, label: "At risk" };
+    case "idle":    return { color: "var(--color-health-red)", fill: 18, label: "Idle" };
   }
 }
 
@@ -91,6 +74,7 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       {data.followUpAlerts.length > 0 && (
         <div className="flex items-start gap-3 rounded-2xl p-4" style={{ background: "#FEF3C7", border: "0.5px solid #FCD34D" }}>
+        <div className="flex items-start gap-3 rounded-2xl p-4" style={{ background: "var(--color-muted)", border: "0.5px solid var(--color-health-amber)" }}>
           <IconAlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" stroke={1.8} />
           <div>
             <p className="text-sm font-medium text-amber-900">{data.followUpAlerts.length} client{data.followUpAlerts.length > 1 ? "s" : ""} need follow-up</p>
@@ -104,6 +88,7 @@ export default async function DashboardPage() {
           const Icon = card.icon;
           return (
             <div key={card.label} className="rounded-2xl bg-secondary p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
+            <div key={card.label} className="rounded-2xl bg-secondary p-5" style={{ border: "0.5px solid var(--color-border)" }}>
               <div className="flex items-center justify-between">
                 <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{card.label}</p>
                 <div className="flex size-8 items-center justify-center rounded-xl" style={{ background: "var(--color-mist)" }}>
@@ -120,6 +105,8 @@ export default async function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <div className="mb-1 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
+        <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
+          <div className="mb-1 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid var(--color-border)" }}>
             <h2 className="text-sm font-semibold text-foreground">Client Health</h2>
             <span className="text-xs text-muted-foreground">{data.healthContacts.length} clients</span>
           </div>
@@ -132,6 +119,7 @@ export default async function DashboardPage() {
               const days = getDaysSince(contact.lastTouchAt);
               return (
                 <div key={contact.id} className="flex items-center gap-4 py-3" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
+                <div key={contact.id} className="flex items-center gap-4 py-3" style={{ borderBottom: "0.5px solid var(--color-border)" }}>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between">
                       <p className="truncate text-sm font-medium text-foreground">{getContactName(contact)}</p>
@@ -153,6 +141,8 @@ export default async function DashboardPage() {
 
         <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <div className="mb-1 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
+        <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
+          <div className="mb-1 flex items-center justify-between" style={{ paddingBottom: "12px", borderBottom: "0.5px solid var(--color-border)" }}>
             <h2 className="text-sm font-semibold text-foreground">Recent Activity</h2>
             <span className="text-xs text-muted-foreground">Last {data.activities.length} activities</span>
           </div>
@@ -163,6 +153,7 @@ export default async function DashboardPage() {
               const Icon = getActivityIcon(activity.type);
               return (
                 <div key={activity.id} className="flex items-start gap-3 py-3" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
+                <div key={activity.id} className="flex items-start gap-3 py-3" style={{ borderBottom: "0.5px solid var(--color-border)" }}>
                   <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg" style={{ background: "var(--color-mist)" }}>
                     <Icon className="size-3.5" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
                   </div>

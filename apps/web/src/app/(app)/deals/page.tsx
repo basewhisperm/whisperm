@@ -1,19 +1,4 @@
-"use client";
-
-import { useState, useEffect } from "react";
-import { IconPlus, IconX, IconCurrencyDollar, IconUser } from "@tabler/icons-react";
-
-interface PipelineStage {
-  id: string;
-  name: string;
-  position: number;
-  color?: string | null;
-}
-
-interface Pipeline {
-  id: string;
-  name: string;
-  stages: PipelineStage[];
+@@ -17,126 +17,126 @@ interface Pipeline {
 }
 
 interface Deal {
@@ -44,8 +29,14 @@ function getStageColor(stage: PipelineStage, index: number): { accent: string; l
     { accent: "#B45309", light: "#FEF3C7" },
     { accent: "#534AB7", light: "var(--color-mist)" },
     { accent: "#15803D", light: "#DCFCE7" },
+    { accent: "var(--color-whisper)", light: "var(--color-mist)" },
+    { accent: "var(--color-pulse)", light: "var(--color-secondary)" },
+    { accent: "var(--color-health-amber)", light: "var(--color-muted)" },
+    { accent: "var(--color-whisper)", light: "var(--color-mist)" },
+    { accent: "var(--color-growth)", light: "var(--color-secondary)" },
   ];
   return COLORS[index % COLORS.length] ?? { accent: "#534AB7", light: "var(--color-mist)" };
+  return COLORS[index % COLORS.length] ?? { accent: "var(--color-whisper)", light: "var(--color-mist)" };
 }
 
 function initials(title?: string | null): string {
@@ -56,6 +47,7 @@ function initials(title?: string | null): string {
 function DealCard({ deal, accent, onClick }: { deal: Deal; accent: string; onClick: () => void }) {
   return (
     <div onClick={onClick} className="cursor-pointer rounded-2xl bg-background p-4 transition hover:shadow-md" style={{ border: "0.5px solid hsl(var(--border))" }}>
+    <div onClick={onClick} className="cursor-pointer rounded-2xl bg-background p-4 transition hover:shadow-md" style={{ border: "0.5px solid var(--color-border)" }}>
       <div className="flex items-center gap-2">
         <div className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: accent }}>
           {initials(deal.title)}
@@ -84,6 +76,7 @@ function DealDetail({ deal, stages, onClose, onStageChange }: { deal: Deal; stag
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-start justify-between p-5" style={{ borderBottom: "0.5px solid hsl(var(--border))" }}>
+      <div className="flex items-start justify-between p-5" style={{ borderBottom: "0.5px solid var(--color-border)" }}>
         <div>
           <p className="font-semibold text-foreground">{deal.title ?? "Untitled deal"}</p>
           <p className="text-xs text-muted-foreground">{formatValue(deal.value, deal.currency)}</p>
@@ -115,6 +108,7 @@ function DealDetail({ deal, stages, onClose, onStageChange }: { deal: Deal; stag
                 <button key={s.id} onClick={() => onStageChange(deal.id, s.id)}
                   className="rounded-full px-3 py-1 text-xs font-medium transition"
                   style={deal.pipelineStageId === s.id ? { background: accent, color: "#fff" } : { background: light, color: accent }}>
+                  style={deal.pipelineStageId === s.id ? { background: accent, color: "var(--color-primary-foreground)" } : { background: light, color: accent }}>
                   {s.name}
                 </button>
               );
@@ -140,22 +134,7 @@ export default function DealsPage() {
       .then(data => { setPipeline(data.pipeline); setDeals(data.deals ?? []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
-
-  function handleDrop(stageId: string) {
-    if (!dragging) return;
-    setDeals(prev => prev.map(d => d.id === dragging ? { ...d, pipelineStageId: stageId } : d));
-    if (selected?.id === dragging) setSelected(prev => prev ? { ...prev, pipelineStageId: stageId } : null);
-    setDragging(null);
-    setDragOver(null);
-  }
-
-  function handleStageChange(dealId: string, stageId: string) {
-    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, pipelineStageId: stageId } : d));
-    setSelected(prev => prev?.id === dealId ? { ...prev, pipelineStageId: stageId } : prev);
-  }
-
-  function stageDeals(stageId: string) {
-    return deals.filter(d => d.pipelineStageId === stageId);
+@@ -159,62 +159,62 @@ export default function DealsPage() {
   }
 
   function stageTotal(stageId: string) {
@@ -182,6 +161,7 @@ export default function DealsPage() {
             return (
               <div key={stage.id} className="flex w-60 shrink-0 flex-col rounded-2xl transition-colors"
                 style={{ background: isDragTarget ? light : "hsl(var(--secondary))", border: isDragTarget ? `2px solid ${accent}` : "0.5px solid hsl(var(--border))" }}
+                style={{ background: isDragTarget ? light : "var(--color-secondary)", border: isDragTarget ? `2px solid ${accent}` : "0.5px solid var(--color-border)" }}
                 onDragOver={e => { e.preventDefault(); setDragOver(stage.id); }}
                 onDragLeave={() => setDragOver(null)}
                 onDrop={() => handleDrop(stage.id)}>
@@ -202,6 +182,7 @@ export default function DealsPage() {
                     </div>
                   ))}
                   <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs text-muted-foreground transition hover:bg-background" style={{ border: "0.5px dashed hsl(var(--border))" }}>
+                  <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs text-muted-foreground transition hover:bg-background" style={{ border: "0.5px dashed var(--color-border)" }}>
                     <IconPlus className="size-3" stroke={1.8} /> Add deal
                   </button>
                 </div>
