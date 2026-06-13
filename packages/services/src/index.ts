@@ -1296,5 +1296,13 @@ export {
   type WeeklyFollowUpDigestResult,
 } from "./notifications/follow-up-digest.js";
 
-export { MarketplaceCaptureService, MarketplaceCaptureServiceError } from "./marketplace-acquisition/capture-service.js";
-export type { MarketplaceCaptureServiceContext, MarketplaceCaptureServiceDependencies, MarketplaceCaptureServiceResult, MarketplaceCaptureRepositoryPort } from "./marketplace-acquisition/capture-service.js";
+export {
+  MarketplaceCaptureService,
+  MarketplaceCaptureServiceError,
+} from "./marketplace-acquisition/capture-service.js";
+
+export type {
+  MarketplaceCaptureServiceContext,
+  MarketplaceCaptureServiceDependencies,
+  MarketplaceCaptureRepositoryPort,
+} from "./marketplace-acquisition/capture-service.js";
