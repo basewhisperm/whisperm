@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import type {
   CreateMarketplaceCaptureInput,
-  MarketplaceAcquisitionRepository,
   MarketplaceCaptureRecord,
 } from "@whisperm/repositories";
 import {
@@ -54,7 +53,7 @@ export interface MarketplaceCaptureAuditPort {
 }
 
 export interface MarketplaceCaptureServiceDependencies {
-  readonly marketplaceAcquisition: MarketplaceCaptureRepositoryPort | MarketplaceAcquisitionRepository;
+  readonly marketplaceAcquisition: MarketplaceCaptureRepositoryPort;
   readonly auditLogs?: MarketplaceCaptureAuditPort | undefined;
 }
 
@@ -91,7 +90,7 @@ const truncateDescription = (description: string | undefined): string | undefine
 
 const parsePriceText = (
   priceText: string | undefined,
-): { readonly price?: string | undefined; readonly currency?: string | undefined } => {
+): { readonly price?: string; readonly currency?: string } => {
   if (priceText === undefined) return {};
 
   const normalized = priceText.trim();
@@ -147,14 +146,14 @@ export class MarketplaceCaptureService {
       tenantId: context.tenantId,
       listingUrl,
       title: request.title,
-      description: truncateDescription(request.description),
-      price: price.price,
-      currency: price.currency,
       status: "CAPTURED",
       capturedAt: new Date().toISOString(),
+      ...(request.description === undefined ? {} : { description: truncateDescription(request.description) }),
+      ...(price.price === undefined ? {} : { price: price.price }),
+      ...(price.currency === undefined ? {} : { currency: price.currency }),
       metadata: {
         sourceHost,
-        priceText: request.priceText,
+        ...(request.priceText === undefined ? {} : { priceText: request.priceText }),
         imageUrls: request.imageUrls,
         rawExtract: request.rawExtract,
       },
