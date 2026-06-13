@@ -25,11 +25,14 @@ export interface MarketplaceCaptureServiceContext {
 export interface MarketplaceCaptureServiceResult {
   readonly capture: MarketplaceCaptureResponse;
   readonly isNew: boolean;
+  readonly duplicate: boolean;
+  readonly normalizationWarnings: readonly string[];
 }
 
 export interface MarketplaceCaptureRepositoryPort {
   createMarketplaceCapture(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>;
-  findMarketplaceCaptureBySourceUrl(context: TenantScoped, sourceUrl: string): Promise<MarketplaceCaptureRecord | null>;
+  findMarketplaceCaptureByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>;
+  findMarketplaceCaptureByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null>;
 }
 
 export interface MarketplaceCaptureAuditPort {
@@ -65,27 +68,60 @@ export class MarketplaceCaptureServiceError extends Error {
   }
 }
 
-const normalizeSourceUrl = (sourceUrl: string): string => new URL(sourceUrl).toString();
+const parserVersion = "marketplace-capture-normalizer-v1";
 const tenantScope = (context: MarketplaceCaptureServiceContext): TenantScoped => ({ tenantId: context.tenantId });
-const truncateDescription = (description: string | undefined): string | undefined => description === undefined ? undefined : description.slice(0, 5000);
+const truncate = (value: string | undefined, max: number): string | undefined => value === undefined ? undefined : value.trim().slice(0, max);
 
-const parsePriceText = (priceText: string | undefined): { readonly priceAmount?: string | undefined; readonly currency?: string | undefined } => {
-  if (priceText === undefined) return {};
-  const normalized = priceText.trim();
-  const match = /^(?<currencyCode>[A-Z]{3})\s?(?<amount>\d{1,9}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,9}(?:\.\d{1,2})?)$/u.exec(normalized);
-  if (match?.groups === undefined) return {};
-  const currency = match.groups.currencyCode;
-  const amount = match.groups.amount;
-  if (currency === undefined || amount === undefined) return {};
-  return { priceAmount: amount.replace(/,/gu, ""), currency };
+const normalizeUrl = (input: string, options: { readonly removeTrailingSlash: boolean }): string => {
+  const parsed = new URL(input.trim());
+  parsed.hostname = parsed.hostname.toLowerCase();
+  if (options.removeTrailingSlash && parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
+    parsed.pathname = parsed.pathname.replace(/\/+$/u, "");
+  }
+  return parsed.toString();
 };
 
-const toResponse = (record: MarketplaceCaptureRecord): MarketplaceCaptureResponse => marketplaceCaptureResponseSchema.parse({
+const detectedSourceKey = (listingUrl: string): string | undefined => {
+  const hostname = new URL(listingUrl).hostname.toLowerCase().replace(/^www\./u, "");
+  if (hostname === "jiji.com.gh" || hostname.endsWith(".jiji.com.gh")) return "jiji";
+  if (hostname === "tonaton.com" || hostname.endsWith(".tonaton.com")) return "tonaton";
+  if (hostname === "facebook.com" || hostname.endsWith(".facebook.com")) return "facebook_marketplace";
+  return undefined;
+};
+
+const parsePriceText = (priceText: string | undefined): { readonly price?: string | undefined; readonly currency?: string | undefined; readonly warning?: string | undefined } => {
+  if (priceText === undefined) return {};
+  const normalized = priceText.trim();
+  const match = /^(?:(?<code>GHS|USD)\s*|(?<symbol>₵|\$)\s*)(?<amount>\d{1,9}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,9}(?:\.\d{1,2})?)$/iu.exec(normalized);
+  if (match?.groups === undefined) return { warning: "PRICE_UNPARSED" };
+  const symbol = match.groups.symbol;
+  const code = match.groups.code?.toUpperCase();
+  const currency = code ?? (symbol === "₵" ? "GHS" : symbol === "$" ? "USD" : undefined);
+  const amount = match.groups.amount;
+  if (currency === undefined || amount === undefined) return { warning: "PRICE_UNPARSED" };
+  return { price: amount.replace(/,/gu, ""), currency };
+};
+
+const metadataFor = (request: MarketplaceCaptureCreateRequest, sourceKey: string | undefined, warnings: readonly string[]): Readonly<Record<string, unknown>> => ({
+  parserVersion,
+  ...(sourceKey === undefined ? {} : { detectedSourceKey: sourceKey }),
+  ...(request.priceText === undefined ? {} : { originalPriceText: request.priceText }),
+  ...(request.imageUrls.length === 0 ? {} : { imageUrls: request.imageUrls }),
+  ...(Object.keys(request.rawExtract).length === 0 ? {} : { rawExtract: request.rawExtract }),
+  ...(warnings.length === 0 ? {} : { normalizationWarnings: warnings }),
+});
+
+const toResponse = (record: MarketplaceCaptureRecord, duplicate: boolean, normalizationWarnings: readonly string[]): MarketplaceCaptureResponse => marketplaceCaptureResponseSchema.parse({
   id: record.id,
   tenantId: record.tenantId,
-  sourceListingUrl: record.sourceListingUrl,
+  listingUrl: record.listingUrl,
+  sourceListingUrl: record.listingUrl,
+  marketplaceSourceId: record.marketplaceSourceId,
+  externalId: record.externalId,
   title: record.title,
   status: record.status,
+  duplicate,
+  normalizationWarnings,
   createdAt: record.createdAt,
 });
 
@@ -95,30 +131,41 @@ export class MarketplaceCaptureService {
   async createCapture(contextInput: MarketplaceCaptureServiceContext, requestInput: MarketplaceCaptureCreateRequest): Promise<MarketplaceCaptureServiceResult> {
     const context = serviceContextSchema.parse(contextInput);
     const request = marketplaceCaptureCreateRequestSchema.parse(requestInput);
-    const sourceListingUrl = normalizeSourceUrl(request.sourceUrl);
-    const sourceHost = request.sourceHost ?? new URL(sourceListingUrl).host.toLowerCase();
-    const existing = await this.dependencies.marketplaceAcquisition.findMarketplaceCaptureBySourceUrl(tenantScope(context), sourceListingUrl);
-    if (existing !== null) {
-      return { capture: toResponse(existing), isNew: false };
+    const listingUrl = normalizeUrl(request.sourceUrl, { removeTrailingSlash: true });
+    const sellerProfileUrl = request.sellerProfileUrl === undefined ? undefined : normalizeUrl(request.sellerProfileUrl, { removeTrailingSlash: false });
+    const scope = tenantScope(context);
+    const warnings: string[] = [];
+
+    const existingByListingUrl = await this.dependencies.marketplaceAcquisition.findMarketplaceCaptureByListingUrl(scope, listingUrl);
+    if (existingByListingUrl !== null) {
+      return { capture: toResponse(existingByListingUrl, true, warnings), isNew: false, duplicate: true, normalizationWarnings: warnings };
+    }
+
+    if (request.externalId !== undefined) {
+      const existingByExternalId = await this.dependencies.marketplaceAcquisition.findMarketplaceCaptureByExternalId(scope, request.externalId);
+      if (existingByExternalId !== null) {
+        return { capture: toResponse(existingByExternalId, true, warnings), isNew: false, duplicate: true, normalizationWarnings: warnings };
+      }
     }
 
     const price = parsePriceText(request.priceText);
+    if (price.warning !== undefined) warnings.push(price.warning);
+    const sourceKey = detectedSourceKey(listingUrl);
     const input: CreateMarketplaceCaptureInput = {
       tenantId: context.tenantId,
-      sourceListingUrl,
-      sourceHost,
-      title: request.title,
-      description: truncateDescription(request.description),
-      priceText: request.priceText,
-      priceAmount: price.priceAmount,
+      listingUrl,
+      externalId: request.externalId,
+      title: truncate(request.title, 300) ?? request.title,
+      description: truncate(request.description, 3000),
+      price: price.price,
       currency: price.currency,
-      imageUrls: request.imageUrls,
-      rawExtract: request.rawExtract,
+      sellerProfileUrl,
+      metadata: metadataFor(request, sourceKey, warnings),
       status: "CAPTURED",
     };
 
-    const created = await this.dependencies.marketplaceAcquisition.createMarketplaceCapture(tenantScope(context), input);
-    await this.dependencies.auditLogs?.append?.(tenantScope(context), {
+    const created = await this.dependencies.marketplaceAcquisition.createMarketplaceCapture(scope, input);
+    await this.dependencies.auditLogs?.append?.(scope, {
       tenantId: context.tenantId,
       actorId: context.actorId,
       action: "MARKETPLACE_CAPTURE_CREATED",
@@ -126,8 +173,8 @@ export class MarketplaceCaptureService {
       targetId: created.id,
       correlationId: context.correlation.correlationId,
       requestId: context.correlation.requestId,
-      metadata: { sourceHost: created.sourceHost },
+      metadata: { sourceHost: new URL(created.listingUrl).host, detectedSourceKey: sourceKey },
     });
-    return { capture: toResponse(created), isNew: true };
+    return { capture: toResponse(created, false, warnings), isNew: true, duplicate: false, normalizationWarnings: warnings };
   }
 }

@@ -9,7 +9,12 @@ const createCaptureStore = () => {
   return {
     records,
     async createCapture(context, input) {
-      const sourceListingUrl = new URL(input.sourceUrl).toString();
+      const parsedUrl = new URL(input.sourceUrl.trim());
+      parsedUrl.hostname = parsedUrl.hostname.toLowerCase();
+      if (parsedUrl.pathname.length > 1 && parsedUrl.pathname.endsWith("/")) {
+        parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/u, "");
+      }
+      const sourceListingUrl = parsedUrl.toString();
 
       const existing = records.find(
         (record) =>
@@ -18,15 +23,20 @@ const createCaptureStore = () => {
       );
 
       if (existing !== undefined) {
-        return { capture: existing, isNew: false };
+        return { capture: { ...existing, duplicate: true }, isNew: false, duplicate: true, normalizationWarnings: [] };
       }
 
       const capture = {
         id: `capture-${records.length + 1}`,
         tenantId: context.tenantId,
         sourceListingUrl,
-        title: input.title,
+        listingUrl: sourceListingUrl,
+        title: input.title.trim().slice(0, 300),
         status: "CAPTURED",
+        marketplaceSourceId: null,
+        duplicate: false,
+        normalizationWarnings: [],
+        metadata: { parserVersion: "marketplace-capture-normalizer-v1" },
         createdAt: "2026-06-11T00:00:00.000Z",
       };
 
@@ -35,6 +45,8 @@ const createCaptureStore = () => {
       return {
         capture,
         isNew: true,
+        duplicate: false,
+        normalizationWarnings: [],
       };
     },
   };
@@ -308,6 +320,58 @@ test(
     assert.deepEqual(
       captures.records.map((record) => record.tenantId),
       ["tenant-a", "tenant-b"],
+    );
+  },
+);
+test(
+  "POST /marketplace-acquisition/captures exposes normalization metadata for duplicate response",
+  async () => {
+    const captures = createCaptureStore();
+    const server = createApiServer(createDependencies(captures));
+
+    await injectCapture(server);
+    const response = await injectCapture(server);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().meta.duplicate, true);
+    assert.deepEqual(response.json().meta.normalizationWarnings, []);
+    assert.equal(response.json().data.duplicate, true);
+  },
+);
+
+test(
+  "POST /marketplace-acquisition/captures normalizes listing URL deterministically",
+  async () => {
+    const captures = createCaptureStore();
+    const server = createApiServer(createDependencies(captures));
+
+    const response = await injectCapture(
+      server,
+      validPayload({
+        sourceUrl: " https://Market.Example/listings/123/?ref=abc ",
+      }),
+    );
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(
+      response.json().data.sourceListingUrl,
+      "https://market.example/listings/123?ref=abc",
+    );
+  },
+);
+
+test(
+  "POST /marketplace-acquisition/captures stores parser version metadata in capture service result",
+  async () => {
+    const captures = createCaptureStore();
+    const server = createApiServer(createDependencies(captures));
+
+    const response = await injectCapture(server);
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(
+      captures.records[0].metadata.parserVersion,
+      "marketplace-capture-normalizer-v1",
     );
   },
 );
