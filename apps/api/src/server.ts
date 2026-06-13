@@ -830,11 +830,17 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         const actorId = firstHeaderValue(request.headers, "x-user-id")?.trim();
 
         if (!tenantId || !actorId) {
-          throw new ApiError({
-            code: "TENANT_CONTEXT_MISMATCH",
-            message: "Marketplace capture requires authenticated tenant and actor context",
+          reply.code(401).send({
+            ok: false,
+            error: {
+              code: "TENANT_CONTEXT_MISMATCH",
+              message: "Marketplace capture requires authenticated tenant and actor context",
+            },
+            meta: { correlationId: request.correlationId },
           });
-        }
+
+          return reply.toInjectResponse();
+       }
 
         if (requireActiveSubscription !== undefined) {
           await requireActiveSubscription(tenantId);
