@@ -140,12 +140,12 @@ const requireWorkspaceAccess = async (store: TeamManagementStore, workspaceId: s
   const tenantId = firstHeaderValue(request.headers, "x-tenant-id")?.trim();
   const actorId = firstHeaderValue(request.headers, "x-user-id")?.trim();
   if (tenantId === undefined || actorId === undefined || tenantId.length === 0 || actorId.length === 0 || workspaceId !== tenantId) {
-    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace tenant context is required" });
+    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace tenant context is required", statusCode: 403 });
   }
   const workspace = await store.findWorkspace({ tenantId });
   const actor = await store.findMember({ tenantId, userId: actorId });
   if (workspace === null || actor === null || !actor.isActive) {
-    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace membership is required" });
+    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace membership is required", statusCode: 403 });
   }
   assertRequiredRole(actor.role, "ADMIN");
   return { tenantId, actor, workspace };
@@ -232,7 +232,9 @@ const changeRole = async (dependencies: WorkspaceTeamManagementDependencies, req
   const { tenantId, actor } = await requireWorkspaceAccess(dependencies.store, workspaceId, request);
   const body = parseRoleBody(request.body);
   const target = await dependencies.store.findMember({ tenantId, userId: targetUserId });
-  if (target === null) throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Target member does not belong to workspace" });
+  if (target === null || !target.isActive) {
+    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Target member does not belong to workspace", statusCode: 403 });
+  }
   const member = await dependencies.store.updateMember({ tenantId, userId: targetUserId, role: body.role });
   await dependencies.store.appendAudit({ tenantId, actorId: actor.id, action: "member.role_changed", targetType: "TENANT_USER", targetId: member.id, correlationId: request.correlationId ?? request.id ?? "unknown", metadata: { previousRole: target.role, role: member.role } });
   reply.send({ ok: true, data: { member: safeMember(member) }, meta: { correlationId: request.correlationId } });
@@ -244,7 +246,9 @@ const removeMember = async (dependencies: WorkspaceTeamManagementDependencies, r
   const { tenantId, actor } = await requireWorkspaceAccess(dependencies.store, workspaceId, request);
   if (actor.id === targetUserId) throw new ApiError({ code: "REQUEST_BODY_INVALID", message: "Cannot remove your own account", statusCode: 400 });
   const target = await dependencies.store.findMember({ tenantId, userId: targetUserId });
-  if (target === null) throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Target member does not belong to workspace" });
+  if (target === null || !target.isActive) {
+    throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Target member does not belong to workspace", statusCode: 403 });
+  }
   const member = await dependencies.store.updateMember({ tenantId, userId: targetUserId, isActive: false });
   await dependencies.store.appendAudit({ tenantId, actorId: actor.id, action: "member.removed", targetType: "TENANT_USER", targetId: member.id, correlationId: request.correlationId ?? request.id ?? "unknown", metadata: { email: target.email, role: target.role } });
   reply.send({ ok: true, data: { member: safeMember(member) }, meta: { correlationId: request.correlationId } });
@@ -256,5 +260,5 @@ export const createWorkspaceTeamManagementHandler = (dependencies: WorkspaceTeam
   if (routeName === "inviteAccept") return acceptInvitation(dependencies, request, reply);
   if (routeName === "roleChange") return changeRole(dependencies, request, reply);
   if (routeName === "memberRemove") return removeMember(dependencies, request, reply);
-  throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace team route is invalid" });
+  throw new ApiError({ code: "TENANT_CONTEXT_MISMATCH", message: "Workspace team route is invalid", statusCode: 403 });
 };
