@@ -18,6 +18,7 @@ const navigationItems = [
   { labelKey: "dashboard.title", icon: IconLayoutDashboard, href: "/dashboard" },
   { labelKey: "contacts.title", icon: IconUsers, href: "/contacts" },
   { labelKey: "deals.title", icon: IconBriefcase, href: "/deals" },
+  { labelKey: "marketplaceAcquisition.title", icon: IconBookmark, href: "/marketplace-acquisition" },
   { labelKey: "reports.title", icon: IconChartBar, href: "/reports" },
   { labelKey: "marketplaceCapture.title", icon: IconBookmark, href: "/marketplace-acquisition/capture" },
   { labelKey: "settings.title", icon: IconSettings, href: "/settings" },
