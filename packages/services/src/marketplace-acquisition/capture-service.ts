@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import type { MarketplaceAcquisitionRepository, MarketplaceCaptureRecord, CreateMarketplaceCaptureInput } from "@whisperm/repositories";
+import type {
+  CreateMarketplaceCaptureInput,
+  MarketplaceCaptureRecord,
+} from "@whisperm/repositories";
 import {
   marketplaceCaptureCreateRequestSchema,
   marketplaceCaptureResponseSchema,
@@ -10,11 +13,19 @@ import {
   type TenantScoped,
 } from "@whisperm/types";
 
-const serviceContextSchema = z.object({
-  tenantId: z.string().min(1),
-  actorId: z.string().min(1).optional(),
-  correlation: z.object({ correlationId: z.string().min(1), requestId: z.string().min(1).optional(), causationId: z.string().min(1).optional() }).strict(),
-}).strict();
+const serviceContextSchema = z
+  .object({
+    tenantId: z.string().min(1),
+    actorId: z.string().min(1).optional(),
+    correlation: z
+      .object({
+        correlationId: z.string().min(1),
+        requestId: z.string().min(1).optional(),
+        causationId: z.string().min(1).optional(),
+      })
+      .strict(),
+  })
+  .strict();
 
 export interface MarketplaceCaptureServiceContext {
   readonly tenantId: string;
@@ -36,20 +47,23 @@ export interface MarketplaceCaptureRepositoryPort {
 }
 
 export interface MarketplaceCaptureAuditPort {
-  append?(context: TenantScoped, input: {
-    readonly tenantId: string;
-    readonly actorId?: string | undefined;
-    readonly action: string;
-    readonly targetType: string;
-    readonly targetId: string;
-    readonly correlationId: string;
-    readonly requestId?: string | undefined;
-    readonly metadata?: Readonly<Record<string, unknown>> | undefined;
-  }): Promise<unknown>;
+  append?(
+    context: TenantScoped,
+    input: {
+      readonly tenantId: string;
+      readonly actorId?: string | undefined;
+      readonly action: string;
+      readonly targetType: string;
+      readonly targetId: string;
+      readonly correlationId: string;
+      readonly requestId?: string | undefined;
+      readonly metadata?: Readonly<Record<string, unknown>> | undefined;
+    },
+  ): Promise<unknown>;
 }
 
 export interface MarketplaceCaptureServiceDependencies {
-  readonly marketplaceAcquisition: MarketplaceCaptureRepositoryPort | MarketplaceAcquisitionRepository;
+  readonly marketplaceAcquisition: MarketplaceCaptureRepositoryPort;
   readonly auditLogs?: MarketplaceCaptureAuditPort | undefined;
 }
 
@@ -57,8 +71,15 @@ export class MarketplaceCaptureServiceError extends Error {
   readonly code: string;
   readonly status: number;
   readonly details?: Readonly<Record<string, unknown>> | undefined;
+  override readonly cause?: unknown;
 
-  constructor(input: { readonly code: string; readonly message: string; readonly status: number; readonly details?: Readonly<Record<string, unknown>> | undefined; readonly cause?: unknown }) {
+  constructor(input: {
+    readonly code: string;
+    readonly message: string;
+    readonly status: number;
+    readonly details?: Readonly<Record<string, unknown>> | undefined;
+    readonly cause?: unknown;
+  }) {
     super(input.message);
     this.name = "MarketplaceCaptureServiceError";
     this.code = input.code;
@@ -148,7 +169,10 @@ const toResponse = (record: MarketplaceCaptureRecord, duplicate: boolean, normal
 export class MarketplaceCaptureService {
   constructor(private readonly dependencies: MarketplaceCaptureServiceDependencies) {}
 
-  async createCapture(contextInput: MarketplaceCaptureServiceContext, requestInput: MarketplaceCaptureCreateRequest): Promise<MarketplaceCaptureServiceResult> {
+  async createCapture(
+    contextInput: MarketplaceCaptureServiceContext,
+    requestInput: MarketplaceCaptureCreateRequest,
+  ): Promise<MarketplaceCaptureServiceResult> {
     const context = serviceContextSchema.parse(contextInput);
     const request = marketplaceCaptureCreateRequestSchema.parse(requestInput);
     const listingUrl = normalizeUrl(request.sourceUrl, { removeTrailingSlash: true });

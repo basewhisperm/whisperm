@@ -16,10 +16,12 @@ import {
   billingUsageRecordSchema,
   type ContactRepository,
   type ActivityRepository,
-  type MarketplaceAcquisitionRepository,
+  type MarketplaceCaptureRepository,
   type ActivityListFilters,
   type ActivityRecord,
   activityRecordSchema,
+  type MarketplaceCaptureRecord,
+  marketplaceCaptureRecordSchema,
   type ContactRecord,
   contactRecordSchema,
   type CreateContactInput,
@@ -51,6 +53,7 @@ import {
   type DealRecord,
   dealRecordSchema,
   type DealsRepository,
+  type PipelineRepository,
   type BoardPaginationRequest,
   type PipelineBoardRecord,
   type EventIngestion,
@@ -189,8 +192,9 @@ export interface ServiceRepositories {
   readonly users: UserRepository;
   readonly contacts: ContactRepository;
   readonly deals: DealsRepository;
+  readonly pipelines: PipelineRepository;
   readonly activities: ActivityRepository;
-  readonly marketplaceAcquisition: MarketplaceAcquisitionRepository;
+  readonly marketplaceCaptures: MarketplaceCaptureRepository;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -972,6 +976,150 @@ const createActivityInputSchema = z.object({
   message: "Activity create requires contactId or dealId",
   path: ["contactId"],
 });
+const marketplaceCaptureInputSchema = z.object({
+  tenantId: idSchema,
+  listingUrl: z.string().url(),
+  title: z.string().min(1),
+  description: z.string().min(1).nullable().optional(),
+  price: z.union([z.number(), z.string()]).nullable().optional(),
+  currency: z.string().min(1).nullable().optional(),
+  sellerName: z.string().min(1).nullable().optional(),
+  sellerEmail: z.string().email().nullable().optional(),
+  sellerProfileUrl: z.string().url().nullable().optional(),
+  marketplaceSourceId: idSchema.nullable().optional(),
+  contactId: idSchema.nullable().optional(),
+  externalId: z.string().min(1).nullable().optional(),
+  metadata: metadataSchema.nullable().optional()
+}).strict();
+
+export type MarketplaceCaptureServiceInput = z.output<typeof marketplaceCaptureInputSchema>;
+export interface MarketplaceCaptureServiceResult {
+  readonly captureId: string;
+  readonly contactId: string;
+  readonly dealId: string;
+  readonly contactMatchStrategy: "provided" | "email" | "created";
+  readonly dealCreated: boolean;
+  readonly dealMatched: boolean;
+  readonly status: string;
+}
+
+const marketplacePipelineDefaultKey = "marketplace_acquisition";
+const marketplaceCapturedStageName = "Captured";
+
+const sourceHost = (listingUrl: string): string => {
+  try { return new URL(listingUrl).host; } catch { return "marketplace"; }
+};
+
+const marketplaceDealExternalId = (listingUrl: string): string => `marketplace-listing:${listingUrl.trim().toLowerCase()}`;
+
+const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => input.sellerName?.trim() || input.title.trim();
+
+export class MarketplaceAcquisitionCaptureService {
+  constructor(private readonly deps: ServiceDependencies) {}
+
+  async capture(contextInput: ServiceContext, input: MarketplaceCaptureServiceInput): Promise<MarketplaceCaptureServiceResult> {
+    const context = ensureContext(contextInput);
+    const data = ensureTenantInput(context, exactInput(parseContract(marketplaceCaptureInputSchema, input, context.correlation)));
+    const tenantScope = contextToTenantScope(context);
+    const pipeline = await this.deps.pipelines.findByDefaultKey(context.tenantId, marketplacePipelineDefaultKey);
+    if (pipeline === null) {
+      throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace Acquisition pipeline is missing; run the pipeline seed before capturing marketplace listings", status: 404, correlation: context.correlation });
+    }
+    const capturedStage = pipeline.stages.find((stage) => stage.name === marketplaceCapturedStageName);
+    if (capturedStage === undefined) {
+      throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace Acquisition Captured stage is missing; run the pipeline seed before capturing marketplace listings", status: 404, correlation: context.correlation });
+    }
+
+    return runWrite(this.deps, context, async (repositories) => {
+      const contactResult = await this.resolveContact(repositories, context, data);
+      const existingCapture = await repositories.marketplaceCaptures.findByListingUrl(tenantScope, data.listingUrl);
+      const capture = existingCapture ?? await repositories.marketplaceCaptures.create(tenantScope, {
+        tenantId: context.tenantId,
+        marketplaceSourceId: data.marketplaceSourceId,
+        contactId: contactResult.contact.id,
+        externalId: data.externalId,
+        listingUrl: data.listingUrl,
+        title: data.title,
+        description: data.description,
+        price: data.price,
+        currency: data.currency,
+        sellerName: data.sellerName,
+        sellerProfileUrl: data.sellerProfileUrl,
+        status: "CAPTURED",
+        metadata: exactInput({ ...(data.metadata ?? {}), sellerEmail: data.sellerEmail ?? undefined })
+      });
+      const linkedCapture = capture.contactId === contactResult.contact.id ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId: contactResult.contact.id });
+      const dealResult = await this.resolveDeal(repositories, context, data, linkedCapture, contactResult.contact.id, capturedStage.id);
+      const finalCapture = linkedCapture.dealId === dealResult.deal.id ? linkedCapture : await repositories.marketplaceCaptures.update(tenantScope, linkedCapture.id, { dealId: dealResult.deal.id });
+      if (context.actorId !== undefined && dealResult.created) {
+        await repositories.activities.create({ ...tenantScope, actorId: context.actorId, correlation: context.correlation }, {
+          tenantId: context.tenantId,
+          contactId: contactResult.contact.id,
+          dealId: dealResult.deal.id,
+          createdById: context.actorId,
+          type: "NOTE",
+          note: `Captured marketplace listing from ${sourceHost(data.listingUrl)}: ${data.title}`,
+          metadata: { eventType: "MARKETPLACE_CAPTURED", marketplaceCaptureId: finalCapture.id, sourceUrl: data.listingUrl }
+        });
+      }
+      await appendAudit(repositories, context, { action: "MARKETPLACE_CAPTURED", targetType: "MARKETPLACE_CAPTURE", targetId: finalCapture.id, metadata: { contactId: contactResult.contact.id, dealId: dealResult.deal.id } });
+      return {
+        captureId: finalCapture.id,
+        contactId: contactResult.contact.id,
+        dealId: dealResult.deal.id,
+        contactMatchStrategy: contactResult.strategy,
+        dealCreated: dealResult.created,
+        dealMatched: !dealResult.created,
+        status: finalCapture.status
+      };
+    });
+  }
+
+  private async resolveContact(repositories: ServiceRepositories, context: ServiceContext, input: MarketplaceCaptureServiceInput): Promise<{ readonly contact: ContactRecord; readonly strategy: MarketplaceCaptureServiceResult["contactMatchStrategy"] }> {
+    const tenantScope = contextToTenantScope(context);
+    if (input.contactId !== undefined && input.contactId !== null) {
+      const existingById = await repositories.contacts.findById(tenantScope, input.contactId);
+      if (existingById === null) {
+        throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture contact not found", status: 404, correlation: context.correlation });
+      }
+      return { contact: existingById, strategy: "provided" };
+    }
+    if (input.sellerEmail !== undefined && input.sellerEmail !== null) {
+      const [existing] = await repositories.contacts.findByEmails(tenantScope, [input.sellerEmail]);
+      if (existing !== undefined) return { contact: existing, strategy: "email" };
+    }
+    const contact = contactRecordSchema.parse(await repositories.contacts.create(tenantScope, {
+      tenantId: context.tenantId,
+      email: input.sellerEmail ?? undefined,
+      firstName: input.sellerName ?? undefined,
+      metadata: { marketplaceAcquisition: true, sellerProfileUrl: input.sellerProfileUrl ?? null }
+    }));
+    return { contact, strategy: "created" };
+  }
+
+  private async resolveDeal(repositories: ServiceRepositories, context: ServiceContext, input: MarketplaceCaptureServiceInput, capture: MarketplaceCaptureRecord, contactId: string, capturedStageId: string): Promise<{ readonly deal: DealRecord; readonly created: boolean }> {
+    if (capture.dealId !== undefined && capture.dealId !== null) {
+      const existingByCapture = await repositories.deals.findById(context.tenantId, capture.dealId);
+      if (existingByCapture !== null) return { deal: existingByCapture, created: false };
+    }
+    const externalId = marketplaceDealExternalId(input.listingUrl);
+    const existing = await repositories.deals.findByExternalId(context.tenantId, externalId);
+    if (existing !== null) return { deal: existing, created: false };
+    const deal = dealRecordSchema.parse(await repositories.deals.create(context.tenantId, {
+      tenantId: context.tenantId,
+      contactId,
+      ownerId: context.actorId,
+      externalId,
+      title: `Marketplace seller: ${sellerDisplayName(input)}`,
+      pipelineStageId: capturedStageId,
+      value: input.price,
+      currency: input.currency ?? "USD",
+      metadata: { marketplaceCaptureId: capture.id, sourceUrl: input.listingUrl, marketplaceSourceId: input.marketplaceSourceId ?? null }
+    }));
+    return { deal, created: true };
+  }
+}
+
 const activityFiltersSchema = z.object({
   contactId: idSchema.optional(),
   dealId: idSchema.optional(),
@@ -1085,7 +1233,7 @@ export interface WhispeRMServices {
   readonly contacts: ContactService;
   readonly deals: DealService;
   readonly activities: ActivityService;
-  readonly marketplaceCaptures: MarketplaceCaptureService;
+  readonly marketplaceAcquisition: MarketplaceAcquisitionCaptureService;
   readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
   readonly workflows: WorkflowService;
@@ -1102,7 +1250,7 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   contacts: new ContactService(dependencies),
   deals: new DealService(dependencies),
   activities: new ActivityService(dependencies),
-  marketplaceCaptures: new MarketplaceCaptureService(dependencies),
+  marketplaceAcquisition: new MarketplaceAcquisitionCaptureService(dependencies),
   scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
   workflows: new WorkflowService(dependencies),
@@ -1148,5 +1296,13 @@ export {
   type WeeklyFollowUpDigestResult,
 } from "./notifications/follow-up-digest.js";
 
-export { MarketplaceCaptureService, MarketplaceCaptureServiceError } from "./marketplace-acquisition/capture-service.js";
-export type { MarketplaceCaptureServiceContext, MarketplaceCaptureServiceDependencies, MarketplaceCaptureServiceResult, MarketplaceCaptureRepositoryPort } from "./marketplace-acquisition/capture-service.js";
+export {
+  MarketplaceCaptureService,
+  MarketplaceCaptureServiceError,
+} from "./marketplace-acquisition/capture-service.js";
+
+export type {
+  MarketplaceCaptureServiceContext,
+  MarketplaceCaptureServiceDependencies,
+  MarketplaceCaptureRepositoryPort,
+} from "./marketplace-acquisition/capture-service.js";

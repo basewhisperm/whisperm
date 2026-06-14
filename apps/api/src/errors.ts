@@ -56,9 +56,11 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.code = options.code;
     this.statusCode = options.statusCode ?? statusByCode[options.code];
+
     if (options.details !== undefined) {
       this.details = options.details;
     }
+
     if (options.cause !== undefined) {
       this.cause = options.cause;
     }
@@ -76,24 +78,61 @@ export interface ErrorResponse {
   };
 }
 
-export const mapErrorToHttp = (error: unknown): { readonly statusCode: number; readonly payload: Omit<ErrorResponse, "meta"> } => {
+export const mapErrorToHttp = (
+  error: unknown,
+): { readonly statusCode: number; readonly payload: Omit<ErrorResponse, "meta"> } => {
   if (typeof error === "object" && error !== null && "name" in error && error.name === "ZodError") {
-    return { statusCode: 400, payload: { ok: false, error: { code: "REQUEST_BODY_INVALID", message: "Request payload is invalid" } } };
+    return {
+      statusCode: 400,
+      payload: {
+        ok: false,
+        error: {
+          code: "REQUEST_BODY_INVALID",
+          message: "Request payload is invalid",
+        },
+      },
+    };
   }
 
-  if (error instanceof ApiError || error instanceof AuthError || error instanceof EventIngestionError || error instanceof OAuthError) {
+  if (
+    error instanceof ApiError ||
+    error instanceof AuthError ||
+    error instanceof EventIngestionError ||
+    error instanceof OAuthError
+  ) {
     return {
       statusCode: error.statusCode,
-      payload: { ok: false, error: { code: error.code, message: error.message } },
+      payload: {
+        ok: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      },
     };
   }
 
   if (typeof error === "object" && error !== null && "status" in error && "code" in error && "message" in error) {
-    const serviceError = error as { readonly status: unknown; readonly code: unknown; readonly message: unknown };
-    if (typeof serviceError.status === "number" && typeof serviceError.code === "string" && typeof serviceError.message === "string") {
+    const serviceError = error as {
+      readonly status: unknown;
+      readonly code: unknown;
+      readonly message: unknown;
+    };
+
+    if (
+      typeof serviceError.status === "number" &&
+      typeof serviceError.code === "string" &&
+      typeof serviceError.message === "string"
+    ) {
       return {
         statusCode: serviceError.status,
-        payload: { ok: false, error: { code: serviceError.code, message: serviceError.message } },
+        payload: {
+          ok: false,
+          error: {
+            code: serviceError.code,
+            message: serviceError.message,
+          },
+        },
       };
     }
   }
@@ -102,7 +141,10 @@ export const mapErrorToHttp = (error: unknown): { readonly statusCode: number; r
     statusCode: 500,
     payload: {
       ok: false,
-      error: { code: "INTERNAL_SERVER_ERROR", message: "An internal server error occurred" },
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "An internal server error occurred",
+      },
     },
   };
 };
