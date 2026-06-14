@@ -60,12 +60,12 @@ const createPipelineSeedClient = (database = createDatabase()) => ({
   database,
 });
 
-test("marketplace acquisition seed creates one tenant-scoped pipeline with three ordered stages", async () => {
+test("marketplace acquisition seed creates one tenant-scoped pipeline with six ordered lifecycle stages", async () => {
   const prisma = createPipelineSeedClient();
 
   const result = await seedMarketplaceAcquisitionPipeline(prisma);
 
-  assert.deepEqual(result, { workspaces: 1, pipelines: 1, stages: 3 });
+  assert.deepEqual(result, { workspaces: 1, pipelines: 1, stages: 6 });
   const pipeline = prisma.database.pipelines.find((row) => row.defaultKey === marketplaceAcquisitionPipelineDefaultKey);
   assert.notEqual(pipeline, undefined);
   assert.equal(pipeline.name, marketplaceAcquisitionPipelineName);
@@ -74,7 +74,7 @@ test("marketplace acquisition seed creates one tenant-scoped pipeline with three
 
   const stages = prisma.database.pipelineStages.filter((row) => row.pipelineId === pipeline.id);
   assert.deepEqual(stages.map((stage) => stage.name), marketplaceAcquisitionPipelineStages.map((stage) => stage.name));
-  assert.deepEqual(stages.map((stage) => stage.position), [1, 2, 3]);
+  assert.deepEqual(stages.map((stage) => stage.position), [1, 2, 3, 4, 5, 6]);
 });
 
 test("marketplace acquisition seed is idempotent for pipelines and stages", async () => {
@@ -84,7 +84,7 @@ test("marketplace acquisition seed is idempotent for pipelines and stages", asyn
   await seedMarketplaceAcquisitionPipeline(prisma);
 
   assert.equal(prisma.database.pipelines.length, 1);
-  assert.equal(prisma.database.pipelineStages.length, 3);
+  assert.equal(prisma.database.pipelineStages.length, 6);
 });
 
 test("combined pipeline seed preserves existing default pipeline stages", async () => {
@@ -92,7 +92,7 @@ test("combined pipeline seed preserves existing default pipeline stages", async 
 
   const result = await seedPipelines(prisma);
 
-  assert.deepEqual(result, { workspaces: 1, pipelines: 2, stages: 8 });
+  assert.deepEqual(result, { workspaces: 1, pipelines: 2, stages: 11 });
   const defaultPipeline = prisma.database.pipelines.find((row) => row.defaultKey === "default");
   assert.notEqual(defaultPipeline, undefined);
   assert.equal(defaultPipeline.name, "Default Pipeline");
