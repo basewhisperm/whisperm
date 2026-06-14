@@ -1210,7 +1210,11 @@ model MarketplaceClaimToken {
   marketplaceCaptureId String    @db.Uuid
   tokenHash            String
   status               String    @default("PENDING")
+  sentAt               DateTime?
   expiresAt            DateTime
+  reminderDay3SentAt   DateTime?
+  reminderDay6SentAt   DateTime?
+  expiredAt            DateTime?
   claimedAt            DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
