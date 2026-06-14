@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
+export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
+export type { ClaimLifecycleDependencies, ClaimLifecycleScheduleJob, ClaimReminderType, MarketplaceClaimTokenRecord } from "./claim-lifecycle.js";
 
 import {
   type ApprovalDecisionRecord,

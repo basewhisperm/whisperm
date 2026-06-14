@@ -129,10 +129,16 @@ export interface ScoreRecomputationServicePort {
   ): Promise<ScoreRecomputationResult> | ScoreRecomputationResult;
 }
 
+export interface ClaimLifecycleServicePort {
+  sendClaimReminder(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string, reminderType: "DAY_3" | "DAY_6"): Promise<unknown> | unknown;
+  expireClaimInvitation(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string): Promise<unknown> | unknown;
+}
+
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
   readonly scoring?: ScoreRecomputationServicePort | undefined;
   readonly notifications?: NotificationServicePort | undefined;
+  readonly claimLifecycle?: ClaimLifecycleServicePort | undefined;
 }
 
 export interface QueueRegistration {
@@ -454,6 +460,45 @@ export const createNotificationTrialReminderHandler = (services: WorkerServices)
   },
 });
 
+const claimLifecycleJobPayloadSchema = z.object({
+  tenantId: z.string().min(1),
+  invitationId: z.string().min(1),
+  reminderType: z.enum(["DAY_3", "DAY_6"]).optional(),
+}).strict();
+
+export const createClaimLifecycleHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.claimLifecycle === undefined) {
+      throw new WorkerRuntimeError({
+        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        message: "Claim lifecycle service port is not configured",
+        status: 503,
+        retryable: true,
+        correlation: context.correlation,
+      });
+    }
+    const payload = claimLifecycleJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({
+        code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION",
+        message: "Claim lifecycle job tenantId must match execution context",
+        status: 403,
+        correlation: context.correlation,
+      });
+    }
+    if (context.job.jobType === "marketplace.claim.reminder") {
+      if (payload.reminderType === undefined) {
+        throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Claim reminder jobs require reminderType", status: 400, correlation: context.correlation });
+      }
+      await services.claimLifecycle.sendClaimReminder({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId, payload.reminderType);
+    } else if (context.job.jobType === "marketplace.claim.expire") {
+      await services.claimLifecycle.expireClaimInvitation({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId);
+    } else {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: `Unsupported claim lifecycle job type ${context.job.jobType}`, status: 400, correlation: context.correlation });
+    }
+    return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, invitationId: payload.invitationId, jobType: context.job.jobType, correlationId: context.correlation.correlationId });
+  },
+});
 
 export const createScoreRecomputationHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
@@ -510,6 +555,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "notification", deadLetterQueueName: "notification.dlq" }),
       jobTypes: ["notification.trial_reminder"],
       handler: createNotificationTrialReminderHandler(input.services),
+    },
+    {
+      name: "claim-lifecycle-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.claim.lifecycle", deadLetterQueueName: "marketplace.claim.lifecycle.dlq" }),
+      jobTypes: ["marketplace.claim.reminder", "marketplace.claim.expire"],
+      handler: createClaimLifecycleHandler(input.services),
     },
     {
       name: "publish-worker",
