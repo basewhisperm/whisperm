@@ -29,11 +29,19 @@ const createStore = () => ({
 
 const createDependencies = (store = createStore()) => ({
   marketplaceAcquisition: {
-    async findMarketplaceCaptureBySourceUrl(scope, sourceUrl) {
+    async findMarketplaceCaptureByListingUrl(scope, listingUrl) {
       return store.captures.find(
         (capture) =>
           capture.tenantId === scope.tenantId &&
-          capture.sourceListingUrl === sourceUrl,
+          capture.listingUrl === listingUrl,
+      ) ?? null;
+    },
+
+    async findMarketplaceCaptureByExternalId(scope, externalId) {
+      return store.captures.find(
+        (capture) =>
+          capture.tenantId === scope.tenantId &&
+          capture.externalId === externalId,
       ) ?? null;
     },
 
@@ -41,16 +49,17 @@ const createDependencies = (store = createStore()) => ({
       const capture = {
         id: `capture-${store.captures.length + 1}`,
         tenantId: scope.tenantId,
-        sourceListingUrl: input.sourceListingUrl,
-        sourceHost: input.sourceHost,
+        marketplaceSourceId: input.marketplaceSourceId ?? null,
+        externalId: input.externalId ?? null,
+        listingUrl: input.listingUrl,
         title: input.title,
         description: input.description ?? null,
-        priceText: input.priceText ?? null,
-        priceAmount: input.priceAmount ?? null,
+        price: input.price ?? null,
         currency: input.currency ?? null,
-        imageUrls: input.imageUrls ?? [],
-        rawExtract: input.rawExtract ?? {},
+        sellerProfileUrl: input.sellerProfileUrl ?? null,
+        metadata: input.metadata ?? {},
         status: input.status,
+        capturedAt: now,
         createdAt: now,
         updatedAt: now,
       };
@@ -76,25 +85,37 @@ const createDependencies = (store = createStore()) => ({
   },
 });
 
-test("capture creates new MarketplaceCapture when no source URL match exists", async () => {
+test("capture creates new MarketplaceCapture when no listing URL match exists", async () => {
   const store = createStore();
   const service = new MarketplaceCaptureService(createDependencies(store));
 
   const result = await service.createCapture(context, baseCaptureInput());
 
   assert.equal(result.isNew, true);
+  assert.equal(result.duplicate, false);
   assert.equal(result.capture.id, "capture-1");
   assert.equal(result.capture.tenantId, "tenant-a");
   assert.equal(result.capture.sourceListingUrl, "https://market.example/listings/123");
+  assert.equal(result.capture.listingUrl, "https://market.example/listings/123");
   assert.equal(result.capture.title, "Vintage desk");
   assert.equal(result.capture.status, "CAPTURED");
 
   assert.equal(store.captures.length, 1);
-  assert.equal(store.captures[0].priceAmount, "45000");
+  assert.equal(store.captures[0].price, "45000");
   assert.equal(store.captures[0].currency, "USD");
 });
 
-test("second capture with same source URL returns existing MarketplaceCapture idempotently", async () => {
+test("capture normalizes listing URL host case and trailing slash", async () => {
+  const store = createStore();
+  const service = new MarketplaceCaptureService(createDependencies(store));
+
+  const result = await service.createCapture(context, baseCaptureInput({ sourceUrl: " https://Market.Example/listings/123/?ref=abc " }));
+
+  assert.equal(result.capture.listingUrl, "https://market.example/listings/123?ref=abc");
+  assert.equal(store.captures[0].listingUrl, "https://market.example/listings/123?ref=abc");
+});
+
+test("second capture with same listing URL returns existing MarketplaceCapture idempotently", async () => {
   const store = createStore();
   const service = new MarketplaceCaptureService(createDependencies(store));
 
@@ -103,12 +124,26 @@ test("second capture with same source URL returns existing MarketplaceCapture id
 
   assert.equal(first.isNew, true);
   assert.equal(second.isNew, false);
+  assert.equal(second.duplicate, true);
   assert.equal(second.capture.id, first.capture.id);
   assert.equal(second.capture.title, "Vintage desk");
   assert.equal(store.captures.length, 1);
 });
 
-test("raw listing data remains on MarketplaceCapture", async () => {
+test("second capture with same external ID returns existing MarketplaceCapture idempotently", async () => {
+  const store = createStore();
+  const service = new MarketplaceCaptureService(createDependencies(store));
+
+  const first = await service.createCapture(context, baseCaptureInput({ externalId: "listing-123" }));
+  const second = await service.createCapture(context, baseCaptureInput({ sourceUrl: "https://market.example/listings/456", externalId: "listing-123" }));
+
+  assert.equal(first.isNew, true);
+  assert.equal(second.isNew, false);
+  assert.equal(second.capture.id, first.capture.id);
+  assert.equal(store.captures.length, 1);
+});
+
+test("raw listing data remains in MarketplaceCapture metadata", async () => {
   const store = createStore();
   const service = new MarketplaceCaptureService(createDependencies(store));
 
@@ -123,11 +158,45 @@ test("raw listing data remains on MarketplaceCapture", async () => {
     }),
   );
 
-  assert.deepEqual(store.captures[0].rawExtract, {
+  assert.deepEqual(store.captures[0].metadata.rawExtract, {
     title: "Vintage desk",
     description: "Solid wood desk",
     images: ["https://market.example/image.jpg"],
   });
+  assert.equal(store.captures[0].metadata.parserVersion, "marketplace-capture-normalizer-v1");
+});
+
+test("capture parses GHS price text conservatively", async () => {
+  const store = createStore();
+  const service = new MarketplaceCaptureService(createDependencies(store));
+
+  await service.createCapture(context, baseCaptureInput({ priceText: "GHS 1,200" }));
+
+  assert.equal(store.captures[0].price, "1200");
+  assert.equal(store.captures[0].currency, "GHS");
+});
+
+test("capture parses Ghana cedi symbol price text conservatively", async () => {
+  const store = createStore();
+  const service = new MarketplaceCaptureService(createDependencies(store));
+
+  await service.createCapture(context, baseCaptureInput({ priceText: "₵1,200" }));
+
+  assert.equal(store.captures[0].price, "1200");
+  assert.equal(store.captures[0].currency, "GHS");
+});
+
+
+test("uncertain price is preserved in metadata without failing capture", async () => {
+  const store = createStore();
+  const service = new MarketplaceCaptureService(createDependencies(store));
+
+  const result = await service.createCapture(context, baseCaptureInput({ priceText: "call for price" }));
+
+  assert.equal(result.isNew, true);
+  assert.equal(store.captures[0].price, null);
+  assert.equal(store.captures[0].metadata.originalPriceText, "call for price");
+  assert.deepEqual(result.normalizationWarnings, ["PRICE_UNPARSED"]);
 });
 
 test("tenant isolation prevents cross-tenant MarketplaceCapture matching", async () => {
@@ -136,10 +205,10 @@ test("tenant isolation prevents cross-tenant MarketplaceCapture matching", async
   store.captures.push({
     id: "foreign-capture",
     tenantId: "tenant-b",
-    sourceListingUrl: "https://market.example/listings/123",
-    sourceHost: "market.example",
+    listingUrl: "https://market.example/listings/123",
     title: "Foreign capture",
     status: "CAPTURED",
+    capturedAt: now,
     createdAt: now,
     updatedAt: now,
   });

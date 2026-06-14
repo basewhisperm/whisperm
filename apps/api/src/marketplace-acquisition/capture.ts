@@ -13,7 +13,7 @@ export interface MarketplaceCaptureRouteContext {
 }
 
 export interface MarketplaceCaptureServicePort {
-  createCapture(context: MarketplaceCaptureRouteContext, input: unknown): Promise<{ readonly capture: unknown; readonly isNew: boolean }> | { readonly capture: unknown; readonly isNew: boolean };
+  createCapture(context: MarketplaceCaptureRouteContext, input: unknown): Promise<{ readonly capture: unknown; readonly isNew: boolean; readonly duplicate?: boolean; readonly normalizationWarnings?: readonly string[] }> | { readonly capture: unknown; readonly isNew: boolean; readonly duplicate?: boolean; readonly normalizationWarnings?: readonly string[] };
 }
 
 export interface MarketplaceCaptureRouteDependencies {
@@ -61,5 +61,5 @@ export const createMarketplaceCaptureHandler = (dependencies: MarketplaceCapture
   const context = routeContext(request);
   const body = marketplaceCaptureCreateRequestSchema.parse(request.body);
   const result = await dependencies.captures.createCapture(context, body);
-  reply.code(result.isNew ? 201 : 200).send({ ok: true, data: result.capture, meta: { correlationId: context.correlation.correlationId } });
+  reply.code(result.isNew ? 201 : 200).send({ ok: true, data: result.capture, meta: { correlationId: context.correlation.correlationId, duplicate: result.duplicate ?? !result.isNew, normalizationWarnings: result.normalizationWarnings ?? [] } });
 };
