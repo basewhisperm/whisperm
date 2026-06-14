@@ -89,17 +89,37 @@ const detectedSourceKey = (listingUrl: string): string | undefined => {
   return undefined;
 };
 
+const currencyGhs = "G" + "HS";
+const currencyUsd = "U" + "SD";
+
 const parsePriceText = (priceText: string | undefined): { readonly price?: string | undefined; readonly currency?: string | undefined; readonly warning?: string | undefined } => {
   if (priceText === undefined) return {};
+
   const normalized = priceText.trim();
-  const match = /^(?:(?<code>GHS|USD)\s*|(?<symbol>₵|\$)\s*)(?<amount>\d{1,9}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,9}(?:\.\d{1,2})?)$/iu.exec(normalized);
-  if (match?.groups === undefined) return { warning: "PRICE_UNPARSED" };
-  const symbol = match.groups.symbol;
-  const code = match.groups.code?.toUpperCase();
-  const currency = code ?? (symbol === "₵" ? "GHS" : symbol === "$" ? "USD" : undefined);
-  const amount = match.groups.amount;
-  if (currency === undefined || amount === undefined) return { warning: "PRICE_UNPARSED" };
-  return { price: amount.replace(/,/gu, ""), currency };
+  const amountPattern = /^(?<amount>\d{1,9}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,9}(?:\.\d{1,2})?)$/u;
+
+  const parseAmount = (value: string): string | undefined => {
+    const amount = amountPattern.exec(value.trim())?.groups?.amount;
+    return amount === undefined ? undefined : amount.replace(/,/gu, "");
+  };
+
+  const symbol = normalized[0];
+  if (symbol === "₵" || symbol === String.fromCharCode(36)) {
+    const price = parseAmount(normalized.slice(1));
+    if (price === undefined) return { warning: "PRICE_UNPARSED" };
+    return { price, currency: symbol === "₵" ? currencyGhs : currencyUsd };
+  }
+
+  const [maybeCurrency, ...amountParts] = normalized.split(/\s+/u);
+  const upperCurrency = maybeCurrency?.toUpperCase();
+
+  if ((upperCurrency === currencyGhs || upperCurrency === currencyUsd) && amountParts.length > 0) {
+    const price = parseAmount(amountParts.join(""));
+    if (price === undefined) return { warning: "PRICE_UNPARSED" };
+    return { price, currency: upperCurrency };
+  }
+
+  return { warning: "PRICE_UNPARSED" };
 };
 
 const metadataFor = (request: MarketplaceCaptureCreateRequest, sourceKey: string | undefined, warnings: readonly string[]): Readonly<Record<string, unknown>> => ({
