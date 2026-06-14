@@ -10,6 +10,11 @@ export interface EmailProvider {
   send(message: EmailMessage): Promise<void>;
 }
 
+export interface SmsMessage { readonly to: string; readonly body: string; }
+export interface SmsProvider { send(message: SmsMessage): Promise<void>; }
+export interface WhatsAppMessage { readonly to: string; readonly body: string; }
+export interface WhatsAppProvider { send(message: WhatsAppMessage): Promise<void>; }
+
 export interface ResendEmailProviderOptions {
   readonly apiKey: string;
   readonly from: string;

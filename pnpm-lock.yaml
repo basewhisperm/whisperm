@@ -63,6 +63,9 @@ importers:
       '@whisperm/repositories':
         specifier: workspace:^
         version: link:../../packages/repositories
+      '@whisperm/services':
+        specifier: workspace:*
+        version: link:../../packages/services
       '@whisperm/types':
         specifier: workspace:*
         version: link:../../packages/types
