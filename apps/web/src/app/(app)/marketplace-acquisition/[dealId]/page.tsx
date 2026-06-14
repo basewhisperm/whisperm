@@ -37,18 +37,13 @@ function formatDate(value: Date | string | null | undefined) {
   }).format(new Date(value));
 }
 
-function contactName(
-  contact:
-    | { firstName?: string | null; lastName?: string | null; email?: string | null; company?: string | null }
-    | null
-    | undefined,
-) {
-  if (!contact) return "Not linked";
-
-  return [contact.firstName, contact.lastName].filter(Boolean).join(" ") || contact.email || contact.company || "Not linked";
+function contactName(contact: unknown) {
+  if (contact === null || contact === undefined || typeof contact !== "object") return "Not linked";
+  const data = contact as { firstName?: string | null; lastName?: string | null; email?: string | null; company?: string | null };
+  return [data.firstName, data.lastName].filter(Boolean).join(" ") || data.email || data.company || "Not linked";
 }
 
-function ownerName(owner: { displayName?: string | null; email?: string | null } | null | undefined) {
+function ownerName(owner: { displayName?: string | null | undefined; email?: string | null | undefined } | null | undefined) {
   if (!owner) return "Unassigned";
 
   return owner.displayName || owner.email || "Unassigned";
