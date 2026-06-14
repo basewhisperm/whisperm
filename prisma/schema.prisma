@@ -227,6 +227,7 @@ model Tenant {
   marketplaceCaptures    MarketplaceCapture[]
   draftInventories       DraftInventory[]
   marketplaceClaimTokens MarketplaceClaimToken[]
+  sellerInvitations   MarketplaceSellerInvitation[]
   sellerVerifications    MarketplaceSellerVerification[]
   renderConversions      RenderConversion[]
   providerConnections    ProviderConnection[]
@@ -1129,6 +1130,7 @@ model MarketplaceCapture {
   contact             Contact?                        @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
   deal                Deal?                           @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
   claimTokens         MarketplaceClaimToken[]
+  sellerInvitations   MarketplaceSellerInvitation[]
   sellerVerifications MarketplaceSellerVerification[]
   renderConversions   RenderConversion[]
   notificationLogs    NotificationDeliveryLog[]
@@ -1176,6 +1178,30 @@ model DraftInventory {
   @@index([tenantId, dealId])
   @@index([tenantId, status])
   @@index([tenantId, marketplaceSource, marketplaceListingId])
+}
+
+
+model MarketplaceSellerInvitation {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @db.Uuid
+  marketplaceCaptureId String   @db.Uuid
+  channel              String
+  status               String   @default("PENDING")
+  inviteUrl            String
+  recipient            String
+  expiresAt            DateTime
+  metadata             Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture MarketplaceCapture @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId])
+  @@index([tenantId, marketplaceCaptureId])
+  @@index([tenantId, status, expiresAt])
+  @@index([tenantId, channel, createdAt])
 }
 
 model MarketplaceClaimToken {

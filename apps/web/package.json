@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && next build",
+    "build": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && next build",
     "lint": "next lint",
-    "typecheck": "pnpm --filter @whisperm/types build && prisma generate --schema=../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && prisma generate --schema=../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
@@ -25,7 +25,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "@whisperm/services": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

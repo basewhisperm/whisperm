@@ -718,5 +718,9 @@ export {
 export type {
   EmailMessage,
   EmailProvider,
+  SmsMessage,
+  SmsProvider,
+  WhatsAppMessage,
+  WhatsAppProvider,
   ResendEmailProviderOptions,
 } from "./email/resend-provider.js";

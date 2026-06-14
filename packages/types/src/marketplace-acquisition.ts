@@ -25,9 +25,32 @@ const safeRawExtractSchema = z.record(z.string(), z.unknown()).default({}).super
   }
 });
 
-export const marketplaceCaptureStatusValues = ["CAPTURED", "INVITED", "CLAIM_STARTED", "CLAIMED", "CONVERTED", "EXPIRED"] as const;
+export const marketplaceCaptureStatusValues = ["CAPTURED", "INVITED"] as const;
 export const marketplaceCaptureStatusSchema = z.enum(marketplaceCaptureStatusValues);
 export type MarketplaceCaptureStatus = z.output<typeof marketplaceCaptureStatusSchema>;
+
+export const sellerInvitationChannelValues = ["WHATSAPP", "SMS", "EMAIL"] as const;
+export const sellerInvitationChannelSchema = z.enum(sellerInvitationChannelValues);
+export type SellerInvitationChannel = z.output<typeof sellerInvitationChannelSchema>;
+
+export const sellerInvitationStatusValues = ["PENDING", "SENT", "FAILED", "OPENED", "EXPIRED"] as const;
+export const sellerInvitationStatusSchema = z.enum(sellerInvitationStatusValues);
+export type SellerInvitationStatus = z.output<typeof sellerInvitationStatusSchema>;
+
+export const sellerInvitationCreateRequestSchema = z.object({
+  preferredChannel: sellerInvitationChannelSchema.optional(),
+}).strict();
+export type SellerInvitationCreateRequest = z.output<typeof sellerInvitationCreateRequestSchema>;
+
+export const sellerInvitationResponseSchema = z.object({
+  captureId: idSchema,
+  invitationId: idSchema,
+  channel: sellerInvitationChannelSchema,
+  status: sellerInvitationStatusSchema,
+  inviteUrl: z.string().url(),
+  expiresAt: isoDateSchema,
+}).strict();
+export type SellerInvitationResponse = z.output<typeof sellerInvitationResponseSchema>;
 
 export const draftInventoryStatusValues = ["DRAFT", "CLAIM_PENDING", "CLAIMED", "CONVERTED", "EXPIRED"] as const;
 export const draftInventoryStatusSchema = z.enum(draftInventoryStatusValues);

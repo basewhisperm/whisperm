@@ -18,6 +18,9 @@ import {
   type ActivityRepository,
   type MarketplaceCaptureRepository,
   type DraftInventoryRepository,
+  type SellerInvitationRepository,
+  type SellerInvitationRecord,
+  sellerInvitationRecordSchema,
   type ActivityListFilters,
   type ActivityRecord,
   activityRecordSchema,
@@ -108,6 +111,11 @@ import {
   type PersistenceCorrelationMetadata,
   persistenceCorrelationMetadataSchema,
   type TenantScoped,
+  sellerInvitationChannelSchema,
+  sellerInvitationCreateRequestSchema,
+  sellerInvitationResponseSchema,
+  type SellerInvitationChannel,
+  type SellerInvitationResponse,
 } from "@whisperm/types";
 
 const metadataSchema = z.record(z.string(), z.unknown());
@@ -156,6 +164,45 @@ export interface ServiceErrorInput {
   readonly cause?: unknown;
 }
 
+type MarketplaceAcquisitionStageName = "Captured" | "Invited" | "Claim Started" | "Claimed" | "Converted" | "Expired";
+
+interface MarketplaceAcquisitionStageTransitionResult {
+  readonly captureId: string;
+  readonly dealId: string;
+  readonly currentStage: MarketplaceAcquisitionStageName;
+  readonly previousStage: MarketplaceAcquisitionStageName;
+  readonly status: MarketplaceCaptureRecord["status"];
+  readonly updatedAt: string;
+}
+
+const marketplaceStageTransitionInputSchema = z.object({
+  dealId: z.string().min(1),
+  stageName: z.enum(["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"]),
+});
+
+const allowedMarketplaceStageTransitions: Record<MarketplaceAcquisitionStageName, readonly MarketplaceAcquisitionStageName[]> = {
+  Captured: ["Invited", "Expired"],
+  Invited: ["Claim Started", "Expired"],
+  "Claim Started": ["Claimed", "Expired"],
+  Claimed: ["Converted"],
+  Converted: [],
+  Expired: [],
+};
+
+const marketplaceStageStatusByName: Record<MarketplaceAcquisitionStageName, MarketplaceCaptureRecord["status"]> = {
+  Captured: "CAPTURED",
+  Invited: "INVITED",
+  "Claim Started": "CLAIM_STARTED",
+  Claimed: "CLAIMED",
+  Converted: "CONVERTED",
+  Expired: "EXPIRED",
+};
+
+function isMarketplaceAcquisitionStageName(value: string): value is MarketplaceAcquisitionStageName {
+  return value === "Captured" || value === "Invited" || value === "Claim Started" || value === "Claimed" || value === "Converted" || value === "Expired";
+}
+
+
 export class ServiceError extends Error {
   readonly code: ServiceErrorCode;
   readonly status: number;
@@ -197,6 +244,7 @@ export interface ServiceRepositories {
   readonly activities: ActivityRepository;
   readonly marketplaceCaptures: MarketplaceCaptureRepository;
   readonly draftInventories: DraftInventoryRepository;
+  readonly sellerInvitations?: SellerInvitationRepository | undefined;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -1008,36 +1056,7 @@ export interface MarketplaceCaptureServiceResult {
 
 const marketplacePipelineDefaultKey = "marketplace_acquisition";
 const marketplaceCapturedStageName = "Captured";
-const marketplaceAcquisitionStageNames = ["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"] as const;
-type MarketplaceAcquisitionStageName = (typeof marketplaceAcquisitionStageNames)[number];
-const marketplaceAcquisitionStageNameSchema = z.enum(marketplaceAcquisitionStageNames);
-const marketplaceStageStatusByName: Readonly<Record<MarketplaceAcquisitionStageName, MarketplaceCaptureRecord["status"]>> = {
-  "Captured": "CAPTURED",
-  "Invited": "INVITED",
-  "Claim Started": "CLAIM_STARTED",
-  "Claimed": "CLAIMED",
-  "Converted": "CONVERTED",
-  "Expired": "EXPIRED",
-};
-const allowedMarketplaceStageTransitions: Readonly<Record<MarketplaceAcquisitionStageName, readonly MarketplaceAcquisitionStageName[]>> = {
-  "Captured": ["Invited", "Expired"],
-  "Invited": ["Claim Started", "Expired"],
-  "Claim Started": ["Claimed", "Expired"],
-  "Claimed": ["Converted"],
-  "Converted": [],
-  "Expired": [],
-};
-const marketplaceStageTransitionInputSchema = z.object({ dealId: idSchema, stageName: marketplaceAcquisitionStageNameSchema }).strict();
-export interface MarketplaceAcquisitionStageTransitionResult {
-  readonly captureId: string;
-  readonly dealId: string;
-  readonly currentStage: MarketplaceAcquisitionStageName;
-  readonly previousStage: MarketplaceAcquisitionStageName;
-  readonly status: string;
-  readonly updatedAt: string;
-}
-
-const isMarketplaceAcquisitionStageName = (value: string): value is MarketplaceAcquisitionStageName => marketplaceAcquisitionStageNames.includes(value as MarketplaceAcquisitionStageName);
+const marketplaceInvitedStageName = "Invited";
 
 const sourceHost = (listingUrl: string): string => {
   try { return new URL(listingUrl).host; } catch { return "marketplace"; }
@@ -1058,6 +1077,99 @@ const marketplaceCategoryForDraft = (input: MarketplaceCaptureServiceInput): str
   const category = input.metadata?.category;
   return typeof category === "string" && category.trim().length > 0 ? category : undefined;
 };
+
+
+const sellerInviteInputSchema = z.object({ tenantId: idSchema, captureId: idSchema, preferredChannel: sellerInvitationChannelSchema.optional() }).strict();
+export type SellerInviteServiceInput = z.output<typeof sellerInviteInputSchema>;
+export interface SellerInvitationProviderPorts {
+  readonly whatsapp?: { send(message: { readonly to: string; readonly body: string }): Promise<void> } | undefined;
+  readonly sms?: { send(message: { readonly to: string; readonly body: string }): Promise<void> } | undefined;
+  readonly email?: { send(message: { readonly to: string; readonly subject: string; readonly html: string }): Promise<void> } | undefined;
+  readonly whatsappEnabled?: boolean | undefined;
+  readonly fallbackToSmsWhenWhatsappMissing?: boolean | undefined;
+  readonly inviteBaseUrl?: string | undefined;
+  readonly now?: (() => Date) | undefined;
+}
+
+const contactFromCapture = (capture: MarketplaceCaptureRecord): { readonly phone?: string; readonly email?: string } => {
+  const metadata = capture.metadata ?? {};
+  const phone = typeof metadata.sellerPhone === "string" && metadata.sellerPhone.trim().length > 0 ? metadata.sellerPhone.trim() : undefined;
+  const email = typeof metadata.sellerEmail === "string" && metadata.sellerEmail.trim().length > 0 ? metadata.sellerEmail.trim() : undefined;
+  return { ...(phone === undefined ? {} : { phone }), ...(email === undefined ? {} : { email }) };
+};
+
+const resolveInviteChannel = (contact: { readonly phone?: string; readonly email?: string }, preferred: SellerInvitationChannel | undefined, whatsappEnabled: boolean): SellerInvitationChannel => {
+  if (preferred !== undefined) {
+    if (preferred === "EMAIL" && contact.email !== undefined) return "EMAIL";
+    if ((preferred === "SMS" || preferred === "WHATSAPP") && contact.phone !== undefined) return preferred;
+    throw new ServiceError({ code: "SERVICE_VALIDATION_FAILED", message: preferred === "EMAIL" ? "Seller email is required for EMAIL invitations." : "Seller phone is required for cellphone invitations.", status: 400 });
+  }
+  if (contact.phone !== undefined) return whatsappEnabled ? "WHATSAPP" : "SMS";
+  if (contact.email !== undefined) return "EMAIL";
+  throw new ServiceError({ code: "SERVICE_VALIDATION_FAILED", message: "Seller has no reachable invitation channel.", status: 400 });
+};
+
+const recipientFor = (channel: SellerInvitationChannel, contact: { readonly phone?: string; readonly email?: string }): string => channel === "EMAIL" ? contact.email ?? "" : contact.phone ?? "";
+
+export class SellerInvitationService {
+  constructor(private readonly deps: ServiceDependencies & { readonly notifications?: SellerInvitationProviderPorts | undefined }) {}
+
+  async createSellerInvitation(contextInput: ServiceContext, input: SellerInviteServiceInput): Promise<SellerInvitationResponse> {
+    const context = ensureContext(contextInput);
+    const data = ensureTenantInput(context, exactInput(parseContract(sellerInviteInputSchema, input, context.correlation)));
+    if (this.deps.sellerInvitations === undefined) throw new ServiceError({ code: "SERVICE_REPOSITORY_FAILED", message: "Seller invitation repository is not configured", status: 500, correlation: context.correlation });
+    const scope = contextToTenantScope(context);
+    const capture = await this.deps.marketplaceCaptures.findById(scope, data.captureId);
+    if (capture === null) throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation });
+    const contact = contactFromCapture(capture);
+    const notifications = this.deps.notifications;
+    const initialChannel = resolveInviteChannel(contact, data.preferredChannel, notifications?.whatsappEnabled !== false);
+    const now = notifications?.now?.() ?? new Date();
+    const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const base = notifications?.inviteBaseUrl ?? "https://app.whisperm.ai/seller-acquisition/invitations";
+
+    return runWrite(this.deps, context, async (repositories) => {
+      const invitation = await this.deps.sellerInvitations!.create(scope, { tenantId: context.tenantId, marketplaceCaptureId: capture.id, channel: initialChannel, status: "PENDING", recipient: recipientFor(initialChannel, contact), inviteUrl: `${base}/${capture.id}`, expiresAt, metadata: { preferredChannel: data.preferredChannel ?? null } });
+      await appendAudit(repositories, context, { action: "INVITATION_CREATED", targetType: "SELLER_INVITATION", targetId: invitation.id, metadata: { captureId: capture.id, channel: initialChannel } });
+      const sent = await this.sendOrFallback(context, scope, repositories, invitation, contact, notifications);
+      if (sent.status === "SENT") {
+        await this.moveToInvited(context, repositories, capture);
+      }
+      return sellerInvitationResponseSchema.parse({ captureId: capture.id, invitationId: sent.id, channel: sent.channel, status: sent.status, inviteUrl: sent.inviteUrl, expiresAt: sent.expiresAt });
+    });
+  }
+
+  private async sendOrFallback(context: ServiceContext, scope: TenantScoped, repositories: ServiceRepositories, invitation: SellerInvitationRecord, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined): Promise<SellerInvitationRecord> {
+    const trySend = async (channel: SellerInvitationChannel, record: SellerInvitationRecord): Promise<SellerInvitationRecord | null> => {
+      const body = `You are invited to Seller Acquisition: ${record.inviteUrl}`;
+      if (channel === "WHATSAPP") { if (notifications?.whatsapp === undefined) return null; await notifications.whatsapp.send({ to: record.recipient, body }); }
+      if (channel === "SMS") { if (notifications?.sms === undefined) return null; await notifications.sms.send({ to: record.recipient, body }); }
+      if (channel === "EMAIL") { if (notifications?.email === undefined) return null; await notifications.email.send({ to: record.recipient, subject: "Seller Acquisition invitation", html: `<p>${body}</p>` }); }
+      const sent = await this.deps.sellerInvitations!.update(scope, record.id, { status: "SENT", metadata: { ...(record.metadata ?? {}), sentAt: new Date().toISOString() } });
+      await appendAudit(repositories, context, { action: "INVITATION_SENT", targetType: "SELLER_INVITATION", targetId: sent.id, metadata: { captureId: sent.marketplaceCaptureId, channel } });
+      return sent;
+    };
+    const sent = await trySend(invitation.channel, invitation);
+    if (sent !== null) return sent;
+    if (invitation.channel === "WHATSAPP" && contact.phone !== undefined && notifications?.fallbackToSmsWhenWhatsappMissing !== false && notifications?.sms !== undefined) {
+      await appendAudit(repositories, context, { action: "INVITATION_FALLBACK_USED", targetType: "SELLER_INVITATION", targetId: invitation.id, metadata: { from: "WHATSAPP", to: "SMS" } });
+      const smsRecord = await this.deps.sellerInvitations!.create(scope, { tenantId: context.tenantId, marketplaceCaptureId: invitation.marketplaceCaptureId, channel: "SMS", status: "PENDING", recipient: contact.phone, inviteUrl: invitation.inviteUrl, expiresAt: invitation.expiresAt, metadata: { fallbackFrom: "WHATSAPP" } });
+      const smsSent = await trySend("SMS", smsRecord);
+      if (smsSent !== null) return smsSent;
+    }
+    const failed = await this.deps.sellerInvitations!.update(scope, invitation.id, { status: "FAILED", metadata: { ...(invitation.metadata ?? {}), failureReason: "INVITATION_PROVIDER_UNAVAILABLE" } });
+    await appendAudit(repositories, context, { action: "INVITATION_FAILED", targetType: "SELLER_INVITATION", targetId: failed.id, metadata: { captureId: failed.marketplaceCaptureId, channel: failed.channel, reason: "PROVIDER_UNAVAILABLE" } });
+    return failed;
+  }
+
+  private async moveToInvited(context: ServiceContext, repositories: ServiceRepositories, capture: MarketplaceCaptureRecord): Promise<void> {
+    await repositories.marketplaceCaptures.update(contextToTenantScope(context), capture.id, { status: "INVITED" });
+    if (capture.dealId === undefined || capture.dealId === null) return;
+    const pipeline = await repositories.pipelines.findByDefaultKey(context.tenantId, marketplacePipelineDefaultKey);
+    const invitedStage = pipeline?.stages.find((stage) => stage.name === marketplaceInvitedStageName);
+    if (invitedStage !== undefined) await repositories.deals.updateStage(context.tenantId, capture.dealId, invitedStage.id);
+  }
+}
 
 export class MarketplaceAcquisitionCaptureService {
   constructor(private readonly deps: ServiceDependencies) {}
@@ -1138,6 +1250,7 @@ export class MarketplaceAcquisitionCaptureService {
       };
     });
   }
+
 
 
   async transitionStage(contextInput: ServiceContext, input: { readonly dealId: string; readonly stageName: MarketplaceAcquisitionStageName }): Promise<MarketplaceAcquisitionStageTransitionResult> {
@@ -1342,6 +1455,7 @@ export interface WhispeRMServices {
   readonly deals: DealService;
   readonly activities: ActivityService;
   readonly marketplaceAcquisition: MarketplaceAcquisitionCaptureService;
+  readonly sellerInvitations: SellerInvitationService;
   readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
   readonly workflows: WorkflowService;
@@ -1359,6 +1473,7 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   deals: new DealService(dependencies),
   activities: new ActivityService(dependencies),
   marketplaceAcquisition: new MarketplaceAcquisitionCaptureService(dependencies),
+  sellerInvitations: new SellerInvitationService(dependencies),
   scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
   workflows: new WorkflowService(dependencies),
