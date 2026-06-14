@@ -13,6 +13,7 @@ export interface MarketplaceCaptureResponse {
   readonly captureId: string;
   readonly contactId: string;
   readonly dealId: string;
+  readonly draftInventoryId: string;
   readonly contactMatchStrategy: string;
   readonly dealCreated: boolean;
   readonly dealMatched: boolean;

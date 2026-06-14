@@ -17,6 +17,7 @@ import {
   type ContactRepository,
   type ActivityRepository,
   type MarketplaceCaptureRepository,
+  type DraftInventoryRepository,
   type ActivityListFilters,
   type ActivityRecord,
   activityRecordSchema,
@@ -195,6 +196,7 @@ export interface ServiceRepositories {
   readonly pipelines: PipelineRepository;
   readonly activities: ActivityRepository;
   readonly marketplaceCaptures: MarketplaceCaptureRepository;
+  readonly draftInventories: DraftInventoryRepository;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -997,6 +999,7 @@ export interface MarketplaceCaptureServiceResult {
   readonly captureId: string;
   readonly contactId: string;
   readonly dealId: string;
+  readonly draftInventoryId: string;
   readonly contactMatchStrategy: "provided" | "email" | "created";
   readonly dealCreated: boolean;
   readonly dealMatched: boolean;
@@ -1013,6 +1016,18 @@ const sourceHost = (listingUrl: string): string => {
 const marketplaceDealExternalId = (listingUrl: string): string => `marketplace-listing:${listingUrl.trim().toLowerCase()}`;
 
 const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => input.sellerName?.trim() || input.title.trim();
+
+const marketplaceSourceForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => input.marketplaceSourceId ?? sourceHost(input.listingUrl);
+
+const marketplaceImagesForDraft = (input: MarketplaceCaptureServiceInput): unknown | undefined => {
+  const images = input.metadata?.imageUrls;
+  return Array.isArray(images) ? images : undefined;
+};
+
+const marketplaceCategoryForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => {
+  const category = input.metadata?.category;
+  return typeof category === "string" && category.trim().length > 0 ? category : undefined;
+};
 
 export class MarketplaceAcquisitionCaptureService {
   constructor(private readonly deps: ServiceDependencies) {}
@@ -1032,7 +1047,9 @@ export class MarketplaceAcquisitionCaptureService {
 
     return runWrite(this.deps, context, async (repositories) => {
       const contactResult = await this.resolveContact(repositories, context, data);
-      const existingCapture = await repositories.marketplaceCaptures.findByListingUrl(tenantScope, data.listingUrl);
+      const existingByListingUrl = await repositories.marketplaceCaptures.findByListingUrl(tenantScope, data.listingUrl);
+      const existingByExternalId = existingByListingUrl === null && data.externalId !== undefined && data.externalId !== null ? await repositories.marketplaceCaptures.findByExternalId(tenantScope, data.externalId) : null;
+      const existingCapture = existingByListingUrl ?? existingByExternalId;
       const capture = existingCapture ?? await repositories.marketplaceCaptures.create(tenantScope, {
         tenantId: context.tenantId,
         marketplaceSourceId: data.marketplaceSourceId,
@@ -1051,6 +1068,22 @@ export class MarketplaceAcquisitionCaptureService {
       const linkedCapture = capture.contactId === contactResult.contact.id ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId: contactResult.contact.id });
       const dealResult = await this.resolveDeal(repositories, context, data, linkedCapture, contactResult.contact.id, capturedStage.id);
       const finalCapture = linkedCapture.dealId === dealResult.deal.id ? linkedCapture : await repositories.marketplaceCaptures.update(tenantScope, linkedCapture.id, { dealId: dealResult.deal.id });
+      const draftInventory = await repositories.draftInventories.upsertForCapture(tenantScope, {
+        tenantId: context.tenantId,
+        marketplaceCaptureId: finalCapture.id,
+        contactId: contactResult.contact.id,
+        dealId: dealResult.deal.id,
+        title: finalCapture.title,
+        description: finalCapture.description,
+        price: finalCapture.price,
+        currency: finalCapture.currency,
+        category: marketplaceCategoryForDraft(data),
+        images: marketplaceImagesForDraft(data),
+        listingUrl: finalCapture.listingUrl,
+        marketplaceSource: marketplaceSourceForDraft(data),
+        marketplaceListingId: finalCapture.externalId ?? undefined,
+        status: "DRAFT",
+      });
       if (context.actorId !== undefined && dealResult.created) {
         await repositories.activities.create({ ...tenantScope, actorId: context.actorId, correlation: context.correlation }, {
           tenantId: context.tenantId,
@@ -1070,6 +1103,7 @@ export class MarketplaceAcquisitionCaptureService {
         contactMatchStrategy: contactResult.strategy,
         dealCreated: dealResult.created,
         dealMatched: !dealResult.created,
+        draftInventoryId: draftInventory.id,
         status: finalCapture.status
       };
     });

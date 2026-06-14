@@ -13,6 +13,7 @@ const createRepositories = (overrides = {}) => {
   const contacts = new Map();
   const captures = new Map();
   const deals = new Map();
+  const draftInventories = new Map();
   const activities = [];
   const push = (repo, method, args) => calls.push({ repo, method, args });
 
@@ -21,6 +22,7 @@ const createRepositories = (overrides = {}) => {
     contactsById: contacts,
     capturesByUrl: captures,
     dealsByExternalId: deals,
+    draftInventoriesByCapture: draftInventories,
     activityRows: activities,
     pipelines: {
       async findByWorkspace() { return null; },
@@ -48,6 +50,10 @@ const createRepositories = (overrides = {}) => {
         push("marketplaceCaptures", "findByListingUrl", [scope, listingUrl]);
         return captures.get(`${scope.tenantId}:${listingUrl}`) ?? null;
       },
+      async findByExternalId(scope, externalId) {
+        push("marketplaceCaptures", "findByExternalId", [scope, externalId]);
+        return [...captures.values()].find((capture) => capture.tenantId === scope.tenantId && capture.externalId === externalId) ?? null;
+      },
       async create(scope, input) {
         push("marketplaceCaptures", "create", [scope, input]);
         const capture = record({ id: `capture-${captures.size + 1}`, tenantId: input.tenantId, marketplaceSourceId: input.marketplaceSourceId ?? null, contactId: input.contactId ?? null, dealId: input.dealId ?? null, externalId: input.externalId ?? null, listingUrl: input.listingUrl, title: input.title, description: input.description ?? null, price: input.price ?? null, currency: input.currency ?? null, sellerName: input.sellerName ?? null, sellerProfileUrl: input.sellerProfileUrl ?? null, status: input.status ?? "CAPTURED", capturedAt: now, metadata: input.metadata ?? {} });
@@ -60,6 +66,45 @@ const createRepositories = (overrides = {}) => {
         assert.ok(entry, "capture must exist");
         const updated = { ...entry[1], ...input, updatedAt: now };
         captures.set(entry[0], updated);
+        return updated;
+      }
+    },
+
+    draftInventories: {
+      async create(scope, input) {
+        push("draftInventories", "create", [scope, input]);
+        const draft = record({ id: `draft-${draftInventories.size + 1}`, tenantId: input.tenantId, marketplaceCaptureId: input.marketplaceCaptureId, contactId: input.contactId ?? null, dealId: input.dealId ?? null, title: input.title, description: input.description ?? null, price: input.price ?? null, currency: input.currency ?? null, category: input.category ?? null, images: input.images ?? null, listingUrl: input.listingUrl ?? null, marketplaceSource: input.marketplaceSource ?? null, marketplaceListingId: input.marketplaceListingId ?? null, status: input.status ?? "DRAFT" });
+        draftInventories.set(`${scope.tenantId}:${input.marketplaceCaptureId}`, draft);
+        return draft;
+      },
+      async findByMarketplaceCaptureId(scope, marketplaceCaptureId) {
+        push("draftInventories", "findByMarketplaceCaptureId", [scope, marketplaceCaptureId]);
+        return draftInventories.get(`${scope.tenantId}:${marketplaceCaptureId}`) ?? null;
+      },
+      async findByMarketplaceListing(scope, marketplaceSource, marketplaceListingId) {
+        push("draftInventories", "findByMarketplaceListing", [scope, marketplaceSource, marketplaceListingId]);
+        return [...draftInventories.values()].find((draft) => draft.tenantId === scope.tenantId && draft.marketplaceSource === marketplaceSource && draft.marketplaceListingId === marketplaceListingId) ?? null;
+      },
+      async upsertForCapture(scope, input) {
+        push("draftInventories", "upsertForCapture", [scope, input]);
+        const existingByCapture = draftInventories.get(`${scope.tenantId}:${input.marketplaceCaptureId}`);
+        if (existingByCapture) return existingByCapture;
+        if (input.marketplaceSource && input.marketplaceListingId) {
+          const existingByListing = [...draftInventories.values()].find((draft) => draft.tenantId === scope.tenantId && draft.marketplaceSource === input.marketplaceSource && draft.marketplaceListingId === input.marketplaceListingId);
+          if (existingByListing) {
+            const updated = { ...existingByListing, ...input, updatedAt: now };
+            draftInventories.set(`${scope.tenantId}:${updated.marketplaceCaptureId}`, updated);
+            return updated;
+          }
+        }
+        return this.create(scope, input);
+      },
+      async update(scope, draftInventoryId, input) {
+        push("draftInventories", "update", [scope, draftInventoryId, input]);
+        const entry = [...draftInventories.entries()].find(([, draft]) => draft.tenantId === scope.tenantId && draft.id === draftInventoryId);
+        assert.ok(entry, "draft inventory must exist");
+        const updated = { ...entry[1], ...input, updatedAt: now };
+        draftInventories.set(entry[0], updated);
         return updated;
       }
     },
@@ -105,7 +150,9 @@ const captureInput = {
   currency: "USD",
   sellerName: "Seller One",
   sellerEmail: "seller@example.com",
-  sellerProfileUrl: "https://market.example/sellers/one"
+  sellerProfileUrl: "https://market.example/sellers/one",
+  externalId: "listing-123",
+  metadata: { imageUrls: ["https://market.example/images/one.jpg"], category: "Furniture" }
 };
 
 test("capture creates a marketplace acquisition deal linked to contact and Captured stage", async () => {
@@ -117,6 +164,7 @@ test("capture creates a marketplace acquisition deal linked to contact and Captu
   assert.equal(result.status, "CAPTURED");
   assert.equal(result.contactId, "contact-1");
   assert.equal(result.dealId, "deal-1");
+  assert.equal(result.draftInventoryId, "draft-1");
   assert.equal(result.dealCreated, true);
   assert.equal(result.dealMatched, false);
 
@@ -127,6 +175,21 @@ test("capture creates a marketplace acquisition deal linked to contact and Captu
   assert.equal(repositories.activityRows[0].contactId, "contact-1");
   assert.equal(repositories.activityRows[0].dealId, "deal-1");
   assert.equal(repositories.activityRows[0].metadata.eventType, "MARKETPLACE_CAPTURED");
+
+  const draft = [...repositories.draftInventoriesByCapture.values()][0];
+  assert.equal(draft.tenantId, "tenant-a");
+  assert.equal(draft.marketplaceCaptureId, "capture-1");
+  assert.equal(draft.contactId, "contact-1");
+  assert.equal(draft.dealId, "deal-1");
+  assert.equal(draft.title, "Two-chair salon suite");
+  assert.equal(draft.description, null);
+  assert.equal(draft.price, "2500.00");
+  assert.equal(draft.currency, "USD");
+  assert.equal(draft.category, "Furniture");
+  assert.deepEqual(draft.images, ["https://market.example/images/one.jpg"]);
+  assert.equal(draft.listingUrl, "https://market.example/listings/123");
+  assert.equal(draft.marketplaceListingId, "listing-123");
+  assert.equal(draft.status, "DRAFT");
 });
 
 test("second capture for same source URL links existing deal without duplication", async () => {
@@ -137,9 +200,12 @@ test("second capture for same source URL links existing deal without duplication
   const second = await services.marketplaceAcquisition.capture(context, captureInput);
 
   assert.equal(second.dealId, "deal-1");
+  assert.equal(second.draftInventoryId, "draft-1");
   assert.equal(second.dealCreated, false);
   assert.equal(second.dealMatched, true);
   assert.equal(repositories.calls.filter((call) => call.repo === "deals" && call.method === "create").length, 1);
+  assert.equal(repositories.calls.filter((call) => call.repo === "draftInventories" && call.method === "create").length, 1);
+  assert.equal(repositories.draftInventoriesByCapture.size, 1);
 });
 
 test("missing marketplace acquisition pipeline fails clearly", async () => {
