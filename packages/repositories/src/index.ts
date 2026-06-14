@@ -89,6 +89,7 @@ export interface PrismaPersistenceClient {
   readonly deal: PrismaDelegate;
   readonly activity: PrismaDelegate;
   readonly marketplaceCapture: PrismaDelegate;
+  readonly draftInventory: PrismaDelegate;
   readonly subscription: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
@@ -251,6 +252,29 @@ export const marketplaceCaptureRecordSchema = baseRecordSchema.extend({
 export type MarketplaceCaptureRecord = z.output<typeof marketplaceCaptureRecordSchema>;
 export type CreateMarketplaceCaptureInput = TenantScoped & Pick<MarketplaceCaptureRecord, "listingUrl" | "title"> & Partial<Pick<MarketplaceCaptureRecord, "marketplaceSourceId" | "contactId" | "dealId" | "externalId" | "description" | "price" | "currency" | "sellerName" | "sellerProfileUrl" | "status" | "capturedAt" | "metadata">>;
 export type UpdateMarketplaceCaptureInput = Partial<Pick<MarketplaceCaptureRecord, "contactId" | "dealId" | "status" | "metadata">>;
+
+export const draftInventoryStatusValues = ["DRAFT", "CLAIM_PENDING", "CLAIMED", "CONVERTED", "EXPIRED"] as const;
+export const draftInventoryStatusSchema = z.enum(draftInventoryStatusValues);
+export type DraftInventoryStatus = z.output<typeof draftInventoryStatusSchema>;
+
+export const draftInventoryRecordSchema = baseRecordSchema.extend({
+  marketplaceCaptureId: z.string().min(1),
+  contactId: z.string().min(1).nullable().optional(),
+  dealId: z.string().min(1).nullable().optional(),
+  title: z.string().min(1),
+  description: z.string().min(1).nullable().optional(),
+  price: decimalLikeSchema.nullable().optional(),
+  currency: z.string().min(1).nullable().optional(),
+  category: z.string().min(1).nullable().optional(),
+  images: z.unknown().nullable().optional(),
+  listingUrl: z.string().min(1).nullable().optional(),
+  marketplaceSource: z.string().min(1).nullable().optional(),
+  marketplaceListingId: z.string().min(1).nullable().optional(),
+  status: draftInventoryStatusSchema,
+}).required({ updatedAt: true }).strict();
+export type DraftInventoryRecord = z.output<typeof draftInventoryRecordSchema>;
+export type CreateDraftInventoryInput = TenantScoped & Pick<DraftInventoryRecord, "marketplaceCaptureId" | "title"> & Partial<Pick<DraftInventoryRecord, "contactId" | "dealId" | "description" | "price" | "currency" | "category" | "images" | "listingUrl" | "marketplaceSource" | "marketplaceListingId" | "status">>;
+export type UpdateDraftInventoryInput = Partial<Pick<DraftInventoryRecord, "contactId" | "dealId" | "title" | "description" | "price" | "currency" | "category" | "images" | "listingUrl" | "marketplaceSource" | "marketplaceListingId" | "status">>;
 export interface ActivityCreateContext extends TenantScoped {
   readonly actorId?: string | undefined;
   readonly correlation?: PersistenceCorrelationMetadata | undefined;
@@ -501,7 +525,8 @@ export interface ContactRepository { create(context: TenantScoped, input: Create
 export interface PipelineRepository { findByWorkspace(workspaceId: string): Promise<PipelineRecord | null>; findByDefaultKey(workspaceId: string, defaultKey: string): Promise<PipelineRecord | null>; updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord>; }
 export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findByExternalId(workspaceId: string, externalId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
 export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
-export interface MarketplaceCaptureRepository { create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; findByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>; update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; }
+export interface MarketplaceCaptureRepository { create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; findByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>; findByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null>; update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; }
+export interface DraftInventoryRepository { create(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null>; findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null>; upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord>; }
 
 export interface DashboardContactRecord { readonly id: string; readonly firstName?: string | null | undefined; readonly lastName?: string | null | undefined; readonly company?: string | null | undefined; readonly email?: string | null | undefined; readonly lastTouchAt?: string | null | undefined; }
 export interface DashboardActivityRecord { readonly id: string; readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined; readonly type: string; readonly note?: string | null | undefined; readonly createdById: string; readonly createdAt: string; }
@@ -1078,6 +1103,12 @@ export class PrismaMarketplaceCaptureRepository implements MarketplaceCaptureRep
     return row === null ? null : parseRecord(marketplaceCaptureRecordSchema, row);
   }
 
+  async findByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.marketplaceCapture.findFirst({ where: withTenant(context, { externalId }) });
+    return row === null ? null : parseRecord(marketplaceCaptureRecordSchema, row);
+  }
+
   async update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord> {
     ensureContext(context);
     const result = await this.prisma.marketplaceCapture.updateMany({ where: byTenantId(context, captureId), data: dataWithDefined(input) });
@@ -1085,6 +1116,50 @@ export class PrismaMarketplaceCaptureRepository implements MarketplaceCaptureRep
     const row = await this.prisma.marketplaceCapture.findFirst({ where: byTenantId(context, captureId) });
     if (row === null) notFound("Marketplace capture not found", { captureId });
     return parseRecord(marketplaceCaptureRecordSchema, row);
+  }
+}
+
+
+export class PrismaDraftInventoryRepository implements DraftInventoryRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async create(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord> {
+    ensureTenantInput(context, input);
+    try {
+      return parseRecord(draftInventoryRecordSchema, await this.prisma.draftInventory.create({ data: dataWithDefined({ status: "DRAFT", ...input }) }));
+    } catch (error) { return mapPrismaError(error, "Draft inventory already exists"); }
+  }
+
+  async findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.draftInventory.findFirst({ where: withTenant(context, { marketplaceCaptureId }) });
+    return row === null ? null : parseRecord(draftInventoryRecordSchema, row);
+  }
+
+  async findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.draftInventory.findFirst({ where: withTenant(context, { marketplaceSource, marketplaceListingId }) });
+    return row === null ? null : parseRecord(draftInventoryRecordSchema, row);
+  }
+
+  async upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord> {
+    ensureTenantInput(context, input);
+    const existingByCapture = await this.findByMarketplaceCaptureId(context, input.marketplaceCaptureId);
+    if (existingByCapture !== null) return existingByCapture;
+    if (input.marketplaceSource !== undefined && input.marketplaceSource !== null && input.marketplaceListingId !== undefined && input.marketplaceListingId !== null) {
+      const existingByListing = await this.findByMarketplaceListing(context, input.marketplaceSource, input.marketplaceListingId);
+      if (existingByListing !== null) return this.update(context, existingByListing.id, input);
+    }
+    return this.create(context, input);
+  }
+
+  async update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord> {
+    ensureContext(context);
+    const result = await this.prisma.draftInventory.updateMany({ where: byTenantId(context, draftInventoryId), data: dataWithDefined(input) });
+    if (result.count !== 1) notFound("Draft inventory not found", { draftInventoryId });
+    const row = await this.prisma.draftInventory.findFirst({ where: byTenantId(context, draftInventoryId) });
+    if (row === null) notFound("Draft inventory not found", { draftInventoryId });
+    return parseRecord(draftInventoryRecordSchema, row);
   }
 }
 
@@ -1208,6 +1283,7 @@ export interface PrismaRepositories {
   readonly auditLogs: AuditLogRepository;
   readonly activities: ActivityRepository;
   readonly marketplaceCaptures: MarketplaceCaptureRepository;
+  readonly draftInventories: DraftInventoryRepository;
   readonly dashboard: DashboardRepository;
   readonly followUpDigest: FollowUpDigestRepository;
   readonly reports: ReportsRepository;
@@ -1224,6 +1300,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     deals: new PrismaDealsRepository(prisma),
     activities: new PrismaActivityRepository(prisma),
     marketplaceCaptures: new PrismaMarketplaceCaptureRepository(prisma),
+    draftInventories: new PrismaDraftInventoryRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
     reports: new PrismaReportsRepository(prisma),
     followUpDigest: new PrismaFollowUpDigestRepository(prisma),

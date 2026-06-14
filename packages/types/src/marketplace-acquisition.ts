@@ -29,6 +29,10 @@ export const marketplaceCaptureStatusValues = ["CAPTURED"] as const;
 export const marketplaceCaptureStatusSchema = z.enum(marketplaceCaptureStatusValues);
 export type MarketplaceCaptureStatus = z.output<typeof marketplaceCaptureStatusSchema>;
 
+export const draftInventoryStatusValues = ["DRAFT", "CLAIM_PENDING", "CLAIMED", "CONVERTED", "EXPIRED"] as const;
+export const draftInventoryStatusSchema = z.enum(draftInventoryStatusValues);
+export type DraftInventoryStatus = z.output<typeof draftInventoryStatusSchema>;
+
 export const marketplaceCaptureCreateRequestSchema = z.object({
   sourceUrl: z.string().trim().url().max(2048),
   sourceHost: optionalTextSchema(255),
@@ -50,6 +54,7 @@ export const marketplaceCaptureResponseSchema = z.object({
   marketplaceSourceId: idSchema.nullable().optional(),
   externalId: z.string().min(1).nullable().optional(),
   title: idSchema,
+  draftInventoryId: idSchema.optional(),
   status: marketplaceCaptureStatusSchema,
   duplicate: z.boolean().optional(),
   normalizationWarnings: z.array(z.string()).optional(),

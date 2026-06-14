@@ -171,6 +171,14 @@ enum SubscriptionStatus {
   UNPAID
 }
 
+enum DraftInventoryStatus {
+  DRAFT
+  CLAIM_PENDING
+  CLAIMED
+  CONVERTED
+  EXPIRED
+}
+
 
 
 model Tenant {
@@ -217,6 +225,7 @@ model Tenant {
   subscriptions          Subscription[]
   marketplaceSources     MarketplaceSource[]
   marketplaceCaptures    MarketplaceCapture[]
+  draftInventories       DraftInventory[]
   marketplaceClaimTokens MarketplaceClaimToken[]
   sellerVerifications    MarketplaceSellerVerification[]
   renderConversions      RenderConversion[]
@@ -273,6 +282,7 @@ model Contact {
   deals         Deal[]
   activities    Activity[]
   marketplaceCaptures MarketplaceCapture[]
+  draftInventories    DraftInventory[]
   sellerVerifications MarketplaceSellerVerification[]
   renderConversions RenderConversion[]
 
@@ -608,8 +618,8 @@ model Deal {
   owner         TenantUser?   @relation("DealOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
   activities    Activity[]
   marketplaceCaptures MarketplaceCapture[]
+  draftInventories    DraftInventory[]
   renderConversions RenderConversion[]
-
   @@unique([tenantId, id])
   @@unique([tenantId, externalId])
   @@index([tenantId])
@@ -1122,6 +1132,7 @@ model MarketplaceCapture {
   sellerVerifications MarketplaceSellerVerification[]
   renderConversions   RenderConversion[]
   notificationLogs    NotificationDeliveryLog[]
+  draftInventories    DraftInventory[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, marketplaceSourceId, externalId])
@@ -1131,6 +1142,40 @@ model MarketplaceCapture {
   @@index([tenantId, dealId])
   @@index([tenantId, externalId])
   @@index([tenantId, status, capturedAt])
+}
+
+model DraftInventory {
+  id                   String               @id @default(uuid()) @db.Uuid
+  tenantId             String               @db.Uuid
+  marketplaceCaptureId String               @db.Uuid
+  contactId            String?              @db.Uuid
+  dealId               String?              @db.Uuid
+  title                String
+  description          String?
+  price                Decimal?             @db.Decimal(18, 4)
+  currency             String?
+  category             String?
+  images               Json?
+  listingUrl           String?
+  marketplaceSource    String?
+  marketplaceListingId String?
+  status               DraftInventoryStatus @default(DRAFT)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture MarketplaceCapture @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+  contact            Contact?           @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  deal               Deal?              @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, marketplaceCaptureId])
+  @@index([tenantId])
+  @@index([tenantId, marketplaceCaptureId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, dealId])
+  @@index([tenantId, status])
+  @@index([tenantId, marketplaceSource, marketplaceListingId])
 }
 
 model MarketplaceClaimToken {
