@@ -22,7 +22,7 @@
         "./src/*"
       ],
       "@whisperm/services": [
-        "../../packages/services/src/index.ts"
+        "../../packages/services/dist/index.d.ts"
       ]
     },
     "plugins": [
