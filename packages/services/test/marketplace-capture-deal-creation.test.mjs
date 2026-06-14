@@ -30,7 +30,14 @@ const createRepositories = (overrides = {}) => {
       async findByDefaultKey(workspaceId, defaultKey) {
         push("pipelines", "findByDefaultKey", [workspaceId, defaultKey]);
         if (workspaceId !== "tenant-a" || defaultKey !== "marketplace_acquisition") return null;
-        return record({ id: "pipeline-market", tenantId: workspaceId, name: "Marketplace Acquisition", isDefault: false, defaultKey, stages: [record({ id: "stage-captured", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Captured", position: 1, color: "#64748B" })] });
+        return record({ id: "pipeline-market", tenantId: workspaceId, name: "Marketplace Acquisition", isDefault: false, defaultKey, stages: [
+          record({ id: "stage-captured", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Captured", position: 1, color: "#64748B" }),
+          record({ id: "stage-invited", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Invited", position: 2, color: "#2563EB" }),
+          record({ id: "stage-claim-started", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Claim Started", position: 3, color: "#7C3AED" }),
+          record({ id: "stage-claimed", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Claimed", position: 4, color: "#0891B2" }),
+          record({ id: "stage-converted", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Converted", position: 5, color: "#16A34A" }),
+          record({ id: "stage-expired", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Expired", position: 6, color: "#DC2626" }),
+        ] });
       }
     },
     contacts: {
@@ -59,6 +66,10 @@ const createRepositories = (overrides = {}) => {
         const capture = record({ id: `capture-${captures.size + 1}`, tenantId: input.tenantId, marketplaceSourceId: input.marketplaceSourceId ?? null, contactId: input.contactId ?? null, dealId: input.dealId ?? null, externalId: input.externalId ?? null, listingUrl: input.listingUrl, title: input.title, description: input.description ?? null, price: input.price ?? null, currency: input.currency ?? null, sellerName: input.sellerName ?? null, sellerProfileUrl: input.sellerProfileUrl ?? null, status: input.status ?? "CAPTURED", capturedAt: now, metadata: input.metadata ?? {} });
         captures.set(`${scope.tenantId}:${input.listingUrl}`, capture);
         return capture;
+      },
+      async findByDealId(scope, dealId) {
+        push("marketplaceCaptures", "findByDealId", [scope, dealId]);
+        return [...captures.values()].find((capture) => capture.tenantId === scope.tenantId && capture.dealId === dealId) ?? null;
       },
       async update(scope, captureId, input) {
         push("marketplaceCaptures", "update", [scope, captureId, input]);
@@ -117,6 +128,14 @@ const createRepositories = (overrides = {}) => {
       async findById(workspaceId, dealId) {
         push("deals", "findById", [workspaceId, dealId]);
         return [...deals.values()].find((deal) => deal.tenantId === workspaceId && deal.id === dealId) ?? null;
+      },
+      async updateStage(workspaceId, dealId, stageId) {
+        push("deals", "updateStage", [workspaceId, dealId, stageId]);
+        const entry = [...deals.entries()].find(([, deal]) => deal.tenantId === workspaceId && deal.id === dealId);
+        assert.ok(entry, "deal must exist");
+        const updated = { ...entry[1], pipelineStageId: stageId, updatedAt: now };
+        deals.set(entry[0], updated);
+        return updated;
       },
       async create(workspaceId, input) {
         push("deals", "create", [workspaceId, input]);
@@ -228,4 +247,65 @@ test("tenant context is enforced before cross-tenant marketplace deal creation",
   );
 
   assert.equal(repositories.calls.some((call) => call.repo === "deals" && call.method === "create"), false);
+});
+
+
+test("valid marketplace acquisition lifecycle transitions update deal and capture status", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  await services.marketplaceAcquisition.capture(context, captureInput);
+
+  const invited = await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Invited" });
+  assert.equal(invited.previousStage, "Captured");
+  assert.equal(invited.currentStage, "Invited");
+  assert.equal(invited.status, "INVITED");
+
+  const claimStarted = await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Claim Started" });
+  assert.equal(claimStarted.status, "CLAIM_STARTED");
+
+  const claimed = await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Claimed" });
+  assert.equal(claimed.status, "CLAIMED");
+
+  const converted = await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Converted" });
+  assert.equal(converted.status, "CONVERTED");
+});
+
+test("expiration is allowed from pre-claim marketplace acquisition stages", async () => {
+  for (const setupStage of [null, "Invited", "Claim Started"]) {
+    const repositories = createRepositories();
+    const services = createWhispeRMServices(repositories);
+    await services.marketplaceAcquisition.capture(context, captureInput);
+    if (setupStage === "Invited") await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Invited" });
+    if (setupStage === "Claim Started") {
+      await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Invited" });
+      await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Claim Started" });
+    }
+
+    const expired = await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Expired" });
+    assert.equal(expired.currentStage, "Expired");
+    assert.equal(expired.status, "EXPIRED");
+  }
+});
+
+test("invalid backwards marketplace acquisition transition fails", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  await services.marketplaceAcquisition.capture(context, captureInput);
+  await services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Invited" });
+
+  await assert.rejects(
+    services.marketplaceAcquisition.transitionStage(context, { dealId: "deal-1", stageName: "Captured" }),
+    (error) => error instanceof ServiceError && error.code === "SERVICE_INVALID_STATE_TRANSITION"
+  );
+});
+
+test("marketplace acquisition stage transition preserves tenant isolation", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  await services.marketplaceAcquisition.capture(context, captureInput);
+
+  await assert.rejects(
+    services.marketplaceAcquisition.transitionStage({ ...context, tenantId: "tenant-b" }, { dealId: "deal-1", stageName: "Invited" }),
+    (error) => error instanceof ServiceError && error.code === "SERVICE_NOT_FOUND"
+  );
 });

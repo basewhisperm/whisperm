@@ -2,10 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
-import { PrismaDealsRepository, PrismaPipelineRepository } from "@whisperm/repositories";
+import { PrismaDealsRepository, PrismaMarketplaceCaptureRepository, PrismaPipelineRepository } from "@whisperm/repositories";
 
 const MARKETPLACE_ACQUISITION_PIPELINE_KEY = "marketplace_acquisition";
-const ACQUISITION_STAGE_NAMES = new Set(["Captured", "Invited", "Converted"]);
+const ACQUISITION_STAGE_NAMES = new Set(["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"]);
+const STATUS_BY_STAGE = new Map<string, string>([
+  ["Captured", "CAPTURED"],
+  ["Invited", "INVITED"],
+  ["Claim Started", "CLAIM_STARTED"],
+  ["Claimed", "CLAIMED"],
+  ["Converted", "CONVERTED"],
+  ["Expired", "EXPIRED"],
+]);
+const ALLOWED_TRANSITIONS = new Map<string, readonly string[]>([
+  ["Captured", ["Invited", "Expired"]],
+  ["Invited", ["Claim Started", "Expired"]],
+  ["Claim Started", ["Claimed", "Expired"]],
+  ["Claimed", ["Converted"]],
+  ["Converted", []],
+  ["Expired", []],
+]);
 
 interface RouteContext {
   readonly params: {
@@ -31,6 +47,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const workspaceId = tenant.id;
   const dealsRepo = new PrismaDealsRepository(prisma as any);
   const pipelineRepo = new PrismaPipelineRepository(prisma as any);
+  const captureRepo = new PrismaMarketplaceCaptureRepository(prisma as any);
   const [pipeline, deal] = await Promise.all([
     pipelineRepo.findByDefaultKey(workspaceId, MARKETPLACE_ACQUISITION_PIPELINE_KEY),
     dealsRepo.findById(workspaceId, params.dealId),
@@ -43,12 +60,32 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Deal is not in the Marketplace Acquisition pipeline" }, { status: 404 });
   }
 
+  const previousStage = pipeline.stages.find((candidate) => candidate.id === deal.pipelineStageId);
+  if (!previousStage || !ALLOWED_TRANSITIONS.get(previousStage.name)?.includes(stageName)) {
+    return NextResponse.json({ error: `Marketplace Acquisition stage transition ${previousStage?.name ?? "Unknown"} → ${stageName} is not allowed` }, { status: 422 });
+  }
+
   const stage = pipeline.stages.find((candidate) => candidate.name === stageName);
   if (!stage) {
     return NextResponse.json({ error: `Marketplace Acquisition ${stageName} stage is missing` }, { status: 409 });
   }
 
-  const updatedDeal = await dealsRepo.updateStage(workspaceId, deal.id, stage.id);
+  const capture = await captureRepo.findByDealId({ tenantId: workspaceId }, deal.id);
+  if (!capture) {
+    return NextResponse.json({ error: "Marketplace capture not found for acquisition deal" }, { status: 404 });
+  }
 
-  return NextResponse.json({ deal: updatedDeal });
+  const updatedDeal = await dealsRepo.updateStage(workspaceId, deal.id, stage.id);
+  const status = STATUS_BY_STAGE.get(stage.name) ?? capture.status;
+  const updatedCapture = await captureRepo.update({ tenantId: workspaceId }, capture.id, { status });
+
+  return NextResponse.json({
+    deal: updatedDeal,
+    captureId: updatedCapture.id,
+    dealId: updatedDeal.id,
+    currentStage: stage.name,
+    previousStage: previousStage.name,
+    status: updatedCapture.status,
+    updatedAt: updatedDeal.updatedAt,
+  });
 }

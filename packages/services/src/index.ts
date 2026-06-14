@@ -164,6 +164,45 @@ export interface ServiceErrorInput {
   readonly cause?: unknown;
 }
 
+type MarketplaceAcquisitionStageName = "Captured" | "Invited" | "Claim Started" | "Claimed" | "Converted" | "Expired";
+
+interface MarketplaceAcquisitionStageTransitionResult {
+  readonly captureId: string;
+  readonly dealId: string;
+  readonly currentStage: MarketplaceAcquisitionStageName;
+  readonly previousStage: MarketplaceAcquisitionStageName;
+  readonly status: MarketplaceCaptureRecord["status"];
+  readonly updatedAt: string;
+}
+
+const marketplaceStageTransitionInputSchema = z.object({
+  dealId: z.string().min(1),
+  stageName: z.enum(["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"]),
+});
+
+const allowedMarketplaceStageTransitions: Record<MarketplaceAcquisitionStageName, readonly MarketplaceAcquisitionStageName[]> = {
+  Captured: ["Invited", "Expired"],
+  Invited: ["Claim Started", "Expired"],
+  "Claim Started": ["Claimed", "Expired"],
+  Claimed: ["Converted"],
+  Converted: [],
+  Expired: [],
+};
+
+const marketplaceStageStatusByName: Record<MarketplaceAcquisitionStageName, MarketplaceCaptureRecord["status"]> = {
+  Captured: "CAPTURED",
+  Invited: "INVITED",
+  "Claim Started": "CLAIM_STARTED",
+  Claimed: "CLAIMED",
+  Converted: "CONVERTED",
+  Expired: "EXPIRED",
+};
+
+function isMarketplaceAcquisitionStageName(value: string): value is MarketplaceAcquisitionStageName {
+  return value === "Captured" || value === "Invited" || value === "Claim Started" || value === "Claimed" || value === "Converted" || value === "Expired";
+}
+
+
 export class ServiceError extends Error {
   readonly code: ServiceErrorCode;
   readonly status: number;
@@ -1208,6 +1247,51 @@ export class MarketplaceAcquisitionCaptureService {
         dealMatched: !dealResult.created,
         draftInventoryId: draftInventory.id,
         status: finalCapture.status
+      };
+    });
+  }
+
+
+
+  async transitionStage(contextInput: ServiceContext, input: { readonly dealId: string; readonly stageName: MarketplaceAcquisitionStageName }): Promise<MarketplaceAcquisitionStageTransitionResult> {
+    const context = ensureContext(contextInput);
+    const data = exactInput(parseContract(marketplaceStageTransitionInputSchema, input, context.correlation));
+    const tenantScope = contextToTenantScope(context);
+    const pipeline = await this.deps.pipelines.findByDefaultKey(context.tenantId, marketplacePipelineDefaultKey);
+    if (pipeline === null) {
+      throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace Acquisition pipeline is missing; run the pipeline seed before moving marketplace acquisition stages", status: 404, correlation: context.correlation });
+    }
+    const deal = await this.deps.deals.findById(context.tenantId, data.dealId);
+    if (deal === null || deal.pipelineId !== pipeline.id) {
+      throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace acquisition deal not found", status: 404, correlation: context.correlation });
+    }
+    const currentStage = pipeline.stages.find((stage) => stage.id === deal.pipelineStageId);
+    if (currentStage === undefined || !isMarketplaceAcquisitionStageName(currentStage.name)) {
+      throw new ServiceError({ code: "SERVICE_CONFLICT", message: "Deal is not on a supported Marketplace Acquisition lifecycle stage", status: 409, correlation: context.correlation });
+    }
+    const nextStage = pipeline.stages.find((stage) => stage.name === data.stageName);
+    if (nextStage === undefined) {
+      throw new ServiceError({ code: "SERVICE_CONFLICT", message: `Marketplace Acquisition ${data.stageName} stage is missing`, status: 409, correlation: context.correlation });
+    }
+    if (!allowedMarketplaceStageTransitions[currentStage.name].includes(data.stageName)) {
+      throw new ServiceError({ code: "SERVICE_INVALID_STATE_TRANSITION", message: `Marketplace Acquisition stage transition ${currentStage.name} → ${data.stageName} is not allowed`, status: 422, correlation: context.correlation });
+    }
+
+    return runWrite(this.deps, context, async (repositories) => {
+      const capture = await repositories.marketplaceCaptures.findByDealId(tenantScope, deal.id);
+      if (capture === null) {
+        throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found for acquisition deal", status: 404, correlation: context.correlation });
+      }
+      const updatedDeal = await repositories.deals.updateStage(context.tenantId, deal.id, nextStage.id);
+      const updatedCapture = await repositories.marketplaceCaptures.update(tenantScope, capture.id, { status: marketplaceStageStatusByName[data.stageName] });
+      await appendAudit(repositories, context, { action: "MARKETPLACE_ACQUISITION_STAGE_CHANGED", targetType: "MARKETPLACE_CAPTURE", targetId: capture.id, metadata: { dealId: deal.id, previousStage: currentStage.name as MarketplaceAcquisitionStageName, currentStage: data.stageName } });
+      return {
+        captureId: updatedCapture.id,
+        dealId: updatedDeal.id,
+        currentStage: data.stageName,
+        previousStage: currentStage.name as MarketplaceAcquisitionStageName,
+        status: updatedCapture.status,
+        updatedAt: updatedDeal.updatedAt,
       };
     });
   }

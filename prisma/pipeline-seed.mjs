@@ -12,9 +12,12 @@ export const marketplaceAcquisitionPipelineName = "Marketplace Acquisition";
 export const marketplaceAcquisitionPipelineDefaultKey = "marketplace_acquisition";
 
 export const marketplaceAcquisitionPipelineStages = Object.freeze([
-  Object.freeze({ name: "Captured", position: 1, color: "#64748B" }),
-  Object.freeze({ name: "Invited", position: 2, color: "#2563EB" }),
-  Object.freeze({ name: "Converted", position: 3, color: "#16A34A" }),
+  Object.freeze({ name: "Captured", slug: "captured", position: 1, color: "#64748B" }),
+  Object.freeze({ name: "Invited", slug: "invited", position: 2, color: "#2563EB" }),
+  Object.freeze({ name: "Claim Started", slug: "claim-started", position: 3, color: "#7C3AED" }),
+  Object.freeze({ name: "Claimed", slug: "claimed", position: 4, color: "#0891B2" }),
+  Object.freeze({ name: "Converted", slug: "converted", position: 5, color: "#16A34A" }),
+  Object.freeze({ name: "Expired", slug: "expired", position: 6, color: "#DC2626" }),
 ]);
 
 const tenantIdFromWorkspace = (workspace) => workspace.tenantId ?? workspace.id;
