@@ -30,7 +30,7 @@ interface Deal {
   readonly updatedAt: string;
 }
 
-const acquisitionStages = ["Captured", "Invited", "Converted"] as const;
+const acquisitionStages = ["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"] as const;
 
 function stageKey(name: string): string {
   return name.trim().toLowerCase();
@@ -120,7 +120,10 @@ export default function MarketplaceAcquisitionPage() {
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Marketplace acquisition summary">
         <SummaryCard label="Captured" value={String(summary.captured)} description="Deals in the Captured stage" />
         <SummaryCard label="Invited" value={String(summary.invited)} description="Deals in the Invited stage" />
+        <SummaryCard label="Claim Started" value={String(summary.claimStarted)} description="Deals in the Claim Started stage" />
+        <SummaryCard label="Claimed" value={String(summary.claimed)} description="Deals in the Claimed stage" />
         <SummaryCard label="Converted" value={String(summary.converted)} description="Deals in the Converted stage" />
+        <SummaryCard label="Expired" value={String(summary.expired)} description="Deals in the Expired stage" />
         <SummaryCard label="Conversion rate" value={formatAcquisitionConversionRate(summary.conversionRate)} description="Converted divided by captured" />
         <SummaryCard label="Recent opportunities" value={String(summary.recentCount)} description="Opportunities currently loaded from the board" />
       </section>

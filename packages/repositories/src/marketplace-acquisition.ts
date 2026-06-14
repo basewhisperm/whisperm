@@ -11,7 +11,7 @@ const pageRequestSchema = z.object({
   cursor: z.string().min(1).optional(),
 }).strict();
 
-const marketplaceCaptureStatusSchema = z.enum(["CAPTURED"]);
+const marketplaceCaptureStatusSchema = z.enum(["CAPTURED", "INVITED", "CLAIM_STARTED", "CLAIMED", "CONVERTED", "EXPIRED"]);
 
 export const marketplaceCaptureRecordSchema = z.object({
   id: z.string().min(1),
@@ -40,6 +40,7 @@ export interface MarketplaceAcquisitionRepository {
   createMarketplaceCapture(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>;
   findMarketplaceCaptureByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>;
   findMarketplaceCaptureByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null>;
+  findMarketplaceCaptureByDealId(context: TenantScoped, dealId: string): Promise<MarketplaceCaptureRecord | null>;
   updateMarketplaceCaptureMetadata(context: TenantScoped, id: string, metadata: Readonly<Record<string, unknown>>): Promise<MarketplaceCaptureRecord>;
   listMarketplaceCaptures(context: TenantScoped, pagination?: PageRequest): Promise<Page<MarketplaceCaptureRecord>>;
 }
@@ -67,6 +68,7 @@ const ensureContext = (context: TenantScoped): void => { z.object({ tenantId: z.
 const ensureTenantInput = (context: TenantScoped, input: TenantScoped): void => { ensureContext(context); assertTenantScope(context, input); };
 const byTenantListingUrl = (context: TenantScoped, listingUrl: string): PrismaWhere => ({ tenantId: context.tenantId, listingUrl });
 const byTenantExternalId = (context: TenantScoped, externalId: string): PrismaWhere => ({ tenantId: context.tenantId, externalId });
+const byTenantDealId = (context: TenantScoped, dealId: string): PrismaWhere => ({ tenantId: context.tenantId, dealId });
 const byTenantId = (context: TenantScoped, id: string): PrismaWhere => ({ tenantId: context.tenantId, id });
 const cursorWhere = (context: TenantScoped, cursor?: string): PrismaWhere => cursor === undefined ? { tenantId: context.tenantId } : { tenantId: context.tenantId, id: { gt: cursor } };
 
@@ -114,6 +116,12 @@ export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquis
   async findMarketplaceCaptureByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null> {
     ensureContext(context);
     const result = await this.captures.findFirst({ where: byTenantExternalId(context, externalId) });
+    return result === null ? null : parseRecord(result);
+  }
+
+  async findMarketplaceCaptureByDealId(context: TenantScoped, dealId: string): Promise<MarketplaceCaptureRecord | null> {
+    ensureContext(context);
+    const result = await this.captures.findFirst({ where: byTenantDealId(context, dealId) });
     return result === null ? null : parseRecord(result);
   }
 
