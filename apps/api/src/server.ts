@@ -846,7 +846,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           await requireActiveSubscription(tenantId);
         }
 
-        const result = await dependencies.marketplaceAcquisition.capture(
+        const result = (await dependencies.marketplaceAcquisition.capture(
           {
             tenantId,
             actorId,
@@ -858,12 +858,20 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
             ...(request.body as Record<string, unknown>),
             tenantId,
           },
-        );
+        )) as {
+          readonly isNew?: boolean;
+          readonly duplicate?: boolean;
+          readonly normalizationWarnings?: readonly string[];
+        };
 
-        reply.code(201).send({
+        reply.code(result.isNew === false || result.duplicate === true ? 200 : 201).send({
           ok: true,
           data: result,
-          meta: { correlationId: request.correlationId },
+          meta: {
+            correlationId: request.correlationId,
+            duplicate: result.duplicate ?? result.isNew === false,
+            normalizationWarnings: result.normalizationWarnings ?? [],
+          },
         });
 
         return reply.toInjectResponse();

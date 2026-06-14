@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 interface PipelineStage {
@@ -62,7 +63,7 @@ export default function MarketplaceAcquisitionPage() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/marketplace-acquisition/deals")
+    fetch("/api/marketplace-acquisition/deals?pipelineDefaultKey=marketplace_acquisition")
       .then(async (response) => {
         const data = (await response.json()) as { pipeline: Pipeline | null; deals?: Deal[]; error?: string };
         if (!response.ok) throw new Error(data.error ?? "Unable to load marketplace acquisition deals");
@@ -134,9 +135,11 @@ export default function MarketplaceAcquisitionPage() {
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Marketplace acquisition</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Acquisition stage actions</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Move captured marketplace opportunities through the acquisition pipeline without triggering seller invitations, verification, or conversion side effects.
+          Capture, invite, and convert marketplace sellers into Render sellers. Move captured marketplace opportunities through the acquisition pipeline without triggering seller invitations, verification, or conversion side effects.
         </p>
       </div>
+
+      <Link href="/marketplace-acquisition/capture" className="text-sm font-medium text-foreground">Capture setup</Link>
 
       {(error !== null || missingStages.length > 0) && (
         <div className="rounded-2xl bg-background p-4 text-sm text-destructive" style={{ border: "0.5px solid var(--color-border)" }}>
@@ -170,6 +173,7 @@ export default function MarketplaceAcquisitionPage() {
                         <div className="min-w-0">
                           <h2 className="truncate text-sm font-semibold text-foreground">{deal.title ?? "Untitled acquisition deal"}</h2>
                           <p className="mt-1 text-xs text-muted-foreground">{formatValue(deal.value, deal.currency)}</p>
+                          <Link href={`/marketplace-acquisition/${deal.id}`} className="mt-2 inline-flex text-xs font-medium text-whisper hover:underline">View detail</Link>
                         </div>
                         <span className="rounded-full px-2 py-1 text-[11px] font-medium" style={{ background: `${color}1A`, color }}>{currentStageName ?? "Unknown"}</span>
                       </div>
