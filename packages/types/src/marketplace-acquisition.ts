@@ -52,6 +52,26 @@ export const sellerInvitationResponseSchema = z.object({
 }).strict();
 export type SellerInvitationResponse = z.output<typeof sellerInvitationResponseSchema>;
 
+export const OWNERSHIP_ATTESTATION_STATEMENT = "I confirm that I am the owner or authorized representative of this seller profile and that I am authorized to claim the associated inventory." as const;
+
+export const ownershipClaimAcceptRequestSchema = z.object({
+  claimantName: textSchema(255),
+  claimantPhone: optionalTextSchema(64),
+  claimantEmail: z.string().trim().email().max(320).optional(),
+  marketplaceIdentity: optionalTextSchema(255),
+  acceptedTerms: z.literal(true),
+}).strict();
+export type OwnershipClaimAcceptRequest = z.output<typeof ownershipClaimAcceptRequestSchema>;
+
+export const ownershipClaimAcceptResponseSchema = z.object({
+  status: z.literal("CLAIMED"),
+  captureId: idSchema,
+  draftInventoryId: idSchema,
+  attestationId: idSchema,
+  claimedAt: isoDateSchema,
+}).strict();
+export type OwnershipClaimAcceptResponse = z.output<typeof ownershipClaimAcceptResponseSchema>;
+
 export const draftInventoryStatusValues = ["DRAFT", "CLAIM_PENDING", "CLAIMED", "CONVERTED", "EXPIRED"] as const;
 export const draftInventoryStatusSchema = z.enum(draftInventoryStatusValues);
 export type DraftInventoryStatus = z.output<typeof draftInventoryStatusSchema>;

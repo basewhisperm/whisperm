@@ -116,4 +116,6 @@ export { OAuthError, buildGoogleAuthorizationUrl, createGoogleOAuthHandler, crea
 export type { GoogleOAuthConfig, GoogleOAuthDependencies, GoogleOAuthHandler, GoogleUserInfo, OAuthCallbackResult, OAuthErrorCode, OAuthHttpClient, OAuthRouteResult, OAuthSessionService, OAuthSessionToken, OAuthStateStore, OAuthTenantRecord, OAuthTokenResponse, OAuthUserRecord, OAuthUserRepository } from "./auth/oauth.js";
 
 export { createMarketplaceCaptureHandler } from "./marketplace-acquisition/capture.js";
+export { createOwnershipClaimAcceptHandler } from "./marketplace-acquisition/claim.js";
 export type { MarketplaceCaptureRouteContext, MarketplaceCaptureRouteDependencies, MarketplaceCaptureServicePort } from "./marketplace-acquisition/capture.js";
+export type { OwnershipClaimRouteContext, OwnershipClaimRouteDependencies, OwnershipClaimServicePort } from "./marketplace-acquisition/claim.js";
