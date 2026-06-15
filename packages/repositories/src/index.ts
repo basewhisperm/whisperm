@@ -92,6 +92,7 @@ export interface PrismaPersistenceClient {
   readonly draftInventory: PrismaDelegate;
   readonly marketplaceSellerInvitation: PrismaDelegate;
   readonly marketplaceClaimToken: PrismaDelegate;
+  readonly marketplaceOwnershipAttestation: PrismaDelegate;
   readonly marketplaceSellerVerification: PrismaDelegate;
   readonly renderConversion: PrismaDelegate;
   readonly subscription: PrismaDelegate;
@@ -271,6 +272,37 @@ export const sellerInvitationRecordSchema = baseRecordSchema.extend({
 export type SellerInvitationRecord = z.output<typeof sellerInvitationRecordSchema>;
 export type CreateSellerInvitationInput = TenantScoped & Pick<SellerInvitationRecord, "marketplaceCaptureId" | "channel" | "status" | "inviteUrl" | "recipient" | "expiresAt"> & Partial<Pick<SellerInvitationRecord, "metadata">>;
 export type UpdateSellerInvitationInput = Partial<Pick<SellerInvitationRecord, "status" | "metadata">>;
+
+export const marketplaceClaimTokenRecordSchema = baseRecordSchema.extend({
+  marketplaceCaptureId: z.string().min(1),
+  tokenHash: z.string().min(1),
+  status: z.string().min(1),
+  expiresAt: isoDateSchema,
+  claimedAt: isoDateSchema.nullable().optional(),
+}).required({ updatedAt: true }).passthrough();
+export type MarketplaceClaimTokenRecord = z.output<typeof marketplaceClaimTokenRecordSchema>;
+export type UpdateMarketplaceClaimTokenInput = Partial<Pick<MarketplaceClaimTokenRecord, "status" | "claimedAt">>;
+
+export const marketplaceOwnershipAttestationRecordSchema = baseRecordSchema.extend({
+  marketplaceCaptureId: z.string().min(1),
+  draftInventoryId: z.string().min(1),
+  contactId: z.string().min(1).nullable().optional(),
+  claimTokenId: z.string().min(1).nullable().optional(),
+  invitationId: z.string().min(1).nullable().optional(),
+  claimantName: z.string().min(1),
+  claimantPhone: z.string().min(1).nullable().optional(),
+  claimantEmail: z.string().email().nullable().optional(),
+  marketplaceIdentity: z.string().min(1).nullable().optional(),
+  attestationStatement: z.string().min(1),
+  acceptedTerms: z.boolean(),
+  ipAddress: z.string().min(1).nullable().optional(),
+  userAgent: z.string().min(1).nullable().optional(),
+  attestedAt: isoDateSchema,
+  evidence: z.unknown().nullable().optional(),
+  metadata: metadataSchema.nullable().optional(),
+}).strict();
+export type MarketplaceOwnershipAttestationRecord = z.output<typeof marketplaceOwnershipAttestationRecordSchema>;
+export type CreateMarketplaceOwnershipAttestationInput = TenantScoped & Omit<MarketplaceOwnershipAttestationRecord, "id" | "createdAt">;
 
 export const draftInventoryStatusValues = ["DRAFT", "CLAIM_PENDING", "CLAIMED", "CONVERTED", "EXPIRED"] as const;
 export const draftInventoryStatusSchema = z.enum(draftInventoryStatusValues);
@@ -578,6 +610,8 @@ export interface DealsRepository { create(workspaceId: string, input: CreateDeal
 export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
 export interface MarketplaceCaptureRepository { create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; findByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>; findByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null>; findById(context: TenantScoped, captureId: string): Promise<MarketplaceCaptureRecord | null>; findByDealId(context: TenantScoped, dealId: string): Promise<MarketplaceCaptureRecord | null>; update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; }
 export interface SellerInvitationRepository { create(context: TenantScoped, input: CreateSellerInvitationInput): Promise<SellerInvitationRecord>; update(context: TenantScoped, invitationId: string, input: UpdateSellerInvitationInput): Promise<SellerInvitationRecord>; }
+export interface MarketplaceClaimTokenRepository { findByTokenHash(context: TenantScoped, tokenHash: string): Promise<MarketplaceClaimTokenRecord | null>; update(context: TenantScoped, tokenId: string, input: UpdateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord>; }
+export interface MarketplaceOwnershipAttestationRepository { create(context: TenantScoped, input: CreateMarketplaceOwnershipAttestationInput): Promise<MarketplaceOwnershipAttestationRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceOwnershipAttestationRecord | null>; }
 export interface DraftInventoryRepository { create(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null>; findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null>; upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord>; }
 export interface MarketplaceSellerVerificationRepository { findLatestByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceSellerVerificationRecord | null>; }
 export interface RenderConversionRepository { findSuccessfulSellerConversion(context: TenantScoped, marketplaceCaptureId: string, contactId: string | null): Promise<RenderConversionRecord | null>; create(context: TenantScoped, input: CreateRenderConversionInput): Promise<RenderConversionRecord>; update(context: TenantScoped, conversionId: string, input: UpdateRenderConversionInput): Promise<RenderConversionRecord>; }
@@ -1207,6 +1241,42 @@ export class PrismaSellerInvitationRepository implements SellerInvitationReposit
   }
 }
 
+export class PrismaMarketplaceClaimTokenRepository implements MarketplaceClaimTokenRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async findByTokenHash(context: TenantScoped, tokenHash: string): Promise<MarketplaceClaimTokenRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.marketplaceClaimToken.findFirst({ where: withTenant(context, { tokenHash }) });
+    return row === null ? null : parseRecord(marketplaceClaimTokenRecordSchema, row);
+  }
+
+  async update(context: TenantScoped, tokenId: string, input: UpdateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord> {
+    ensureContext(context);
+    const result = await this.prisma.marketplaceClaimToken.updateMany({ where: byTenantId(context, tokenId), data: dataWithDefined(input) });
+    if (result.count !== 1) notFound("Marketplace claim token not found", { tokenId });
+    const row = await this.prisma.marketplaceClaimToken.findFirst({ where: byTenantId(context, tokenId) });
+    if (row === null) notFound("Marketplace claim token not found", { tokenId });
+    return parseRecord(marketplaceClaimTokenRecordSchema, row);
+  }
+}
+
+export class PrismaMarketplaceOwnershipAttestationRepository implements MarketplaceOwnershipAttestationRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async create(context: TenantScoped, input: CreateMarketplaceOwnershipAttestationInput): Promise<MarketplaceOwnershipAttestationRecord> {
+    ensureTenantInput(context, input);
+    try {
+      return parseRecord(marketplaceOwnershipAttestationRecordSchema, await this.prisma.marketplaceOwnershipAttestation.create({ data: dataWithDefined(input) }));
+    } catch (error) { return mapPrismaError(error, "Ownership attestation already exists"); }
+  }
+
+  async findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceOwnershipAttestationRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.marketplaceOwnershipAttestation.findFirst({ where: withTenant(context, { marketplaceCaptureId }) });
+    return row === null ? null : parseRecord(marketplaceOwnershipAttestationRecordSchema, row);
+  }
+}
+
 export class PrismaDraftInventoryRepository implements DraftInventoryRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
 
@@ -1408,6 +1478,8 @@ export interface PrismaRepositories {
   readonly followUpDigest: FollowUpDigestRepository;
   readonly reports: ReportsRepository;
   readonly marketplaceAcquisition: MarketplaceAcquisitionRepository;
+  readonly marketplaceClaimTokens: MarketplaceClaimTokenRepository;
+  readonly ownershipAttestations: MarketplaceOwnershipAttestationRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -1433,6 +1505,8 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     events: new PrismaEventRepository(prisma),
     billing: new PrismaBillingRepository(auditLogs),
     marketplaceAcquisition: new PrismaMarketplaceAcquisitionRepository(prisma),
+    marketplaceClaimTokens: new PrismaMarketplaceClaimTokenRepository(prisma),
+    ownershipAttestations: new PrismaMarketplaceOwnershipAttestationRepository(prisma),
     auditLogs
   };
 };

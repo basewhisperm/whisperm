@@ -227,6 +227,7 @@ model Tenant {
   marketplaceCaptures    MarketplaceCapture[]
   draftInventories       DraftInventory[]
   marketplaceClaimTokens MarketplaceClaimToken[]
+  ownershipAttestations MarketplaceOwnershipAttestation[]
   sellerInvitations   MarketplaceSellerInvitation[]
   sellerVerifications    MarketplaceSellerVerification[]
   renderConversions      RenderConversion[]
@@ -1135,6 +1136,7 @@ model MarketplaceCapture {
   renderConversions   RenderConversion[]
   notificationLogs    NotificationDeliveryLog[]
   draftInventories    DraftInventory[]
+  ownershipAttestations MarketplaceOwnershipAttestation[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, marketplaceSourceId, externalId])
@@ -1169,6 +1171,7 @@ model DraftInventory {
   marketplaceCapture MarketplaceCapture @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
   contact            Contact?           @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
   deal               Deal?              @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+  ownershipAttestations MarketplaceOwnershipAttestation[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, marketplaceCaptureId])
@@ -1222,12 +1225,47 @@ model MarketplaceClaimToken {
   tenant             Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   marketplaceCapture MarketplaceCapture        @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
   notificationLogs   NotificationDeliveryLog[]
+  ownershipAttestations MarketplaceOwnershipAttestation[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, tokenHash])
   @@index([tenantId])
   @@index([tenantId, marketplaceCaptureId])
   @@index([tenantId, status, expiresAt])
+}
+
+
+model MarketplaceOwnershipAttestation {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @db.Uuid
+  marketplaceCaptureId String   @db.Uuid
+  draftInventoryId     String   @db.Uuid
+  contactId            String?  @db.Uuid
+  claimTokenId         String?  @db.Uuid
+  invitationId         String?  @db.Uuid
+  claimantName         String
+  claimantPhone        String?
+  claimantEmail        String?
+  marketplaceIdentity  String?
+  attestationStatement String
+  acceptedTerms        Boolean
+  ipAddress            String?
+  userAgent            String?
+  attestedAt           DateTime @default(now())
+  evidence             Json?
+  metadata             Json?
+  createdAt            DateTime @default(now())
+
+  tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture MarketplaceCapture     @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+  draftInventory     DraftInventory         @relation(fields: [tenantId, draftInventoryId], references: [tenantId, id], onDelete: Restrict)
+  claimToken         MarketplaceClaimToken? @relation(fields: [tenantId, claimTokenId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, marketplaceCaptureId])
+  @@index([tenantId])
+  @@index([tenantId, draftInventoryId])
+  @@index([tenantId, claimTokenId])
 }
 
 model MarketplaceSellerVerification {
