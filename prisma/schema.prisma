@@ -1307,6 +1307,12 @@ model RenderConversion {
   completedAt          DateTime?
   failedAt             DateTime?
   failureReason        String?
+  failureCode          String?
+  attemptCount         Int       @default(0)
+  maxAttempts          Int       @default(3)
+  nextAttemptAt        DateTime?
+  lastAttemptAt        DateTime?
+  deadLetteredAt       DateTime?
   convertedAt          DateTime?
   metadata             Json?
   createdAt            DateTime  @default(now())

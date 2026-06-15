@@ -337,7 +337,7 @@ export const marketplaceSellerVerificationRecordSchema = baseRecordSchema.extend
 }).required({ updatedAt: true }).strict();
 export type MarketplaceSellerVerificationRecord = z.output<typeof marketplaceSellerVerificationRecordSchema>;
 
-export const renderConversionStatusSchema = z.enum(["PENDING", "PROCESSING", "SUCCESS", "FAILED"]);
+export const renderConversionStatusSchema = z.enum(["PENDING", "PROCESSING", "SUCCESS", "FAILED", "RETRYING", "DEAD_LETTERED"]);
 export const renderConversionRecordSchema = baseRecordSchema.extend({
   marketplaceCaptureId: z.string().min(1).nullable().optional(),
   sellerVerificationId: z.string().min(1).nullable().optional(),
@@ -351,12 +351,18 @@ export const renderConversionRecordSchema = baseRecordSchema.extend({
   completedAt: isoDateSchema.nullable().optional(),
   failedAt: isoDateSchema.nullable().optional(),
   failureReason: z.string().min(1).nullable().optional(),
+  failureCode: z.string().min(1).nullable().optional(),
+  attemptCount: z.number().int().min(0).default(0),
+  maxAttempts: z.number().int().min(1).default(3),
+  nextAttemptAt: isoDateSchema.nullable().optional(),
+  lastAttemptAt: isoDateSchema.nullable().optional(),
+  deadLetteredAt: isoDateSchema.nullable().optional(),
   convertedAt: isoDateSchema.nullable().optional(),
   metadata: metadataSchema.nullable().optional(),
 }).required({ updatedAt: true }).strict();
 export type RenderConversionRecord = z.output<typeof renderConversionRecordSchema>;
-export type CreateRenderConversionInput = TenantScoped & Pick<RenderConversionRecord, "marketplaceCaptureId" | "sellerVerificationId" | "contactId" | "status"> & Partial<Pick<RenderConversionRecord, "dealId" | "externalId" | "renderSellerId" | "conversionKind" | "startedAt" | "completedAt" | "failedAt" | "failureReason" | "convertedAt" | "metadata">>;
-export type UpdateRenderConversionInput = Partial<Pick<RenderConversionRecord, "status" | "renderSellerId" | "startedAt" | "completedAt" | "failedAt" | "failureReason" | "convertedAt" | "metadata">>;
+export type CreateRenderConversionInput = TenantScoped & Pick<RenderConversionRecord, "marketplaceCaptureId" | "sellerVerificationId" | "contactId" | "status"> & Partial<Pick<RenderConversionRecord, "dealId" | "externalId" | "renderSellerId" | "conversionKind" | "startedAt" | "completedAt" | "failedAt" | "failureReason" | "failureCode" | "attemptCount" | "maxAttempts" | "nextAttemptAt" | "lastAttemptAt" | "deadLetteredAt" | "convertedAt" | "metadata">>;
+export type UpdateRenderConversionInput = Partial<Pick<RenderConversionRecord, "status" | "renderSellerId" | "externalId" | "startedAt" | "completedAt" | "failedAt" | "failureReason" | "failureCode" | "attemptCount" | "maxAttempts" | "nextAttemptAt" | "lastAttemptAt" | "deadLetteredAt" | "convertedAt" | "metadata">>;
 
 export interface ActivityCreateContext extends TenantScoped {
   readonly actorId?: string | undefined;
@@ -614,7 +620,7 @@ export interface MarketplaceClaimTokenRepository { findByTokenHash(context: Tena
 export interface MarketplaceOwnershipAttestationRepository { create(context: TenantScoped, input: CreateMarketplaceOwnershipAttestationInput): Promise<MarketplaceOwnershipAttestationRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceOwnershipAttestationRecord | null>; }
 export interface DraftInventoryRepository { create(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null>; findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null>; upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord>; }
 export interface MarketplaceSellerVerificationRepository { findLatestByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceSellerVerificationRecord | null>; }
-export interface RenderConversionRepository { findSuccessfulSellerConversion(context: TenantScoped, marketplaceCaptureId: string, contactId: string | null): Promise<RenderConversionRecord | null>; create(context: TenantScoped, input: CreateRenderConversionInput): Promise<RenderConversionRecord>; update(context: TenantScoped, conversionId: string, input: UpdateRenderConversionInput): Promise<RenderConversionRecord>; }
+export interface RenderConversionRepository { findById(context: TenantScoped, conversionId: string): Promise<RenderConversionRecord | null>; findSuccessfulSellerConversion(context: TenantScoped, marketplaceCaptureId: string, contactId: string | null): Promise<RenderConversionRecord | null>; findSuccessfulInventoryConversion(context: TenantScoped, marketplaceCaptureId: string, externalId: string | null): Promise<RenderConversionRecord | null>; create(context: TenantScoped, input: CreateRenderConversionInput): Promise<RenderConversionRecord>; update(context: TenantScoped, conversionId: string, input: UpdateRenderConversionInput): Promise<RenderConversionRecord>; }
 
 export interface DashboardContactRecord { readonly id: string; readonly firstName?: string | null | undefined; readonly lastName?: string | null | undefined; readonly company?: string | null | undefined; readonly email?: string | null | undefined; readonly lastTouchAt?: string | null | undefined; }
 export interface DashboardActivityRecord { readonly id: string; readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined; readonly type: string; readonly note?: string | null | undefined; readonly createdById: string; readonly createdAt: string; }
@@ -1332,9 +1338,19 @@ export class PrismaMarketplaceSellerVerificationRepository implements Marketplac
 
 export class PrismaRenderConversionRepository implements RenderConversionRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
+  async findById(context: TenantScoped, conversionId: string): Promise<RenderConversionRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.renderConversion.findFirst({ where: byTenantId(context, conversionId) });
+    return row === null ? null : parseRecord(renderConversionRecordSchema, row);
+  }
   async findSuccessfulSellerConversion(context: TenantScoped, marketplaceCaptureId: string, contactId: string | null): Promise<RenderConversionRecord | null> {
     ensureContext(context);
     const row = await this.prisma.renderConversion.findFirst({ where: withTenant(context, dataWithDefined({ marketplaceCaptureId, contactId, conversionKind: "SELLER", status: "SUCCESS" })), orderBy: { createdAt: "desc" } });
+    return row === null ? null : parseRecord(renderConversionRecordSchema, row);
+  }
+  async findSuccessfulInventoryConversion(context: TenantScoped, marketplaceCaptureId: string, externalId: string | null): Promise<RenderConversionRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.renderConversion.findFirst({ where: withTenant(context, dataWithDefined({ marketplaceCaptureId, externalId, conversionKind: "INVENTORY", status: "SUCCESS" })), orderBy: { createdAt: "desc" } });
     return row === null ? null : parseRecord(renderConversionRecordSchema, row);
   }
   async create(context: TenantScoped, input: CreateRenderConversionInput): Promise<RenderConversionRecord> {
