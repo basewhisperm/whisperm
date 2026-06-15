@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { PersistenceError, assertTenantScope, type TenantScoped } from "@whisperm/types";
+import { PersistenceError, assertTenantScope, type SellerAcquisitionAnalyticsResponse, type TenantScoped } from "@whisperm/types";
 import type { Page, PageRequest, PrismaPersistenceClient } from "./index.js";
 
 const isoDateSchema = z.string().datetime();
@@ -43,6 +43,14 @@ export interface MarketplaceAcquisitionRepository {
   findMarketplaceCaptureByDealId(context: TenantScoped, dealId: string): Promise<MarketplaceCaptureRecord | null>;
   updateMarketplaceCaptureMetadata(context: TenantScoped, id: string, metadata: Readonly<Record<string, unknown>>): Promise<MarketplaceCaptureRecord>;
   listMarketplaceCaptures(context: TenantScoped, pagination?: PageRequest): Promise<Page<MarketplaceCaptureRecord>>;
+  getSellerAcquisitionAnalytics(input: SellerAcquisitionAnalyticsQuery): Promise<SellerAcquisitionAnalyticsResponse>;
+}
+
+export interface SellerAcquisitionAnalyticsQuery extends TenantScoped {
+  readonly dateFrom?: string | undefined;
+  readonly dateTo?: string | undefined;
+  readonly marketplaceSource?: string | undefined;
+  readonly channel?: string | undefined;
 }
 
 type SortDirection = "asc" | "desc";
@@ -53,6 +61,10 @@ interface MarketplaceCaptureDelegate {
   findFirst(args: { readonly where: PrismaWhere; readonly take?: number; readonly orderBy?: Readonly<Record<string, SortDirection>> }): Promise<unknown | null>;
   findMany(args: { readonly where: PrismaWhere; readonly take?: number; readonly orderBy?: Readonly<Record<string, SortDirection>> }): Promise<readonly unknown[]>;
   update(args: { readonly where: PrismaWhere; readonly data: PrismaData }): Promise<unknown>;
+}
+
+interface AnalyticsDelegate {
+  findMany(args: { readonly where: PrismaWhere; readonly orderBy?: Readonly<Record<string, SortDirection>> }): Promise<readonly unknown[]>;
 }
 
 const normalizeRecord = (value: unknown): unknown => {
@@ -93,9 +105,19 @@ const mapPrismaError = (error: unknown): never => {
 
 export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquisitionRepository {
   private readonly captures: MarketplaceCaptureDelegate;
+  private readonly draftInventories: AnalyticsDelegate;
+  private readonly invitations: AnalyticsDelegate;
+  private readonly claimTokens: AnalyticsDelegate;
+  private readonly attestations: AnalyticsDelegate;
+  private readonly renderConversions: AnalyticsDelegate;
 
   constructor(prisma: PrismaPersistenceClient) {
     this.captures = prisma.marketplaceCapture as MarketplaceCaptureDelegate;
+    this.draftInventories = prisma.draftInventory as AnalyticsDelegate;
+    this.invitations = prisma.marketplaceSellerInvitation as AnalyticsDelegate;
+    this.claimTokens = prisma.marketplaceClaimToken as AnalyticsDelegate;
+    this.attestations = prisma.marketplaceOwnershipAttestation as AnalyticsDelegate;
+    this.renderConversions = prisma.renderConversion as AnalyticsDelegate;
   }
 
   async createMarketplaceCapture(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord> {
@@ -140,4 +162,73 @@ export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquis
     const rows = await this.captures.findMany({ where: cursorWhere(context, args.cursor), take: args.take, orderBy: { id: "asc" } });
     return paginate(rows.map(parseRecord), args.take - 1);
   }
+
+  async getSellerAcquisitionAnalytics(input: SellerAcquisitionAnalyticsQuery): Promise<SellerAcquisitionAnalyticsResponse> {
+    ensureContext(input);
+    const createdAt = dataWithDefined({ gte: input.dateFrom === undefined ? undefined : new Date(input.dateFrom), lte: input.dateTo === undefined ? undefined : new Date(input.dateTo) });
+    const captures = (await this.captures.findMany({ where: dataWithDefined({ tenantId: input.tenantId, marketplaceSourceId: input.marketplaceSource, ...(Object.keys(createdAt).length === 0 ? {} : { createdAt }) }), orderBy: { createdAt: "asc" } })).map((row) => normalizeRecord(row) as Record<string, unknown>);
+    const captureIds = captures.map((capture) => String(capture.id));
+    const childWhere = dataWithDefined({ tenantId: input.tenantId, marketplaceCaptureId: captureIds.length === 0 ? undefined : { in: captureIds } });
+    const [invitations, claimTokens, attestations, drafts, conversions] = await Promise.all([
+      this.invitations.findMany({ where: dataWithDefined({ ...childWhere, channel: input.channel }) }),
+      this.claimTokens.findMany({ where: childWhere }),
+      this.attestations.findMany({ where: childWhere }),
+      this.draftInventories.findMany({ where: childWhere }),
+      this.renderConversions.findMany({ where: childWhere }),
+    ]);
+    const rows = (values: readonly unknown[]): readonly Record<string, unknown>[] => values.map((row) => normalizeRecord(row) as Record<string, unknown>);
+    const invitationRows = rows(invitations);
+    const tokenRows = rows(claimTokens);
+    const attestationRows = rows(attestations);
+    const draftRows = rows(drafts);
+    const conversionRows = rows(conversions);
+    const sentInvitations = invitationRows.filter((row) => row.status === "SENT" || row.status === "OPENED");
+    const claimedCount = captures.filter((row) => row.status === "CLAIMED" || row.status === "CONVERTED").length;
+    const convertedCount = captures.filter((row) => row.status === "CONVERTED").length;
+    const captureById = new Map(captures.map((capture) => [String(capture.id), capture]));
+    const sentByCapture = new Map(sentInvitations.map((invitation) => [String(invitation.marketplaceCaptureId), invitation]));
+    const hours = (from: unknown, to: unknown): number | null => {
+      if (typeof from !== "string" || typeof to !== "string") return null;
+      const diff = Date.parse(to) - Date.parse(from);
+      return Number.isFinite(diff) && diff >= 0 ? diff / 3_600_000 : null;
+    };
+    const average = (values: readonly (number | null)[]): number | null => {
+      const valid = values.filter((value): value is number => value !== null);
+      return valid.length === 0 ? null : valid.reduce((sum, value) => sum + value, 0) / valid.length;
+    };
+    const dayCounts = captures.reduce((days, capture) => {
+      const day = String(capture.createdAt).slice(0, 10);
+      days.set(day, (days.get(day) ?? 0) + 1);
+      return days;
+    }, new Map<string, number>());
+    return {
+      dateRange: { from: input.dateFrom ?? new Date(0).toISOString(), to: input.dateTo ?? new Date().toISOString() },
+      acquisition: {
+        captures: captures.length,
+        capturesPerDay: [...dayCounts.entries()].map(([date, count]) => ({ date, count })),
+        invitationsSent: sentInvitations.length,
+        claimRate: sentInvitations.length === 0 ? 0 : claimedCount / sentInvitations.length,
+        conversionRate: claimedCount === 0 ? 0 : convertedCount / claimedCount,
+        expiredCount: captures.filter((row) => row.status === "EXPIRED").length + invitationRows.filter((row) => row.status === "EXPIRED").length + tokenRows.filter((row) => row.status === "EXPIRED").length,
+      },
+      inventory: {
+        listingsCaptured: draftRows.length,
+        listingsClaimed: draftRows.filter((row) => row.status === "CLAIMED" || row.status === "CONVERTED").length,
+        listingsConverted: draftRows.filter((row) => row.status === "CONVERTED").length,
+        listingsExpired: draftRows.filter((row) => row.status === "EXPIRED").length,
+      },
+      operations: {
+        averageTimeToInviteHours: average(sentInvitations.map((invitation) => hours(captureById.get(String(invitation.marketplaceCaptureId))?.createdAt, invitation.createdAt))),
+        averageTimeToClaimHours: average(attestationRows.map((attestation) => hours(sentByCapture.get(String(attestation.marketplaceCaptureId))?.createdAt ?? captureById.get(String(attestation.marketplaceCaptureId))?.createdAt, attestation.attestedAt))),
+        averageTimeToConversionHours: average(conversionRows.filter((row) => row.status === "SUCCESS").map((conversion) => hours(captureById.get(String(conversion.marketplaceCaptureId))?.createdAt, conversion.completedAt ?? conversion.convertedAt))),
+      },
+      conversion: {
+        sellerConversionsSucceeded: conversionRows.filter((row) => row.status === "SUCCESS" && (row.conversionKind ?? "SELLER") === "SELLER").length,
+        inventoryConversionsSucceeded: conversionRows.filter((row) => row.status === "SUCCESS" && row.conversionKind === "INVENTORY").length,
+        conversionFailures: conversionRows.filter((row) => row.status === "FAILED").length,
+        deadLetteredConversions: conversionRows.filter((row) => row.status === "DEAD_LETTERED").length,
+      },
+    };
+  }
+
 }

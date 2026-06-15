@@ -27,6 +27,7 @@ import {
 } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { createRenderSellerConversionHandler, type RenderSellerConversionRouteDependencies } from "./marketplace-acquisition/render-seller-conversion.js";
+import { createMarketplaceAcquisitionAnalyticsHandler, type MarketplaceAcquisitionAnalyticsRouteDependencies } from "./marketplace-acquisition/analytics.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { applySecurityHeaders, authRateLimiter, getClientIp, sanitizeRequestBody } from "./http/security.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
@@ -117,6 +118,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly workspaceProvisioningPort?: WorkspaceProvisioningPort | undefined;
   readonly onboardingStatePort?: OnboardingStatePort | undefined;
     readonly renderSellerConversion?: RenderSellerConversionRouteDependencies["renderSellerConversion"] | undefined;
+    readonly marketplaceAcquisitionAnalytics?: MarketplaceAcquisitionAnalyticsRouteDependencies["analytics"] | undefined;
     readonly marketplaceAcquisition?: {
     capture(
       context: {
@@ -499,6 +501,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
   const reportsHandler =
     dependencies.reports === undefined ? undefined : createReportsHandler({ reports: dependencies.reports });
   const renderSellerConversionHandler = dependencies.renderSellerConversion === undefined ? undefined : createRenderSellerConversionHandler({ renderSellerConversion: dependencies.renderSellerConversion });
+  const marketplaceAcquisitionAnalyticsHandler = dependencies.marketplaceAcquisitionAnalytics === undefined ? undefined : createMarketplaceAcquisitionAnalyticsHandler({ analytics: dependencies.marketplaceAcquisitionAnalytics });
 
   const activityCreateHandler =
     dependencies.activities === undefined
@@ -815,6 +818,15 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         const result = await initiateUpgrade(dependencies.upgradePorts, body.context, body.plan);
 
         reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+      if (options.method === "GET" && parsedUrl.pathname === "/marketplace-acquisition/analytics") {
+        if (marketplaceAcquisitionAnalyticsHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_ANALYTICS_NOT_CONFIGURED", message: "Marketplace acquisition analytics is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        request.query = parsedUrl.query;
+        await marketplaceAcquisitionAnalyticsHandler(request, reply);
         return reply.toInjectResponse();
       }
       const renderSellerConversionMatch = /^\/marketplace-acquisition\/captures\/([^/?#]+)\/convert\/render-seller\/?$/u.exec(parsedUrl.pathname);

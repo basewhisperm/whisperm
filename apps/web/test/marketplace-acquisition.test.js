@@ -82,3 +82,13 @@ test("marketplace acquisition page filters client-side without backend query cha
   assert.match(source, /marketplaceSource\(deal\)/u);
   assert.doesNotMatch(source, /raw payload|tokenHash|providerSecret/u);
 });
+
+
+test("marketplace acquisition dashboard renders compact analytics cards", () => {
+  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  assert.match(source, /api\/marketplace-acquisition\/analytics/u);
+  for (const label of ["Captures", "Invitations sent", "Claim rate", "Conversion rate", "Expired", "Listings converted", "Failed conversions"]) {
+    assert.match(source, new RegExp(label, "u"));
+  }
+  assert.match(source, /analytics\?\.acquisition\.captures \?\? 0/u);
+});

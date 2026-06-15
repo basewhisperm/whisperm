@@ -104,3 +104,41 @@ export const marketplaceCaptureResponseSchema = z.object({
   createdAt: isoDateSchema,
 }).strict();
 export type MarketplaceCaptureResponse = z.output<typeof marketplaceCaptureResponseSchema>;
+
+export const sellerAcquisitionAnalyticsFiltersSchema = z.object({
+  dateFrom: z.string().datetime().optional(),
+  dateTo: z.string().datetime().optional(),
+  marketplaceSource: z.string().trim().min(1).max(255).optional(),
+  channel: sellerInvitationChannelSchema.optional(),
+}).strict();
+export type SellerAcquisitionAnalyticsFilters = z.output<typeof sellerAcquisitionAnalyticsFiltersSchema>;
+
+export const sellerAcquisitionAnalyticsResponseSchema = z.object({
+  dateRange: z.object({ from: isoDateSchema, to: isoDateSchema }).strict(),
+  acquisition: z.object({
+    captures: z.number().int().nonnegative(),
+    capturesPerDay: z.array(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u), count: z.number().int().nonnegative() }).strict()),
+    invitationsSent: z.number().int().nonnegative(),
+    claimRate: z.number().nonnegative(),
+    conversionRate: z.number().nonnegative(),
+    expiredCount: z.number().int().nonnegative(),
+  }).strict(),
+  inventory: z.object({
+    listingsCaptured: z.number().int().nonnegative(),
+    listingsClaimed: z.number().int().nonnegative(),
+    listingsConverted: z.number().int().nonnegative(),
+    listingsExpired: z.number().int().nonnegative(),
+  }).strict(),
+  operations: z.object({
+    averageTimeToInviteHours: z.number().nonnegative().nullable(),
+    averageTimeToClaimHours: z.number().nonnegative().nullable(),
+    averageTimeToConversionHours: z.number().nonnegative().nullable(),
+  }).strict(),
+  conversion: z.object({
+    sellerConversionsSucceeded: z.number().int().nonnegative(),
+    inventoryConversionsSucceeded: z.number().int().nonnegative(),
+    conversionFailures: z.number().int().nonnegative(),
+    deadLetteredConversions: z.number().int().nonnegative(),
+  }).strict(),
+}).strict();
+export type SellerAcquisitionAnalyticsResponse = z.output<typeof sellerAcquisitionAnalyticsResponseSchema>;
