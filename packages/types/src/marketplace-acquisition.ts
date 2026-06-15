@@ -161,3 +161,20 @@ export const sellerAcquisitionAnalyticsResponseSchema = z.object({
   }).strict(),
 }).strict();
 export type SellerAcquisitionAnalyticsResponse = z.output<typeof sellerAcquisitionAnalyticsResponseSchema>;
+
+
+export const sellerAcquisitionWorkQueueReasonValues = ["NEEDS_FOLLOW_UP", "FAILED_DELIVERY", "CLAIM_STARTED", "CLAIM_ABANDONED", "EXPIRING_SOON"] as const;
+export const sellerAcquisitionWorkQueueReasonSchema = z.enum(sellerAcquisitionWorkQueueReasonValues);
+export type SellerAcquisitionWorkQueueReason = z.output<typeof sellerAcquisitionWorkQueueReasonSchema>;
+
+export const sellerAcquisitionWorkQueueItemSchema = z.object({
+  tenantId: idSchema,
+  captureId: idSchema,
+  reason: sellerAcquisitionWorkQueueReasonSchema,
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
+  createdAt: isoDateSchema,
+  dueAt: isoDateSchema.optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).strict();
+export type SellerAcquisitionWorkQueueItem = z.output<typeof sellerAcquisitionWorkQueueItemSchema>;
+

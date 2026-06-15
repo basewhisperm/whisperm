@@ -33,3 +33,29 @@ test("seller invitation contracts preserve WhatsApp-first channel support with o
 
   assert.equal(response.channel, "WHATSAPP");
 });
+
+import {
+  sellerAcquisitionWorkQueueItemSchema,
+  sellerAcquisitionWorkQueueReasonValues,
+} from "../dist/index.js";
+
+test("seller acquisition work queue contract preserves operator follow-up reasons", () => {
+  assert.deepEqual(sellerAcquisitionWorkQueueReasonValues, [
+    "NEEDS_FOLLOW_UP",
+    "FAILED_DELIVERY",
+    "CLAIM_STARTED",
+    "CLAIM_ABANDONED",
+    "EXPIRING_SOON",
+  ]);
+
+  const item = sellerAcquisitionWorkQueueItemSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    reason: "EXPIRING_SOON",
+    createdAt: "2026-06-15T00:00:00.000Z",
+    dueAt: "2026-06-16T00:00:00.000Z",
+  });
+
+  assert.equal(item.priority, "NORMAL");
+  assert.deepEqual(item.metadata, {});
+});
