@@ -183,3 +183,16 @@ test("POST /marketplace-acquisition/captures stores parser version metadata in c
     "marketplace-capture-normalizer-v1",
   );
 });
+
+test("POST /marketplace-acquisition/captures forwards seller and inventory capture fields", async () => {
+  const calls = [];
+  const server = createApiServer({ ...createDependencies(createCaptureStore()), marketplaceAcquisition: { async capture(context, input) { calls.push({ context, input }); return { captureId: "capture-1", contactId: "contact-1", dealId: "deal-1", draftInventoryId: "draft-1", status: "CAPTURED" }; } } });
+  const response = await injectCapture(server, validPayload({ sellerName: "Seller One", sellerProfileUrl: "https://market.example/sellers/one", marketplaceIdentifier: "seller-one", phone: "+15555550123", email: "seller@example.com", location: "Austin", category: "Trucks", marketplaceSource: "market.example", marketplaceListingId: "listing-123", images: ["https://market.example/images/1.jpg"] }));
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.json().data.draftInventoryId, "draft-1");
+  assert.equal(calls[0].input.sellerName, "Seller One");
+  assert.equal(calls[0].input.phone, "+15555550123");
+  assert.equal(calls[0].input.email, "seller@example.com");
+  assert.equal(calls[0].input.marketplaceListingId, "listing-123");
+  assert.deepEqual(calls[0].input.images, ["https://market.example/images/1.jpg"]);
+});

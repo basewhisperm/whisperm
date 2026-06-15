@@ -47,7 +47,7 @@ const createRepositories = (overrides = {}) => {
       },
       async create(scope, input) {
         push("contacts", "create", [scope, input]);
-        const contact = record({ id: `contact-${contacts.size + 1}`, tenantId: input.tenantId, externalId: null, email: input.email ?? null, phone: null, firstName: input.firstName ?? null, lastName: null, stage: "PROSPECT", metadata: input.metadata ?? {} });
+        const contact = record({ id: `contact-${contacts.size + 1}`, tenantId: input.tenantId, externalId: null, email: input.email ?? null, phone: input.phone ?? null, firstName: input.firstName ?? null, lastName: null, stage: "PROSPECT", metadata: input.metadata ?? {} });
         contacts.set(contact.id, contact);
         return contact;
       }
@@ -209,6 +209,8 @@ test("capture creates a marketplace acquisition deal linked to contact and Captu
   assert.equal(draft.listingUrl, "https://market.example/listings/123");
   assert.equal(draft.marketplaceListingId, "listing-123");
   assert.equal(draft.status, "DRAFT");
+  const contact = repositories.contactsById.get("contact-1");
+  assert.equal(contact.email, "seller@example.com");
 });
 
 test("second capture for same source URL links existing deal without duplication", async () => {
@@ -308,4 +310,30 @@ test("marketplace acquisition stage transition preserves tenant isolation", asyn
     services.marketplaceAcquisition.transitionStage({ ...context, tenantId: "tenant-b" }, { dealId: "deal-1", stageName: "Invited" }),
     (error) => error instanceof ServiceError && error.code === "SERVICE_NOT_FOUND"
   );
+});
+
+
+test("capture preserves phone/email and works when optional channels are missing", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  const withPhone = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/phone", externalId: "listing-phone", sellerPhone: "+15555550123", sellerEmail: "phone@example.com" });
+  assert.equal(withPhone.draftInventoryId, "draft-1");
+  assert.equal(repositories.contactsById.get("contact-1").phone, "+15555550123");
+  const capture = [...repositories.capturesByUrl.values()].find((item) => item.id === withPhone.captureId);
+  assert.equal(capture.metadata.sellerPhone, "+15555550123");
+  assert.equal(capture.metadata.sellerEmail, "phone@example.com");
+
+  const withoutChannels = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/no-channel", externalId: "listing-no-channel", sellerEmail: undefined, sellerPhone: undefined });
+  assert.equal(withoutChannels.status, "CAPTURED");
+  assert.ok(withoutChannels.contactId);
+});
+
+test("duplicate marketplace listing id is scoped to tenant and reuses capture inventory", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  await services.marketplaceAcquisition.capture(context, captureInput);
+  const duplicate = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/123?ref=second" });
+  assert.equal(duplicate.draftInventoryId, "draft-1");
+  assert.equal(repositories.draftInventoriesByCapture.size, 1);
+  await assert.rejects(services.marketplaceAcquisition.capture({ ...context, tenantId: "tenant-b" }, captureInput), /tenant/i);
 });
