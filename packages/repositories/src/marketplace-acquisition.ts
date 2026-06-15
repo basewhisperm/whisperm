@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { PersistenceError, assertTenantScope, type SellerAcquisitionAnalyticsResponse, type TenantScoped } from "@whisperm/types";
+import { PersistenceError, assertTenantScope, marketplaceCaptureStatusSchema, type SellerAcquisitionAnalyticsResponse, type TenantScoped } from "@whisperm/types";
 import type { Page, PageRequest, PrismaPersistenceClient } from "./index.js";
 
 const isoDateSchema = z.string().datetime();
@@ -11,7 +11,6 @@ const pageRequestSchema = z.object({
   cursor: z.string().min(1).optional(),
 }).strict();
 
-const marketplaceCaptureStatusSchema = z.enum(["CAPTURED", "INVITED", "CLAIM_STARTED", "CLAIMED", "CONVERTED", "EXPIRED"]);
 
 export const marketplaceCaptureRecordSchema = z.object({
   id: z.string().min(1),
