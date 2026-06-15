@@ -724,3 +724,6 @@ export type {
   WhatsAppProvider,
   ResendEmailProviderOptions,
 } from "./email/resend-provider.js";
+
+export { RenderSellerHttpConnector, RenderSellerConnectorError, createRenderSellerConnectorFromEnv } from "./render-seller.js";
+export type { RenderSellerConnector, RenderSellerPayload, CreateRenderSellerInput, CreateRenderSellerResult } from "./render-seller.js";

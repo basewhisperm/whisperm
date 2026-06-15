@@ -92,6 +92,8 @@ export interface PrismaPersistenceClient {
   readonly draftInventory: PrismaDelegate;
   readonly marketplaceSellerInvitation: PrismaDelegate;
   readonly marketplaceClaimToken: PrismaDelegate;
+  readonly marketplaceSellerVerification: PrismaDelegate;
+  readonly renderConversion: PrismaDelegate;
   readonly subscription: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
@@ -292,6 +294,38 @@ export const draftInventoryRecordSchema = baseRecordSchema.extend({
 export type DraftInventoryRecord = z.output<typeof draftInventoryRecordSchema>;
 export type CreateDraftInventoryInput = TenantScoped & Pick<DraftInventoryRecord, "marketplaceCaptureId" | "title"> & Partial<Pick<DraftInventoryRecord, "contactId" | "dealId" | "description" | "price" | "currency" | "category" | "images" | "listingUrl" | "marketplaceSource" | "marketplaceListingId" | "status">>;
 export type UpdateDraftInventoryInput = Partial<Pick<DraftInventoryRecord, "contactId" | "dealId" | "title" | "description" | "price" | "currency" | "category" | "images" | "listingUrl" | "marketplaceSource" | "marketplaceListingId" | "status">>;
+
+export const marketplaceSellerVerificationRecordSchema = baseRecordSchema.extend({
+  marketplaceCaptureId: z.string().min(1),
+  contactId: z.string().min(1).nullable().optional(),
+  status: z.string().min(1),
+  method: z.string().min(1).nullable().optional(),
+  verifiedAt: isoDateSchema.nullable().optional(),
+  evidence: metadataSchema.nullable().optional(),
+}).required({ updatedAt: true }).strict();
+export type MarketplaceSellerVerificationRecord = z.output<typeof marketplaceSellerVerificationRecordSchema>;
+
+export const renderConversionStatusSchema = z.enum(["PENDING", "PROCESSING", "SUCCESS", "FAILED"]);
+export const renderConversionRecordSchema = baseRecordSchema.extend({
+  marketplaceCaptureId: z.string().min(1).nullable().optional(),
+  sellerVerificationId: z.string().min(1).nullable().optional(),
+  contactId: z.string().min(1).nullable().optional(),
+  dealId: z.string().min(1).nullable().optional(),
+  externalId: z.string().min(1).nullable().optional(),
+  renderSellerId: z.string().min(1).nullable().optional(),
+  conversionKind: z.string().min(1).nullable().optional(),
+  status: renderConversionStatusSchema,
+  startedAt: isoDateSchema.nullable().optional(),
+  completedAt: isoDateSchema.nullable().optional(),
+  failedAt: isoDateSchema.nullable().optional(),
+  failureReason: z.string().min(1).nullable().optional(),
+  convertedAt: isoDateSchema.nullable().optional(),
+  metadata: metadataSchema.nullable().optional(),
+}).required({ updatedAt: true }).strict();
+export type RenderConversionRecord = z.output<typeof renderConversionRecordSchema>;
+export type CreateRenderConversionInput = TenantScoped & Pick<RenderConversionRecord, "marketplaceCaptureId" | "sellerVerificationId" | "contactId" | "status"> & Partial<Pick<RenderConversionRecord, "dealId" | "externalId" | "renderSellerId" | "conversionKind" | "startedAt" | "completedAt" | "failedAt" | "failureReason" | "convertedAt" | "metadata">>;
+export type UpdateRenderConversionInput = Partial<Pick<RenderConversionRecord, "status" | "renderSellerId" | "startedAt" | "completedAt" | "failedAt" | "failureReason" | "convertedAt" | "metadata">>;
+
 export interface ActivityCreateContext extends TenantScoped {
   readonly actorId?: string | undefined;
   readonly correlation?: PersistenceCorrelationMetadata | undefined;
@@ -545,6 +579,8 @@ export interface ActivityRepository { create(context: ActivityCreateContext, inp
 export interface MarketplaceCaptureRepository { create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; findByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>; findByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null>; findById(context: TenantScoped, captureId: string): Promise<MarketplaceCaptureRecord | null>; findByDealId(context: TenantScoped, dealId: string): Promise<MarketplaceCaptureRecord | null>; update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; }
 export interface SellerInvitationRepository { create(context: TenantScoped, input: CreateSellerInvitationInput): Promise<SellerInvitationRecord>; update(context: TenantScoped, invitationId: string, input: UpdateSellerInvitationInput): Promise<SellerInvitationRecord>; }
 export interface DraftInventoryRepository { create(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null>; findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null>; upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord>; }
+export interface MarketplaceSellerVerificationRepository { findLatestByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceSellerVerificationRecord | null>; }
+export interface RenderConversionRepository { findSuccessfulSellerConversion(context: TenantScoped, marketplaceCaptureId: string, contactId: string | null): Promise<RenderConversionRecord | null>; create(context: TenantScoped, input: CreateRenderConversionInput): Promise<RenderConversionRecord>; update(context: TenantScoped, conversionId: string, input: UpdateRenderConversionInput): Promise<RenderConversionRecord>; }
 
 export interface DashboardContactRecord { readonly id: string; readonly firstName?: string | null | undefined; readonly lastName?: string | null | undefined; readonly company?: string | null | undefined; readonly email?: string | null | undefined; readonly lastTouchAt?: string | null | undefined; }
 export interface DashboardActivityRecord { readonly id: string; readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined; readonly type: string; readonly note?: string | null | undefined; readonly createdById: string; readonly createdAt: string; }
@@ -1214,6 +1250,37 @@ export class PrismaDraftInventoryRepository implements DraftInventoryRepository 
   }
 }
 
+
+export class PrismaMarketplaceSellerVerificationRepository implements MarketplaceSellerVerificationRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+  async findLatestByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceSellerVerificationRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.marketplaceSellerVerification.findFirst({ where: withTenant(context, { marketplaceCaptureId }), orderBy: { createdAt: "desc" } });
+    return row === null ? null : parseRecord(marketplaceSellerVerificationRecordSchema, row);
+  }
+}
+
+export class PrismaRenderConversionRepository implements RenderConversionRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+  async findSuccessfulSellerConversion(context: TenantScoped, marketplaceCaptureId: string, contactId: string | null): Promise<RenderConversionRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.renderConversion.findFirst({ where: withTenant(context, dataWithDefined({ marketplaceCaptureId, contactId, conversionKind: "SELLER", status: "SUCCESS" })), orderBy: { createdAt: "desc" } });
+    return row === null ? null : parseRecord(renderConversionRecordSchema, row);
+  }
+  async create(context: TenantScoped, input: CreateRenderConversionInput): Promise<RenderConversionRecord> {
+    ensureTenantInput(context, input);
+    try { return parseRecord(renderConversionRecordSchema, await this.prisma.renderConversion.create({ data: dataWithDefined({ conversionKind: "SELLER", ...input }) })); } catch (error) { return mapPrismaError(error, "Render conversion already exists"); }
+  }
+  async update(context: TenantScoped, conversionId: string, input: UpdateRenderConversionInput): Promise<RenderConversionRecord> {
+    ensureContext(context);
+    const result = await this.prisma.renderConversion.updateMany({ where: byTenantId(context, conversionId), data: dataWithDefined(input) });
+    if (result.count !== 1) notFound("Render conversion not found", { conversionId });
+    const row = await this.prisma.renderConversion.findFirst({ where: byTenantId(context, conversionId) });
+    if (row === null) notFound("Render conversion not found", { conversionId });
+    return parseRecord(renderConversionRecordSchema, row);
+  }
+}
+
 export class PrismaActivityRepository implements ActivityRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
 
@@ -1335,6 +1402,8 @@ export interface PrismaRepositories {
   readonly activities: ActivityRepository;
   readonly marketplaceCaptures: MarketplaceCaptureRepository;
   readonly draftInventories: DraftInventoryRepository;
+  readonly marketplaceSellerVerifications: MarketplaceSellerVerificationRepository;
+  readonly renderConversions: RenderConversionRepository;
   readonly dashboard: DashboardRepository;
   readonly followUpDigest: FollowUpDigestRepository;
   readonly reports: ReportsRepository;
@@ -1352,6 +1421,8 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     activities: new PrismaActivityRepository(prisma),
     marketplaceCaptures: new PrismaMarketplaceCaptureRepository(prisma),
     draftInventories: new PrismaDraftInventoryRepository(prisma),
+    marketplaceSellerVerifications: new PrismaMarketplaceSellerVerificationRepository(prisma),
+    renderConversions: new PrismaRenderConversionRepository(prisma),
     dashboard: new PrismaDashboardRepository(prisma),
     reports: new PrismaReportsRepository(prisma),
     followUpDigest: new PrismaFollowUpDigestRepository(prisma),

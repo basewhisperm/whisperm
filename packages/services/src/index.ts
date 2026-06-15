@@ -3,6 +3,8 @@ import { z } from "zod";
 import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
 export { SellerClaimPortalService, SellerClaimPortalError } from "./seller-claim-portal.js";
+export { RenderSellerConversionService, RenderSellerConversionError } from "./render-seller-conversion.js";
+export type { RenderSellerConversionContext, RenderSellerConversionDependencies, RenderSellerConversionResult } from "./render-seller-conversion.js";
 export type { ClaimPreview, ClaimTokenRecord, ClaimTokenRepository, SellerClaimPortalDependencies } from "./seller-claim-portal.js";
 export type { ClaimLifecycleDependencies, ClaimLifecycleScheduleJob, ClaimReminderType, MarketplaceClaimTokenRecord } from "./claim-lifecycle.js";
 
@@ -22,6 +24,8 @@ import {
   type ActivityRepository,
   type MarketplaceCaptureRepository,
   type DraftInventoryRepository,
+  type MarketplaceSellerVerificationRepository,
+  type RenderConversionRepository,
   type SellerInvitationRepository,
   type SellerInvitationRecord,
   sellerInvitationRecordSchema,
@@ -249,6 +253,8 @@ export interface ServiceRepositories {
   readonly marketplaceCaptures: MarketplaceCaptureRepository;
   readonly draftInventories: DraftInventoryRepository;
   readonly sellerInvitations?: SellerInvitationRepository | undefined;
+  readonly marketplaceSellerVerifications?: MarketplaceSellerVerificationRepository | undefined;
+  readonly renderConversions?: RenderConversionRepository | undefined;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;

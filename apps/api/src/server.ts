@@ -26,6 +26,7 @@ import {
   type DealRouteDependencies,
 } from "./crm/deals.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
+import { createRenderSellerConversionHandler, type RenderSellerConversionRouteDependencies } from "./marketplace-acquisition/render-seller-conversion.js";
 import { correlationIdMiddleware } from "./http/correlation.js";
 import { applySecurityHeaders, authRateLimiter, getClientIp, sanitizeRequestBody } from "./http/security.js";
 import { firstHeaderValue, type FastifyReplyLike, type FastifyRequestLike, type RequestLogger } from "./http/fastify.js";
@@ -115,6 +116,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly upgradePorts?: UpgradeServicePorts | undefined;
   readonly workspaceProvisioningPort?: WorkspaceProvisioningPort | undefined;
   readonly onboardingStatePort?: OnboardingStatePort | undefined;
+    readonly renderSellerConversion?: RenderSellerConversionRouteDependencies["renderSellerConversion"] | undefined;
     readonly marketplaceAcquisition?: {
     capture(
       context: {
@@ -295,6 +297,7 @@ const parseCrmRoute = (
 const routeTemplate = (method: string, pathname: string): string => {
   if (method === "GET" && pathname === "/healthz") return "/healthz";
   if (method === "POST" && pathname === "/marketplace-acquisition/captures") return "/marketplace-acquisition/captures";
+  if (method === "POST" && /^\/marketplace-acquisition\/captures\/[^/?#]+\/convert\/render-seller\/?$/u.test(pathname)) return "/marketplace-acquisition/captures/:id/convert/render-seller";
   if (method === "GET" && pathname === "/readyz") return "/readyz";
   if (method === "POST" && pathname === "/contacts/import") return "/contacts/import";
   if (method === "POST" && pathname === "/webhooks/stripe") return "/webhooks/stripe";
@@ -495,6 +498,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
     dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
   const reportsHandler =
     dependencies.reports === undefined ? undefined : createReportsHandler({ reports: dependencies.reports });
+  const renderSellerConversionHandler = dependencies.renderSellerConversion === undefined ? undefined : createRenderSellerConversionHandler({ renderSellerConversion: dependencies.renderSellerConversion });
 
   const activityCreateHandler =
     dependencies.activities === undefined
@@ -811,6 +815,16 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         const result = await initiateUpgrade(dependencies.upgradePorts, body.context, body.plan);
 
         reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+      const renderSellerConversionMatch = /^\/marketplace-acquisition\/captures\/([^/?#]+)\/convert\/render-seller\/?$/u.exec(parsedUrl.pathname);
+      if (options.method === "POST" && renderSellerConversionMatch !== null) {
+        if (renderSellerConversionHandler === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Render seller conversion is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        request.params = { id: decodeURIComponent(renderSellerConversionMatch[1] ?? "") };
+        await renderSellerConversionHandler(request, reply);
         return reply.toInjectResponse();
       }
       if (options.method === "POST" && parsedUrl.pathname === "/marketplace-acquisition/captures") {

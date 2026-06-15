@@ -117,3 +117,5 @@ export type { GoogleOAuthConfig, GoogleOAuthDependencies, GoogleOAuthHandler, Go
 
 export { createMarketplaceCaptureHandler } from "./marketplace-acquisition/capture.js";
 export type { MarketplaceCaptureRouteContext, MarketplaceCaptureRouteDependencies, MarketplaceCaptureServicePort } from "./marketplace-acquisition/capture.js";
+export { createRenderSellerConversionHandler } from "./marketplace-acquisition/render-seller-conversion.js";
+export type { RenderSellerConversionRouteDependencies } from "./marketplace-acquisition/render-seller-conversion.js";
