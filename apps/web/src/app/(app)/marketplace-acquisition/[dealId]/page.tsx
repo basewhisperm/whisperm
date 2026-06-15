@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { IconClock, IconNote } from "@tabler/icons-react";
+import { SellerAcquisitionInvitePanel } from "@/components/seller-acquisition/invite-panel";
 import { PrismaDealsRepository, type ActivityRecord, type PrismaPersistenceClient } from "@whisperm/repositories";
 
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
@@ -194,6 +195,8 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
           </div>
         )}
       </section>
+
+      {capture !== null && <SellerAcquisitionInvitePanel captureId={capture.id} />}
 
       <ActivityTimeline activities={detail.activity} />
     </div>
