@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
@@ -23,6 +25,11 @@ import {
   type SellerInvitationRepository,
   type SellerInvitationRecord,
   sellerInvitationRecordSchema,
+  type MarketplaceClaimTokenRepository,
+  type MarketplaceClaimTokenRecord,
+  type MarketplaceOwnershipAttestationRepository,
+  type MarketplaceOwnershipAttestationRecord,
+  marketplaceOwnershipAttestationRecordSchema,
   type ActivityListFilters,
   type ActivityRecord,
   activityRecordSchema,
@@ -118,6 +125,10 @@ import {
   sellerInvitationResponseSchema,
   type SellerInvitationChannel,
   type SellerInvitationResponse,
+  ownershipClaimAcceptRequestSchema,
+  ownershipClaimAcceptResponseSchema,
+  OWNERSHIP_ATTESTATION_STATEMENT,
+  type OwnershipClaimAcceptResponse,
 } from "@whisperm/types";
 
 const metadataSchema = z.record(z.string(), z.unknown());
@@ -247,6 +258,8 @@ export interface ServiceRepositories {
   readonly marketplaceCaptures: MarketplaceCaptureRepository;
   readonly draftInventories: DraftInventoryRepository;
   readonly sellerInvitations?: SellerInvitationRepository | undefined;
+  readonly marketplaceClaimTokens?: MarketplaceClaimTokenRepository | undefined;
+  readonly ownershipAttestations?: MarketplaceOwnershipAttestationRepository | undefined;
   readonly campaigns: CampaignRepository;
   readonly workflows: WorkflowRepository;
   readonly approvals: ApprovalRepository;
@@ -1068,6 +1081,69 @@ const marketplaceDealExternalId = (listingUrl: string): string => `marketplace-l
 
 const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => input.sellerName?.trim() || input.title.trim();
 
+const claimAcceptInputSchema = ownershipClaimAcceptRequestSchema.extend({
+  tenantId: idSchema,
+  token: z.string().min(1),
+  ipAddress: z.string().min(1).max(255).optional(),
+  userAgent: z.string().min(1).max(1024).optional(),
+}).strict();
+
+const hashClaimToken = (token: string): string => createHash("sha256").update(token, "utf8").digest("hex");
+
+export class OwnershipAttestationService {
+  constructor(private readonly deps: ServiceDependencies) {}
+
+  async acceptClaim(contextInput: ServiceContext, input: z.input<typeof claimAcceptInputSchema>): Promise<OwnershipClaimAcceptResponse> {
+    const context = ensureContext(contextInput);
+    const data = ensureTenantInput(context, exactInput(parseContract(claimAcceptInputSchema, input, context.correlation)));
+    if (this.deps.marketplaceClaimTokens === undefined || this.deps.ownershipAttestations === undefined) {
+      throw new ServiceError({ code: "SERVICE_REPOSITORY_FAILED", message: "Ownership attestation repositories are not configured", status: 500, correlation: context.correlation });
+    }
+    const scope = contextToTenantScope(context);
+    const token = await this.deps.marketplaceClaimTokens.findByTokenHash(scope, hashClaimToken(data.token));
+    if (token === null) throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Claim token not found", status: 404, correlation: context.correlation });
+    if (new Date(token.expiresAt).getTime() <= Date.now() || token.status === "EXPIRED") throw new ServiceError({ code: "SERVICE_VALIDATION_FAILED", message: "Claim token is expired", status: 410, correlation: context.correlation });
+    if (token.status === "CLAIMED") throw new ServiceError({ code: "SERVICE_CONFLICT", message: "Claim has already been accepted", status: 409, correlation: context.correlation });
+
+    const capture = await this.deps.marketplaceCaptures.findById(scope, token.marketplaceCaptureId);
+    if (capture === null) throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation });
+    if (["CLAIMED", "CONVERTED", "EXPIRED"].includes(capture.status)) throw new ServiceError({ code: "SERVICE_CONFLICT", message: "Acquisition cannot be claimed in its current state", status: 409, correlation: context.correlation });
+    const draft = await this.deps.draftInventories.findByMarketplaceCaptureId(scope, capture.id);
+    if (draft === null) throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Draft inventory not found", status: 404, correlation: context.correlation });
+    if (["CLAIMED", "CONVERTED", "EXPIRED"].includes(draft.status)) throw new ServiceError({ code: "SERVICE_CONFLICT", message: "Draft inventory cannot be claimed in its current state", status: 409, correlation: context.correlation });
+    const existing = await this.deps.ownershipAttestations.findByMarketplaceCaptureId(scope, capture.id);
+    if (existing !== null) throw new ServiceError({ code: "SERVICE_CONFLICT", message: "Ownership attestation already exists", status: 409, correlation: context.correlation });
+
+    return runWrite(this.deps, context, async (repositories) => {
+      const claimedAt = new Date().toISOString();
+      const attestation = marketplaceOwnershipAttestationRecordSchema.parse(await repositories.ownershipAttestations!.create(scope, {
+        tenantId: context.tenantId,
+        marketplaceCaptureId: capture.id,
+        draftInventoryId: draft.id,
+        contactId: draft.contactId ?? capture.contactId ?? null,
+        claimTokenId: token.id,
+        invitationId: null,
+        claimantName: data.claimantName,
+        claimantPhone: data.claimantPhone ?? null,
+        claimantEmail: data.claimantEmail ?? null,
+        marketplaceIdentity: data.marketplaceIdentity ?? null,
+        attestationStatement: OWNERSHIP_ATTESTATION_STATEMENT,
+        acceptedTerms: true,
+        ipAddress: data.ipAddress ?? null,
+        userAgent: data.userAgent ?? null,
+        attestedAt: claimedAt,
+        evidence: { acceptedTerms: true },
+        metadata: {},
+      }));
+      await repositories.marketplaceCaptures.update(scope, capture.id, { status: "CLAIMED" });
+      await repositories.draftInventories.update(scope, draft.id, { status: "CLAIMED" });
+      await repositories.marketplaceClaimTokens!.update(scope, token.id, { status: "CLAIMED", claimedAt });
+      await appendAudit(repositories, context, { action: "OWNERSHIP_ATTESTED", targetType: "MARKETPLACE_OWNERSHIP_ATTESTATION", targetId: attestation.id, metadata: { tenantId: context.tenantId, marketplaceCaptureId: capture.id, draftInventoryId: draft.id, attestationId: attestation.id, claimTokenId: token.id } });
+      return ownershipClaimAcceptResponseSchema.parse({ status: "CLAIMED", captureId: capture.id, draftInventoryId: draft.id, attestationId: attestation.id, claimedAt });
+    });
+  }
+}
+
 const marketplaceSourceForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => input.marketplaceSourceId ?? sourceHost(input.listingUrl);
 
 const marketplaceImagesForDraft = (input: MarketplaceCaptureServiceInput): unknown | undefined => {
@@ -1458,6 +1534,7 @@ export interface WhispeRMServices {
   readonly activities: ActivityService;
   readonly marketplaceAcquisition: MarketplaceAcquisitionCaptureService;
   readonly sellerInvitations: SellerInvitationService;
+  readonly ownershipAttestations: OwnershipAttestationService;
   readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
   readonly workflows: WorkflowService;
@@ -1476,6 +1553,7 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   activities: new ActivityService(dependencies),
   marketplaceAcquisition: new MarketplaceAcquisitionCaptureService(dependencies),
   sellerInvitations: new SellerInvitationService(dependencies),
+  ownershipAttestations: new OwnershipAttestationService(dependencies),
   scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
   workflows: new WorkflowService(dependencies),
