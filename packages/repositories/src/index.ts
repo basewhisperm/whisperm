@@ -91,6 +91,7 @@ export interface PrismaPersistenceClient {
   readonly marketplaceCapture: PrismaDelegate;
   readonly draftInventory: PrismaDelegate;
   readonly marketplaceSellerInvitation: PrismaDelegate;
+  readonly marketplaceClaimToken: PrismaDelegate;
   readonly subscription: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
