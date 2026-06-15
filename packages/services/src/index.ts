@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
+export { SellerAcquisitionAnalyticsService } from "./acquisition-analytics.js";
+export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
 export { SellerClaimPortalService, SellerClaimPortalError } from "./seller-claim-portal.js";
 export { RenderSellerConversionService, RenderSellerConversionError } from "./render-seller-conversion.js";

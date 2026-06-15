@@ -120,5 +120,5 @@ export type { MarketplaceCaptureRouteContext, MarketplaceCaptureRouteDependencie
 export { createRenderSellerConversionHandler } from "./marketplace-acquisition/render-seller-conversion.js";
 export type { RenderSellerConversionRouteDependencies } from "./marketplace-acquisition/render-seller-conversion.js";
 
-export { createRenderConversionRetryHandler } from "./marketplace-acquisition/render-conversion-retry.js";
-export type { RenderConversionRetryRouteDependencies } from "./marketplace-acquisition/render-conversion-retry.js";
+export { createMarketplaceAcquisitionAnalyticsHandler } from "./marketplace-acquisition/analytics.js";
+export type { MarketplaceAcquisitionAnalyticsRouteDependencies, MarketplaceAcquisitionAnalyticsServicePort } from "./marketplace-acquisition/analytics.js";

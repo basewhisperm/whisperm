@@ -30,6 +30,12 @@ interface Deal {
   readonly updatedAt: string;
 }
 
+interface AcquisitionAnalytics {
+  readonly acquisition: { readonly captures: number; readonly invitationsSent: number; readonly claimRate: number; readonly conversionRate: number; readonly expiredCount: number };
+  readonly inventory: { readonly listingsConverted: number };
+  readonly conversion: { readonly conversionFailures: number };
+}
+
 const acquisitionStages = ["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"] as const;
 
 function stageKey(name: string): string {
@@ -60,18 +66,22 @@ export default function MarketplaceAcquisitionPage() {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState<AcquisitionAnalytics | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
 
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/deals?pipelineDefaultKey=marketplace_acquisition")
-      .then((response) => response.json())
-      .then((data: { readonly pipeline: Pipeline | null; readonly deals?: readonly Deal[] }) => {
+    Promise.all([
+      fetch("/api/deals?pipelineDefaultKey=marketplace_acquisition").then((response) => response.json()),
+      fetch("/api/marketplace-acquisition/analytics").then((response) => response.ok ? response.json() : null),
+    ])
+      .then(([data, analyticsData]: [{ readonly pipeline: Pipeline | null; readonly deals?: readonly Deal[] }, AcquisitionAnalytics | null]) => {
         if (!cancelled) {
           setPipeline(data.pipeline);
           setDeals([...(data.deals ?? [])]);
+          setAnalytics(analyticsData);
           setLoading(false);
         }
       })
@@ -126,6 +136,16 @@ export default function MarketplaceAcquisitionPage() {
         <SummaryCard label="Expired" value={String(summary.expired)} description="Deals in the Expired stage" />
         <SummaryCard label="Conversion rate" value={formatAcquisitionConversionRate(summary.conversionRate)} description="Converted divided by captured" />
         <SummaryCard label="Recent opportunities" value={String(summary.recentCount)} description="Opportunities currently loaded from the board" />
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7" aria-label="Seller acquisition analytics">
+        <SummaryCard label="Captures" value={String(analytics?.acquisition.captures ?? 0)} description="Tenant-scoped captures in range" />
+        <SummaryCard label="Invitations sent" value={String(analytics?.acquisition.invitationsSent ?? 0)} description="Sent acquisition invitations" />
+        <SummaryCard label="Claim rate" value={formatPercent(analytics?.acquisition.claimRate ?? 0)} description="Claims divided by invitations" />
+        <SummaryCard label="Conversion rate" value={formatPercent(analytics?.acquisition.conversionRate ?? 0)} description="Converted divided by claimed" />
+        <SummaryCard label="Expired" value={String(analytics?.acquisition.expiredCount ?? 0)} description="Expired captures or invitations" />
+        <SummaryCard label="Listings converted" value={String(analytics?.inventory.listingsConverted ?? 0)} description="Draft listings converted" />
+        <SummaryCard label="Failed conversions" value={String(analytics?.conversion.conversionFailures ?? 0)} description="Render conversion failures" />
       </section>
 
       <input
@@ -201,6 +221,10 @@ export default function MarketplaceAcquisitionPage() {
       )}
     </div>
   );
+}
+
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 }).format(value);
 }
 
 function SummaryCard({ label, value, description }: { readonly label: string; readonly value: string; readonly description: string }) {
