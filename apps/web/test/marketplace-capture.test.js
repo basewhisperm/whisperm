@@ -65,3 +65,40 @@ test('marketplace acquisition detail route links safe capture fields without raw
   assert.doesNotMatch(detailPage, /\.metadata\b/u);
   assert.doesNotMatch(detailPage, /claimToken|tokenHash|providerCredentials|rawPayload/u);
 });
+
+test('extractor captures marketplace seller and inventory snapshot fields', async () => {
+  const { extractMarketplaceCapturePayload } = await import('../src/lib/marketplace-capture/bookmarklet.js');
+  const document = {
+    title: 'Fallback listing title',
+    body: { innerText: 'Call +1 555 555 0123 or email seller@example.com' },
+    querySelector(selector) {
+      const nodes = this.querySelectorAll(selector);
+      return nodes[0] ?? null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'script[type="application/ld+json"]') return [{ textContent: JSON.stringify({ '@type': 'Product', name: 'Road bike', description: 'Fast bike', category: 'Bicycles', image: ['https://market.example/bike.jpg'], brand: { name: 'Sam Seller' }, offers: { priceCurrency: 'USD', price: '500' } }) }];
+      if (selector.includes('seller')) return [{ textContent: 'Sam Seller', getAttribute: (name) => name === 'href' ? '/seller/sam' : null }];
+      if (selector.includes('location')) return [{ textContent: 'Austin, TX', getAttribute: () => null }];
+      return [];
+    },
+  };
+  const payload = extractMarketplaceCapturePayload(document, new URL('https://market.example/listings/abc-123'), 'test-agent');
+  assert.equal(payload.title, 'Road bike');
+  assert.equal(payload.priceText, 'USD 500');
+  assert.equal(payload.imageUrls[0], 'https://market.example/bike.jpg');
+  assert.equal(payload.listingUrl, 'https://market.example/listings/abc-123');
+  assert.equal(payload.marketplaceSource, 'market.example');
+  assert.equal(payload.marketplaceListingId, 'abc-123');
+  assert.equal(payload.sellerName, 'Sam Seller');
+  assert.equal(payload.sellerProfileUrl, 'https://market.example/seller/sam');
+  assert.equal(payload.phone, '+1 555 555 0123');
+  assert.equal(payload.email, 'seller@example.com');
+});
+
+test('intake page submits seller and inventory data to capture API', () => {
+  const source = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/capture/intake/page.tsx', import.meta.url), 'utf8');
+  for (const field of ['sellerName', 'sellerProfileUrl', 'phone', 'email', 'location', 'title', 'priceText', 'category', 'listingUrl', 'marketplaceSource', 'marketplaceListingId']) {
+    assert.match(source, new RegExp(field, 'u'));
+  }
+  assert.match(source, /fetch\("\/marketplace-acquisition\/captures"/u);
+});

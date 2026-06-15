@@ -1051,19 +1051,37 @@ const createActivityInputSchema = z.object({
 });
 const marketplaceCaptureInputSchema = z.object({
   tenantId: idSchema,
-  listingUrl: z.string().url(),
+  listingUrl: z.string().url().optional(),
+  sourceUrl: z.string().url().optional(),
   title: z.string().min(1),
   description: z.string().min(1).nullable().optional(),
   price: z.union([z.number(), z.string()]).nullable().optional(),
+  priceText: z.string().min(1).max(120).nullable().optional(),
   currency: z.string().min(1).nullable().optional(),
   sellerName: z.string().min(1).nullable().optional(),
   sellerEmail: z.string().email().nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  sellerPhone: z.string().min(1).max(64).nullable().optional(),
+  phone: z.string().min(1).max(64).nullable().optional(),
+  sellerLocation: z.string().min(1).max(255).nullable().optional(),
+  location: z.string().min(1).max(255).nullable().optional(),
+  marketplaceIdentifier: z.string().min(1).max(255).nullable().optional(),
   sellerProfileUrl: z.string().url().nullable().optional(),
   marketplaceSourceId: idSchema.nullable().optional(),
+  marketplaceSource: z.string().min(1).max(255).nullable().optional(),
+  marketplaceListingId: z.string().min(1).max(255).nullable().optional(),
+  category: z.string().min(1).max(255).nullable().optional(),
+  images: z.array(z.string().url()).max(10).nullable().optional(),
+  imageUrls: z.array(z.string().url()).max(10).nullable().optional(),
+  capturedAt: z.string().datetime().nullable().optional(),
+  capturedBy: z.string().min(1).max(255).nullable().optional(),
+  pageUrl: z.string().url().nullable().optional(),
+  sourceMarketplace: z.string().min(1).max(255).nullable().optional(),
+  userAgent: z.string().min(1).max(1024).nullable().optional(),
   contactId: idSchema.nullable().optional(),
   externalId: z.string().min(1).nullable().optional(),
   metadata: metadataSchema.nullable().optional()
-}).strict();
+}).strict().refine((value) => value.listingUrl !== undefined || value.sourceUrl !== undefined, { message: "Marketplace capture requires listingUrl or sourceUrl", path: ["listingUrl"] });
 
 export type MarketplaceCaptureServiceInput = z.output<typeof marketplaceCaptureInputSchema>;
 export interface MarketplaceCaptureServiceResult {
@@ -1086,6 +1104,7 @@ const sourceHost = (listingUrl: string): string => {
 };
 
 const marketplaceDealExternalId = (listingUrl: string): string => `marketplace-listing:${listingUrl.trim().toLowerCase()}`;
+const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<Record<string, unknown>> => exactInput({ ...(input.metadata ?? {}), sellerEmail: input.sellerEmail ?? input.email ?? undefined, sellerPhone: input.sellerPhone ?? input.phone ?? undefined, sellerLocation: input.sellerLocation ?? input.location ?? undefined, marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? undefined, marketplaceListingId: input.marketplaceListingId ?? input.externalId ?? undefined, imageUrls: input.imageUrls ?? input.images ?? input.metadata?.imageUrls, category: input.category ?? input.metadata?.category, capturedAt: input.capturedAt ?? undefined, capturedBy: input.capturedBy ?? undefined, pageUrl: input.pageUrl ?? input.sourceUrl ?? input.listingUrl ?? undefined, userAgent: input.userAgent ?? undefined });
 
 const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => input.sellerName?.trim() || input.title.trim();
 
@@ -1152,14 +1171,19 @@ export class OwnershipAttestationService {
   }
 }
 
-const marketplaceSourceForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => input.marketplaceSourceId ?? sourceHost(input.listingUrl);
+const listingUrlForCapture = (input: MarketplaceCaptureServiceInput): string => input.listingUrl ?? input.sourceUrl ?? "";
+const externalIdForCapture = (input: MarketplaceCaptureServiceInput): string | undefined => input.externalId ?? input.marketplaceListingId ?? input.marketplaceIdentifier ?? undefined;
+const marketplaceSourceForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => input.marketplaceSource ?? input.sourceMarketplace ?? input.marketplaceSourceId ?? sourceHost(listingUrlForCapture(input));
 
 const marketplaceImagesForDraft = (input: MarketplaceCaptureServiceInput): unknown | undefined => {
+  if (Array.isArray(input.images)) return input.images;
+  if (Array.isArray(input.imageUrls)) return input.imageUrls;
   const images = input.metadata?.imageUrls;
   return Array.isArray(images) ? images : undefined;
 };
 
 const marketplaceCategoryForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => {
+  if (input.category !== undefined && input.category !== null) return input.category;
   const category = input.metadata?.category;
   return typeof category === "string" && category.trim().length > 0 ? category : undefined;
 };
@@ -1275,23 +1299,26 @@ export class MarketplaceAcquisitionCaptureService {
 
     return runWrite(this.deps, context, async (repositories) => {
       const contactResult = await this.resolveContact(repositories, context, data);
-      const existingByListingUrl = await repositories.marketplaceCaptures.findByListingUrl(tenantScope, data.listingUrl);
-      const existingByExternalId = existingByListingUrl === null && data.externalId !== undefined && data.externalId !== null ? await repositories.marketplaceCaptures.findByExternalId(tenantScope, data.externalId) : null;
+      const listingUrl = listingUrlForCapture(data);
+      const externalId = externalIdForCapture(data);
+      const sellerEmail = data.sellerEmail ?? data.email;
+      const existingByListingUrl = await repositories.marketplaceCaptures.findByListingUrl(tenantScope, listingUrl);
+      const existingByExternalId = existingByListingUrl === null && externalId !== undefined && externalId !== null ? await repositories.marketplaceCaptures.findByExternalId(tenantScope, externalId) : null;
       const existingCapture = existingByListingUrl ?? existingByExternalId;
       const capture = existingCapture ?? await repositories.marketplaceCaptures.create(tenantScope, {
         tenantId: context.tenantId,
         marketplaceSourceId: data.marketplaceSourceId,
         contactId: contactResult.contact.id,
-        externalId: data.externalId,
-        listingUrl: data.listingUrl,
+        externalId,
+        listingUrl,
         title: data.title,
         description: data.description,
-        price: data.price,
+        price: data.price ?? data.priceText,
         currency: data.currency,
         sellerName: data.sellerName,
         sellerProfileUrl: data.sellerProfileUrl,
         status: "CAPTURED",
-        metadata: exactInput({ ...(data.metadata ?? {}), sellerEmail: data.sellerEmail ?? undefined })
+        metadata: mergedCaptureMetadata(data)
       });
       const linkedCapture = capture.contactId === contactResult.contact.id ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId: contactResult.contact.id });
       const dealResult = await this.resolveDeal(repositories, context, data, linkedCapture, contactResult.contact.id, capturedStage.id);
@@ -1319,8 +1346,8 @@ export class MarketplaceAcquisitionCaptureService {
           dealId: dealResult.deal.id,
           createdById: context.actorId,
           type: "NOTE",
-          note: `Captured marketplace listing from ${sourceHost(data.listingUrl)}: ${data.title}`,
-          metadata: { eventType: "MARKETPLACE_CAPTURED", marketplaceCaptureId: finalCapture.id, sourceUrl: data.listingUrl }
+          note: `Captured marketplace listing from ${sourceHost(listingUrl)}: ${data.title}`,
+          metadata: { eventType: "MARKETPLACE_CAPTURED", marketplaceCaptureId: finalCapture.id, sourceUrl: listingUrl }
         });
       }
       await appendAudit(repositories, context, { action: "MARKETPLACE_CAPTURED", targetType: "MARKETPLACE_CAPTURE", targetId: finalCapture.id, metadata: { contactId: contactResult.contact.id, dealId: dealResult.deal.id } });
@@ -1391,15 +1418,17 @@ export class MarketplaceAcquisitionCaptureService {
       }
       return { contact: existingById, strategy: "provided" };
     }
-    if (input.sellerEmail !== undefined && input.sellerEmail !== null) {
-      const [existing] = await repositories.contacts.findByEmails(tenantScope, [input.sellerEmail]);
+    const sellerEmail = input.sellerEmail ?? input.email;
+    if (sellerEmail !== undefined && sellerEmail !== null) {
+      const [existing] = await repositories.contacts.findByEmails(tenantScope, [sellerEmail]);
       if (existing !== undefined) return { contact: existing, strategy: "email" };
     }
     const contact = contactRecordSchema.parse(await repositories.contacts.create(tenantScope, {
       tenantId: context.tenantId,
-      email: input.sellerEmail ?? undefined,
+      email: sellerEmail ?? undefined,
+      phone: input.sellerPhone ?? input.phone ?? undefined,
       firstName: input.sellerName ?? undefined,
-      metadata: { marketplaceAcquisition: true, sellerProfileUrl: input.sellerProfileUrl ?? null }
+      metadata: { marketplaceAcquisition: true, sellerProfileUrl: input.sellerProfileUrl ?? null, sellerLocation: input.sellerLocation ?? input.location ?? null, marketplaceIdentifier: input.marketplaceIdentifier ?? null }
     }));
     return { contact, strategy: "created" };
   }
@@ -1409,7 +1438,7 @@ export class MarketplaceAcquisitionCaptureService {
       const existingByCapture = await repositories.deals.findById(context.tenantId, capture.dealId);
       if (existingByCapture !== null) return { deal: existingByCapture, created: false };
     }
-    const externalId = marketplaceDealExternalId(input.listingUrl);
+    const externalId = marketplaceDealExternalId(listingUrlForCapture(input));
     const existing = await repositories.deals.findByExternalId(context.tenantId, externalId);
     if (existing !== null) return { deal: existing, created: false };
     const deal = dealRecordSchema.parse(await repositories.deals.create(context.tenantId, {
@@ -1419,9 +1448,9 @@ export class MarketplaceAcquisitionCaptureService {
       externalId,
       title: `Marketplace seller: ${sellerDisplayName(input)}`,
       pipelineStageId: capturedStageId,
-      value: input.price,
+      value: input.price ?? input.priceText,
       currency: input.currency ?? "USD",
-      metadata: { marketplaceCaptureId: capture.id, sourceUrl: input.listingUrl, marketplaceSourceId: input.marketplaceSourceId ?? null }
+      metadata: { marketplaceCaptureId: capture.id, sourceUrl: listingUrlForCapture(input), marketplaceSourceId: input.marketplaceSourceId ?? null, marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? null }
     }));
     return { deal, created: true };
   }
