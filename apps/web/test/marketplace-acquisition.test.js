@@ -10,10 +10,10 @@ function read(relativePath) {
   return readFileSync(join(appRoot, relativePath), "utf8");
 }
 
-test("marketplace acquisition page renders required board copy and stages", () => {
+test("seller acquisition page renders required board copy and stages", () => {
   const source = read("app/(app)/marketplace-acquisition/page.tsx");
 
-  assert.match(source, /Marketplace Acquisition/u);
+  assert.match(source, /Seller Acquisition/u);
   assert.match(
     source,
     /Capture, invite, and convert marketplace sellers into Render sellers/u,
@@ -29,7 +29,7 @@ test("marketplace acquisition page renders required board copy and stages", () =
   assert.match(source, /No acquisition opportunities match these filters\./u);
 });
 
-test("marketplace acquisition navigation is placed between deals and reports", () => {
+test("seller acquisition navigation is placed between deals and reports", () => {
   const sidebar = read("components/app-shell/sidebar.tsx");
   const messages = JSON.parse(read("lib/i18n/en.json"));
   const dealsIndex = sidebar.indexOf("deals.title");
@@ -38,7 +38,7 @@ test("marketplace acquisition navigation is placed between deals and reports", (
 
   assert.equal(
     messages["marketplaceAcquisition.title"],
-    "Marketplace Acquisition",
+    "Seller Acquisition",
   );
   assert.ok(dealsIndex !== -1);
   assert.ok(acquisitionIndex > dealsIndex);
@@ -62,7 +62,7 @@ test("deals API preserves default behavior and supports marketplace acquisition 
   );
 });
 
-test("marketplace acquisition page filters client-side without backend query changes", () => {
+test("seller acquisition page filters client-side without backend query changes", () => {
   const source = read("app/(app)/marketplace-acquisition/page.tsx");
 
   assert.match(
@@ -84,7 +84,7 @@ test("marketplace acquisition page filters client-side without backend query cha
 });
 
 
-test("marketplace acquisition dashboard renders compact analytics cards", () => {
+test("seller acquisition dashboard renders compact analytics cards", () => {
   const source = read("app/(app)/marketplace-acquisition/page.tsx");
   assert.match(source, /api\/marketplace-acquisition\/analytics/u);
   for (const label of ["Captures", "Invitations sent", "Claim rate", "Conversion rate", "Expired", "Listings converted", "Failed conversions"]) {
@@ -94,7 +94,7 @@ test("marketplace acquisition dashboard renders compact analytics cards", () => 
 });
 
 
-test("marketplace acquisition dashboard renders lifecycle analytics cards", () => {
+test("seller acquisition dashboard renders lifecycle analytics cards", () => {
   const source = read("app/(app)/marketplace-acquisition/page.tsx");
   for (const label of [
     "Seller acquisition lifecycle analytics",

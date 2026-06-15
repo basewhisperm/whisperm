@@ -142,8 +142,8 @@ export default function MarketplaceAcquisitionPage() {
     <div className="space-y-6">
       <section className="flex flex-col gap-4 rounded-2xl bg-background p-5 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Marketplace Acquisition</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Marketplace Acquisition</h1>
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Seller Acquisition</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Seller Acquisition</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
             Capture, invite, and convert marketplace sellers into Render sellers
           </p>
@@ -154,7 +154,7 @@ export default function MarketplaceAcquisitionPage() {
         </Link>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Marketplace acquisition summary">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Seller acquisition summary">
         <SummaryCard label="Captured" value={String(summary.captured)} description="Deals in the Captured stage" />
         <SummaryCard label="Invited" value={String(summary.invited)} description="Deals in the Invited stage" />
         <SummaryCard label="Claim Started" value={String(summary.claimStarted)} description="Deals in the Claim Started stage" />
@@ -211,11 +211,11 @@ export default function MarketplaceAcquisitionPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading Marketplace Acquisition…</p>
+        <p className="text-sm text-muted-foreground">Loading Seller Acquisition…</p>
       ) : pipeline === null ? (
         <section className="flex flex-col items-center justify-center rounded-2xl bg-background px-6 py-16 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
           <IconBookmark aria-hidden="true" className="size-8 text-muted-foreground" stroke={1.5} />
-          <h2 className="mt-4 text-sm font-semibold text-foreground">No marketplace acquisition deals yet</h2>
+          <h2 className="mt-4 text-sm font-semibold text-foreground">No seller acquisition deals yet</h2>
           <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Start by configuring marketplace capture, then captured sellers will appear on this acquisition board.</p>
         </section>
       ) : (

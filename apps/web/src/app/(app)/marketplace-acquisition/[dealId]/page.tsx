@@ -128,10 +128,10 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
   if (pipeline === null || deal.pipelineId !== pipeline.id) {
     return (
       <div className="rounded-2xl bg-background p-6" style={{ border: "0.5px solid var(--color-border)" }}>
-        <p className="text-sm font-medium text-foreground">This deal is not a Marketplace Acquisition opportunity.</p>
+        <p className="text-sm font-medium text-foreground">This deal is not a Seller Acquisition opportunity.</p>
         <p className="mt-1 text-xs text-muted-foreground">Open this record from the standard Deals workspace instead.</p>
         <Link className="mt-4 inline-flex text-sm font-medium text-whisper hover:underline" href="/marketplace-acquisition">
-          Back to Marketplace Acquisition
+          Back to Seller Acquisition
         </Link>
       </div>
     );
@@ -149,7 +149,7 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
     <div className="space-y-5">
       <div>
         <Link className="text-sm font-medium text-whisper hover:underline" href="/marketplace-acquisition">
-          ← Back to Marketplace Acquisition
+          ← Back to Seller Acquisition
         </Link>
         <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
           <div>
