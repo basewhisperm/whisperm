@@ -10,6 +10,7 @@ export { SellerClaimPortalService, SellerClaimPortalError } from "./seller-claim
 export { RenderSellerConversionService, RenderSellerConversionError } from "./render-seller-conversion.js";
 export type { RenderSellerConversionContext, RenderSellerConversionDependencies, RenderSellerConversionResult } from "./render-seller-conversion.js";
 export { RenderInventoryConversionService, RenderInventoryConversionError } from "./render-inventory-conversion.js";
+export { MarketplaceCaptureCompletionService, MarketplaceCaptureCompletionError } from "./marketplace-capture-completion.js";
 export type { RenderInventoryConnector as RenderInventoryConversionConnector, RenderInventoryConversionContext, RenderInventoryConversionDependencies, RenderInventoryConversionResult } from "./render-inventory-conversion.js";
 export type { ClaimPreview, ClaimTokenRecord, ClaimTokenRepository, SellerClaimPortalDependencies } from "./seller-claim-portal.js";
 export type { ClaimLifecycleDependencies, ClaimLifecycleScheduleJob, ClaimReminderType, MarketplaceClaimTokenRecord } from "./claim-lifecycle.js";
