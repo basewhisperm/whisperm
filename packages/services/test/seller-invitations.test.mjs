@@ -62,3 +62,31 @@ test("successful invitation creates a resolvable claim token and /claim invite U
   const expiresAt = Date.parse(r.store.claimTokens[0].expiresAt);
   assert.equal(expiresAt, Date.parse(now) + 7 * 24 * 60 * 60 * 1000);
 });
+
+test("WhatsApp provider failure falls back to SMS and records deterministic audit", async () => {
+  const store = createStore();
+  const p = providers(store);
+  const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567" } }), {
+    whatsapp: { async send() { throw new Error("provider down"); } },
+    sms: p.sms,
+  });
+
+  assert.equal(r.result.channel, "SMS");
+  assert.equal(r.result.status, "SENT");
+  assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FALLBACK_USED"), true);
+  assert.equal(r.store.invitations[1].metadata.fallbackFrom, "WHATSAPP");
+  assert.equal(r.store.invitations[1].metadata.providerOutcome, "DELIVERED");
+});
+
+test("provider delivery failure produces deterministic failure metadata", async () => {
+  const store = createStore();
+  const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {
+    email: { async send() { throw new Error("provider down"); } },
+  });
+
+  assert.equal(r.result.channel, "EMAIL");
+  assert.equal(r.result.status, "FAILED");
+  assert.equal(r.store.invitations[0].metadata.providerOutcome, "FAILED");
+  assert.equal(r.store.invitations[0].metadata.failureReason, "INVITATION_PROVIDER_UNAVAILABLE");
+  assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FAILED"), true);
+});
