@@ -138,6 +138,7 @@ import {
   OWNERSHIP_ATTESTATION_STATEMENT,
   type OwnershipClaimAcceptResponse,
 } from "@whisperm/types";
+import { generateRawClaimToken } from "./claim-token-hash.js";
 
 const metadataSchema = z.record(z.string(), z.unknown());
 const idSchema = z.string().min(1);
@@ -1230,24 +1231,66 @@ export class SellerInvitationService {
     const context = ensureContext(contextInput);
     const data = ensureTenantInput(context, exactInput(parseContract(sellerInviteInputSchema, input, context.correlation)));
     if (this.deps.sellerInvitations === undefined) throw new ServiceError({ code: "SERVICE_REPOSITORY_FAILED", message: "Seller invitation repository is not configured", status: 500, correlation: context.correlation });
+    if (this.deps.marketplaceClaimTokens === undefined) throw new ServiceError({ code: "SERVICE_REPOSITORY_FAILED", message: "Marketplace claim token repository is not configured", status: 500, correlation: context.correlation });
+
     const scope = contextToTenantScope(context);
     const capture = await this.deps.marketplaceCaptures.findById(scope, data.captureId);
     if (capture === null) throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation });
+
     const contact = contactFromCapture(capture);
     const notifications = this.deps.notifications;
     const initialChannel = resolveInviteChannel(contact, data.preferredChannel, notifications?.whatsappEnabled !== false);
     const now = notifications?.now?.() ?? new Date();
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    const base = notifications?.inviteBaseUrl ?? "https://app.whisperm.ai/seller-acquisition/invitations";
+    const base = notifications?.inviteBaseUrl ?? "https://app.whisperm.ai/claim";
 
     return runWrite(this.deps, context, async (repositories) => {
-      const invitation = await this.deps.sellerInvitations!.create(scope, { tenantId: context.tenantId, marketplaceCaptureId: capture.id, channel: initialChannel, status: "PENDING", recipient: recipientFor(initialChannel, contact), inviteUrl: `${base}/${capture.id}`, expiresAt, metadata: { preferredChannel: data.preferredChannel ?? null } });
-      await appendAudit(repositories, context, { action: "INVITATION_CREATED", targetType: "SELLER_INVITATION", targetId: invitation.id, metadata: { captureId: capture.id, channel: initialChannel } });
+      if (repositories.marketplaceClaimTokens === undefined || repositories.sellerInvitations === undefined) {
+        throw new ServiceError({ code: "SERVICE_REPOSITORY_FAILED", message: "Seller invitation repositories are not configured", status: 500, correlation: context.correlation });
+      }
+
+      const rawToken = generateRawClaimToken();
+      const claimToken = await repositories.marketplaceClaimTokens.create(scope, {
+        tenantId: context.tenantId,
+        marketplaceCaptureId: capture.id,
+        tokenHash: hashClaimToken(rawToken),
+        expiresAt,
+        status: "PENDING"
+      });
+      const inviteUrl = `${base.replace(/\/$/, "")}/${rawToken}`;
+
+      const invitation = await repositories.sellerInvitations.create(scope, {
+        tenantId: context.tenantId,
+        marketplaceCaptureId: capture.id,
+        channel: initialChannel,
+        status: "PENDING",
+        recipient: recipientFor(initialChannel, contact),
+        inviteUrl,
+        expiresAt,
+        metadata: { preferredChannel: data.preferredChannel ?? null, claimTokenId: claimToken.id }
+      });
+
+      await appendAudit(repositories, context, {
+        action: "INVITATION_CREATED",
+        targetType: "SELLER_INVITATION",
+        targetId: invitation.id,
+        metadata: { captureId: capture.id, channel: initialChannel, claimTokenId: claimToken.id }
+      });
+
       const sent = await this.sendOrFallback(context, scope, repositories, invitation, contact, notifications);
       if (sent.status === "SENT") {
+        await repositories.marketplaceClaimTokens.update(scope, claimToken.id, { status: "SENT" });
         await this.moveToInvited(context, repositories, capture);
       }
-      return sellerInvitationResponseSchema.parse({ captureId: capture.id, invitationId: sent.id, channel: sent.channel, status: sent.status, inviteUrl: sent.inviteUrl, expiresAt: sent.expiresAt });
+
+      return sellerInvitationResponseSchema.parse({
+        captureId: capture.id,
+        invitationId: sent.id,
+        channel: sent.channel,
+        status: sent.status,
+        inviteUrl: sent.inviteUrl,
+        expiresAt: sent.expiresAt
+      });
     });
   }
 

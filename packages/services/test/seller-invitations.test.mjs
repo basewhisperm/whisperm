@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { SellerInvitationService, ServiceError } from "../dist/index.js";
@@ -6,13 +7,18 @@ import { SellerInvitationService, ServiceError } from "../dist/index.js";
 const now = "2026-06-14T00:00:00.000Z";
 const context = { tenantId: "tenant-a", actorId: "actor-1", correlation: { correlationId: "corr-invite" } };
 
-const createStore = () => ({ captures: new Map(), invitations: [], audits: [], sent: [], stageUpdates: [] });
+const createStore = () => ({ captures: new Map(), invitations: [], claimTokens: [], audits: [], sent: [], stageUpdates: [] });
 const baseCapture = (overrides = {}) => ({ id: "capture-1", tenantId: "tenant-a", listingUrl: "https://market.example/listing/1", title: "Desk", status: "CAPTURED", dealId: "deal-1", capturedAt: now, createdAt: now, updatedAt: now, metadata: {}, ...overrides });
 
 const deps = (store, options = {}) => ({
   marketplaceCaptures: {
     async findById(scope, id) { return store.captures.get(`${scope.tenantId}:${id}`) ?? null; },
     async update(scope, id, input) { const c = store.captures.get(`${scope.tenantId}:${id}`); assert.ok(c); const u = { ...c, ...input, updatedAt: now }; store.captures.set(`${scope.tenantId}:${id}`, u); return u; },
+  },
+  marketplaceClaimTokens: {
+    async create(scope, input) { const row = { id: `token-${store.claimTokens.length + 1}`, tenantId: scope.tenantId, status: "PENDING", ...input, createdAt: now, updatedAt: now }; store.claimTokens.push(row); return row; },
+    async findByTokenHash(scope, tokenHash) { return store.claimTokens.find((row) => row.tenantId === scope.tenantId && row.tokenHash === tokenHash) ?? null; },
+    async update(scope, id, input) { const idx = store.claimTokens.findIndex((row) => row.tenantId === scope.tenantId && row.id === id); assert.notEqual(idx, -1); store.claimTokens[idx] = { ...store.claimTokens[idx], ...input, updatedAt: now }; return store.claimTokens[idx]; },
   },
   sellerInvitations: {
     async create(scope, input) { const row = { id: `invite-${store.invitations.length + 1}`, tenantId: scope.tenantId, ...input, createdAt: now, updatedAt: now }; store.invitations.push(row); return row; },
@@ -21,7 +27,7 @@ const deps = (store, options = {}) => ({
   pipelines: { async findByDefaultKey(tenantId) { return { id: "pipe-1", tenantId, stages: [{ id: "stage-invited", name: "Invited" }] }; } },
   deals: { async updateStage(workspaceId, dealId, stageId) { store.stageUpdates.push({ workspaceId, dealId, stageId }); return {}; } },
   auditLogs: { async append(scope, input) { store.audits.push({ tenantId: scope.tenantId, ...input }); return {}; } },
-  notifications: { inviteBaseUrl: "https://app.example/invite", now: () => new Date(now), whatsappEnabled: options.whatsappEnabled, fallbackToSmsWhenWhatsappMissing: options.fallbackToSmsWhenWhatsappMissing, whatsapp: options.whatsapp, sms: options.sms, email: options.email },
+  notifications: { inviteBaseUrl: options.inviteBaseUrl ?? "https://app.example/invite", now: () => new Date(now), whatsappEnabled: options.whatsappEnabled, fallbackToSmsWhenWhatsappMissing: options.fallbackToSmsWhenWhatsappMissing, whatsapp: options.whatsapp, sms: options.sms, email: options.email },
 });
 
 const run = async (capture, options, input = {}) => { const store = createStore(); store.captures.set(`${capture.tenantId}:${capture.id}`, capture); const service = new SellerInvitationService(deps(store, options)); const result = await service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id, ...input }); return { store, result }; };
@@ -37,3 +43,22 @@ test("preferredChannel EMAIL works when email exists", async () => { const store
 test("preferredChannel WHATSAPP fails when phone missing", async () => { await assert.rejects(run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {}, { preferredChannel: "WHATSAPP" }), (e) => e instanceof ServiceError && e.message.includes("Seller phone")); });
 test("invitation moves capture from Captured to Invited only after successful send", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), { email: p.email }); assert.equal(r.store.captures.get("tenant-a:capture-1").status, "INVITED"); assert.equal(r.store.stageUpdates[0].stageId, "stage-invited"); });
 test("tenant isolation preserved", async () => { const store = createStore(); store.captures.set("tenant-b:capture-1", baseCapture({ tenantId: "tenant-b" })); const service = new SellerInvitationService(deps(store, {})); await assert.rejects(service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: "capture-1" }), (e) => e instanceof ServiceError && e.code === "SERVICE_NOT_FOUND"); });
+
+test("successful invitation creates a resolvable claim token and /claim invite URL", async () => {
+  const store = createStore();
+  const p = providers(store);
+  const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), { email: p.email, inviteBaseUrl: "https://app.example/claim" });
+
+  assert.equal(r.store.claimTokens.length, 1);
+  assert.equal(r.store.claimTokens[0].marketplaceCaptureId, "capture-1");
+  assert.equal(r.store.claimTokens[0].status, "SENT");
+
+  const rawToken = new URL(r.result.inviteUrl).pathname.split("/").at(-1);
+  assert.ok(rawToken);
+  assert.equal(new URL(r.result.inviteUrl).pathname.startsWith("/claim/"), true);
+  assert.equal(r.store.claimTokens[0].tokenHash, createHash("sha256").update(rawToken, "utf8").digest("hex"));
+  assert.equal(r.store.invitations[0].metadata.claimTokenId, r.store.claimTokens[0].id);
+
+  const expiresAt = Date.parse(r.store.claimTokens[0].expiresAt);
+  assert.equal(expiresAt, Date.parse(now) + 7 * 24 * 60 * 60 * 1000);
+});
