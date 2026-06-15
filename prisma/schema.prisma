@@ -1301,6 +1301,12 @@ model RenderConversion {
   dealId               String?   @db.Uuid
   externalId           String?
   status               String    @default("PENDING")
+  renderSellerId       String?
+  conversionKind       String?   @default("SELLER")
+  startedAt            DateTime?
+  completedAt          DateTime?
+  failedAt             DateTime?
+  failureReason        String?
   convertedAt          DateTime?
   metadata             Json?
   createdAt            DateTime  @default(now())
@@ -1320,6 +1326,8 @@ model RenderConversion {
   @@index([tenantId, contactId])
   @@index([tenantId, dealId])
   @@index([tenantId, status, createdAt])
+  @@index([tenantId, conversionKind, status])
+  @@index([tenantId, renderSellerId])
 }
 
 model ProviderConnection {
