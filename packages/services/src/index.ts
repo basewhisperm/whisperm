@@ -1300,10 +1300,14 @@ export class SellerInvitationService {
   private async sendOrFallback(context: ServiceContext, scope: TenantScoped, repositories: ServiceRepositories, invitation: SellerInvitationRecord, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined): Promise<SellerInvitationRecord> {
     const trySend = async (channel: SellerInvitationChannel, record: SellerInvitationRecord): Promise<SellerInvitationRecord | null> => {
       const body = `You are invited to Seller Acquisition: ${record.inviteUrl}`;
-      if (channel === "WHATSAPP") { if (notifications?.whatsapp === undefined) return null; await notifications.whatsapp.send({ to: record.recipient, body }); }
-      if (channel === "SMS") { if (notifications?.sms === undefined) return null; await notifications.sms.send({ to: record.recipient, body }); }
-      if (channel === "EMAIL") { if (notifications?.email === undefined) return null; await notifications.email.send({ to: record.recipient, subject: "Seller Acquisition invitation", html: `<p>${body}</p>` }); }
-      const sent = await this.deps.sellerInvitations!.update(scope, record.id, { status: "SENT", metadata: { ...(record.metadata ?? {}), sentAt: new Date().toISOString() } });
+      try {
+        if (channel === "WHATSAPP") { if (notifications?.whatsapp === undefined) return null; await notifications.whatsapp.send({ to: record.recipient, body }); }
+        if (channel === "SMS") { if (notifications?.sms === undefined) return null; await notifications.sms.send({ to: record.recipient, body }); }
+        if (channel === "EMAIL") { if (notifications?.email === undefined) return null; await notifications.email.send({ to: record.recipient, subject: "Seller Acquisition invitation", html: `<p>${body}</p>` }); }
+      } catch {
+        return null;
+      }
+      const sent = await this.deps.sellerInvitations!.update(scope, record.id, { status: "SENT", metadata: { ...(record.metadata ?? {}), sentAt: new Date().toISOString(), providerOutcome: "DELIVERED" } });
       await appendAudit(repositories, context, { action: "INVITATION_SENT", targetType: "SELLER_INVITATION", targetId: sent.id, metadata: { captureId: sent.marketplaceCaptureId, channel } });
       return sent;
     };
@@ -1315,7 +1319,7 @@ export class SellerInvitationService {
       const smsSent = await trySend("SMS", smsRecord);
       if (smsSent !== null) return smsSent;
     }
-    const failed = await this.deps.sellerInvitations!.update(scope, invitation.id, { status: "FAILED", metadata: { ...(invitation.metadata ?? {}), failureReason: "INVITATION_PROVIDER_UNAVAILABLE" } });
+    const failed = await this.deps.sellerInvitations!.update(scope, invitation.id, { status: "FAILED", metadata: { ...(invitation.metadata ?? {}), providerOutcome: "FAILED", failureReason: "INVITATION_PROVIDER_UNAVAILABLE" } });
     await appendAudit(repositories, context, { action: "INVITATION_FAILED", targetType: "SELLER_INVITATION", targetId: failed.id, metadata: { captureId: failed.marketplaceCaptureId, channel: failed.channel, reason: "PROVIDER_UNAVAILABLE" } });
     return failed;
   }
