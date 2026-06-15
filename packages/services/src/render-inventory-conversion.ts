@@ -126,18 +126,13 @@ export class RenderInventoryConversionService {
       const completedAt = this.now().toISOString();
       const updated = await this.deps.renderConversions.update(scope, conversion.id, {
         status: "SUCCESS",
-        externalId: providerResult.renderInventoryId,
+        externalId: draft.id,
         completedAt,
         convertedAt: completedAt,
-        metadata: { source: "DRAFT_INVENTORY", draftInventoryId: draft.id, providerStatus: providerResult.status },
+        metadata: { source: "DRAFT_INVENTORY", draftInventoryId: draft.id, renderInventoryId: providerResult.renderInventoryId, providerStatus: providerResult.status },
       });
 
       await this.deps.draftInventories.update(scope, draft.id, { status: "CONVERTED" });
-      await this.deps.marketplaceCaptures.update(scope, capture.id, { status: "CONVERTED" });
-
-      if (capture.dealId != null && this.deps.deals !== undefined) {
-        await this.moveDealToConverted(scope, capture.dealId);
-      }
 
       await this.audit(scope, context.correlation, "RENDER_INVENTORY_CONVERSION_SUCCEEDED", conversion.id, {
         marketplaceCaptureId: capture.id,
@@ -153,7 +148,7 @@ export class RenderInventoryConversionService {
         conversionStatus: "SUCCESS",
         conversionId: updated.id,
         idempotent: false,
-        acquisitionConverted: true,
+        acquisitionConverted: false,
       };
     } catch (cause) {
       const failureReason = cause instanceof Error ? cause.message : "Render inventory connector failed";

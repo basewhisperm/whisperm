@@ -91,17 +91,18 @@ async function rejectsWithCode(fn, code) {
   await assert.rejects(fn, (error) => error?.code === code);
 }
 
-test('claimed draft inventory converts to Render inventory and completes acquisition', async () => {
+test('claimed draft inventory converts to Render inventory without completing acquisition', async () => {
   const setup = deps();
   const result = await setup.service.convertClaimedInventoryToRender(context, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' });
 
   assert.equal(result.renderInventoryId, 'render-inventory-1');
   assert.equal(result.conversionStatus, 'SUCCESS');
-  assert.equal(result.acquisitionConverted, true);
-  assert.equal(setup.state.capture.status, 'CONVERTED');
+  assert.equal(result.acquisitionConverted, false);
+  assert.equal(setup.state.capture.status, 'CLAIMED');
   assert.equal(setup.state.draft.status, 'CONVERTED');
   assert.equal(setup.state.conversions.at(-1).status, 'SUCCESS');
-  assert.equal(setup.state.conversions.at(-1).externalId, 'render-inventory-1');
+  assert.equal(setup.state.conversions.at(-1).externalId, 'draft-1');
+  assert.equal(setup.state.conversions.at(-1).metadata.renderInventoryId, 'render-inventory-1');
   assert.equal(setup.state.inventoryCalls[0].title, 'Bike');
   assert.equal(setup.state.inventoryCalls[0].idempotencyKey, 'render-inventory:tenant-1:draft-1');
   assert.equal(setup.state.audits.some((audit) => audit.action === 'RENDER_INVENTORY_CONVERSION_SUCCEEDED'), true);
