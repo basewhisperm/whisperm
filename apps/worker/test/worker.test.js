@@ -97,20 +97,21 @@ const createApp = (services, runtimePorts, queues = new InMemoryQueueRuntime()) 
   logger: { info() {}, warn() {}, error() {} },
 });
 
-test('registers event ingestion, score recomputation, notification, claim lifecycle, publish, and scheduler workers on startup', async () => {
+test('registers event ingestion, score recomputation, notification, claim lifecycle, render retry, publish, and scheduler workers on startup', async () => {
   const queues = new InMemoryQueueRuntime();
   const runtime = createRuntimePorts();
   const app = createApp({ events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) } }, runtime.ports, queues);
 
   const registrations = await app.start();
 
-  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'publish', 'scheduler']);
-  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'publish.dispatch', 'scheduler.tick']);
+  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'render.conversion.retry', 'publish', 'scheduler']);
+  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'render.conversion.retry', 'publish.dispatch', 'scheduler.tick']);
   assert.equal(app.getReadiness().status, 'HEALTHY');
   assert.equal(queues.isWorkerActive('event-ingestion-worker'), true);
   assert.equal(queues.isWorkerActive('score-recomputation-worker'), true);
   assert.equal(queues.isWorkerActive('notification-worker'), true);
   assert.equal(queues.isWorkerActive('claim-lifecycle-worker'), true);
+  assert.equal(queues.isWorkerActive('render-conversion-retry-worker'), true);
   assert.equal(queues.isWorkerActive('publish-worker'), true);
   assert.equal(queues.isWorkerActive('scheduler-worker'), true);
 });
@@ -333,3 +334,31 @@ test('concurrent jobs remain tenant isolated', async () => {
   }
 });
 
+
+
+test('render conversion retry worker invokes retry service with tenant isolation', async () => {
+  const calls = [];
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) },
+    renderConversionRetry: {
+      retryRenderConversion: async (context, input) => {
+        calls.push({ context, input });
+        return { conversionId: input.conversionId, status: 'SUCCESS', attemptCount: 1, nextAttemptAt: null };
+      },
+    },
+  }, runtime.ports);
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'render-retry-1',
+    queueName: 'render.conversion.retry',
+    jobType: 'render.conversion.retry',
+    payload: { tenantId: 'tenant-1', conversionId: 'conversion-1' },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'tenant-1:render-retry-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'render.conversion.retry', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(calls[0].context.tenantId, 'tenant-1');
+  assert.equal(calls[0].input.conversionId, 'conversion-1');
+});
