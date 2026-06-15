@@ -134,11 +134,14 @@ export interface ClaimLifecycleServicePort {
   expireClaimInvitation(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string): Promise<unknown> | unknown;
 }
 
+export interface RenderConversionRetryServicePort { retryRenderConversion(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly conversionId: string }): Promise<{ readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }> | { readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }; }
+
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
   readonly scoring?: ScoreRecomputationServicePort | undefined;
   readonly notifications?: NotificationServicePort | undefined;
   readonly claimLifecycle?: ClaimLifecycleServicePort | undefined;
+  readonly renderConversionRetry?: RenderConversionRetryServicePort | undefined;
 }
 
 export interface QueueRegistration {
@@ -460,6 +463,22 @@ export const createNotificationTrialReminderHandler = (services: WorkerServices)
   },
 });
 
+const renderConversionRetryJobPayloadSchema = z.object({ tenantId: z.string().min(1), conversionId: z.string().min(1) }).strict();
+
+export const createRenderConversionRetryHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.renderConversionRetry === undefined) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Render conversion retry service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+    }
+    const payload = renderConversionRetryJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Render conversion retry job tenantId must match execution context", status: 403, correlation: context.correlation });
+    }
+    const result = await services.renderConversionRetry.retryRenderConversion({ tenantId: payload.tenantId, correlation: context.correlation }, payload);
+    return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, conversionId: result.conversionId, status: result.status, attemptCount: result.attemptCount, nextAttemptAt: result.nextAttemptAt, correlationId: context.correlation.correlationId });
+  },
+});
+
 const claimLifecycleJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
   invitationId: z.string().min(1),
@@ -561,6 +580,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.claim.lifecycle", deadLetterQueueName: "marketplace.claim.lifecycle.dlq" }),
       jobTypes: ["marketplace.claim.reminder", "marketplace.claim.expire"],
       handler: createClaimLifecycleHandler(input.services),
+    },
+    {
+      name: "render-conversion-retry-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: "render.conversion.retry", deadLetterQueueName: "render.conversion.retry.dlq" }),
+      jobTypes: ["render.conversion.retry"],
+      handler: createRenderConversionRetryHandler(input.services),
     },
     {
       name: "publish-worker",

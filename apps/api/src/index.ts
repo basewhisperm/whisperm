@@ -119,3 +119,6 @@ export { createMarketplaceCaptureHandler } from "./marketplace-acquisition/captu
 export type { MarketplaceCaptureRouteContext, MarketplaceCaptureRouteDependencies, MarketplaceCaptureServicePort } from "./marketplace-acquisition/capture.js";
 export { createRenderSellerConversionHandler } from "./marketplace-acquisition/render-seller-conversion.js";
 export type { RenderSellerConversionRouteDependencies } from "./marketplace-acquisition/render-seller-conversion.js";
+
+export { createRenderConversionRetryHandler } from "./marketplace-acquisition/render-conversion-retry.js";
+export type { RenderConversionRetryRouteDependencies } from "./marketplace-acquisition/render-conversion-retry.js";
