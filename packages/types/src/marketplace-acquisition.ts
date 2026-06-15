@@ -25,7 +25,7 @@ const safeRawExtractSchema = z.record(z.string(), z.unknown()).default({}).super
   }
 });
 
-export const marketplaceCaptureStatusValues = ["CAPTURED", "INVITED"] as const;
+export const marketplaceCaptureStatusValues = ["CAPTURED", "INVITED", "CLAIM_STARTED", "CLAIMED", "CONVERTED", "EXPIRED"] as const;
 export const marketplaceCaptureStatusSchema = z.enum(marketplaceCaptureStatusValues);
 export type MarketplaceCaptureStatus = z.output<typeof marketplaceCaptureStatusSchema>;
 
