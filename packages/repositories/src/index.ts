@@ -281,6 +281,7 @@ export const marketplaceClaimTokenRecordSchema = baseRecordSchema.extend({
   claimedAt: isoDateSchema.nullable().optional(),
 }).required({ updatedAt: true }).passthrough();
 export type MarketplaceClaimTokenRecord = z.output<typeof marketplaceClaimTokenRecordSchema>;
+export type CreateMarketplaceClaimTokenInput = TenantScoped & Pick<MarketplaceClaimTokenRecord, "marketplaceCaptureId" | "tokenHash" | "expiresAt"> & Partial<Pick<MarketplaceClaimTokenRecord, "status">>;
 export type UpdateMarketplaceClaimTokenInput = Partial<Pick<MarketplaceClaimTokenRecord, "status" | "claimedAt">>;
 
 export const marketplaceOwnershipAttestationRecordSchema = baseRecordSchema.extend({
@@ -616,7 +617,7 @@ export interface DealsRepository { create(workspaceId: string, input: CreateDeal
 export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; }
 export interface MarketplaceCaptureRepository { create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; findByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>; findByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null>; findById(context: TenantScoped, captureId: string): Promise<MarketplaceCaptureRecord | null>; findByDealId(context: TenantScoped, dealId: string): Promise<MarketplaceCaptureRecord | null>; update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; }
 export interface SellerInvitationRepository { create(context: TenantScoped, input: CreateSellerInvitationInput): Promise<SellerInvitationRecord>; update(context: TenantScoped, invitationId: string, input: UpdateSellerInvitationInput): Promise<SellerInvitationRecord>; }
-export interface MarketplaceClaimTokenRepository { findByTokenHash(context: TenantScoped, tokenHash: string): Promise<MarketplaceClaimTokenRecord | null>; update(context: TenantScoped, tokenId: string, input: UpdateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord>; }
+export interface MarketplaceClaimTokenRepository { create(context: TenantScoped, input: CreateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord>; findByTokenHash(context: TenantScoped, tokenHash: string): Promise<MarketplaceClaimTokenRecord | null>; update(context: TenantScoped, tokenId: string, input: UpdateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord>; }
 export interface MarketplaceOwnershipAttestationRepository { create(context: TenantScoped, input: CreateMarketplaceOwnershipAttestationInput): Promise<MarketplaceOwnershipAttestationRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceOwnershipAttestationRecord | null>; }
 export interface DraftInventoryRepository { create(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null>; findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null>; upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord>; }
 export interface MarketplaceSellerVerificationRepository { findLatestByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceSellerVerificationRecord | null>; }
@@ -1249,6 +1250,17 @@ export class PrismaSellerInvitationRepository implements SellerInvitationReposit
 
 export class PrismaMarketplaceClaimTokenRepository implements MarketplaceClaimTokenRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async create(context: TenantScoped, input: CreateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord> {
+    ensureTenantInput(context, input);
+    try {
+      return parseRecord(marketplaceClaimTokenRecordSchema, await this.prisma.marketplaceClaimToken.create({
+        data: dataWithDefined({ ...input, status: input.status ?? "PENDING" })
+      }));
+    } catch (error) {
+      return mapPrismaError(error, "Marketplace claim token already exists");
+    }
+  }
 
   async findByTokenHash(context: TenantScoped, tokenHash: string): Promise<MarketplaceClaimTokenRecord | null> {
     ensureContext(context);

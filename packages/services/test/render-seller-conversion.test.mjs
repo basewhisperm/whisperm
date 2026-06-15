@@ -14,7 +14,7 @@ function deps(options = {}) {
   return { state, deps: {
     marketplaceCaptures: { async findById(scope, id) { return options.captureTenantMismatch ? null : (options.capture ?? capture()); } },
     draftInventories: { async findByMarketplaceCaptureId() { return options.draft === undefined ? draft() : options.draft; } },
-    marketplaceSellerVerifications: { async findLatestByMarketplaceCaptureId() { return options.attestation === undefined ? attestation() : options.attestation; } },
+    ownershipAttestations: { async findByMarketplaceCaptureId() { return options.attestation === undefined ? attestation() : options.attestation; } },
     contacts: { async findById() { return options.contact === undefined ? contact() : options.contact; } },
     renderConversions: {
       async findSuccessfulSellerConversion() { return options.existing ?? null; },

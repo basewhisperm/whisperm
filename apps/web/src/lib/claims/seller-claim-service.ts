@@ -4,6 +4,7 @@ import {
   PrismaDealsRepository,
   PrismaDraftInventoryRepository,
   PrismaMarketplaceCaptureRepository,
+  PrismaMarketplaceOwnershipAttestationRepository,
   PrismaPipelineRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
@@ -40,6 +41,7 @@ export const createSellerClaimService = (): SellerClaimPortalService => {
     claimTokens: new PrismaClaimTokenRepository(client),
     marketplaceCaptures: new PrismaMarketplaceCaptureRepository(client),
     draftInventories: new PrismaDraftInventoryRepository(client),
+    ownershipAttestations: new PrismaMarketplaceOwnershipAttestationRepository(client),
     pipelines: new PrismaPipelineRepository(client),
     deals: new PrismaDealsRepository(client),
     auditLogs: new PrismaAuditLogRepository(client),

@@ -1,5 +1,5 @@
 import type { CreateRenderSellerInput, RenderSellerConnector } from "@whisperm/provider-adapters";
-import type { AuditLogRepository, ContactRepository, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, MarketplaceSellerVerificationRepository, RenderConversionRepository } from "@whisperm/repositories";
+import type { AuditLogRepository, ContactRepository, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, MarketplaceOwnershipAttestationRepository, RenderConversionRepository } from "@whisperm/repositories";
 import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
 
 export interface RenderSellerConversionContext { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: PersistenceCorrelationMetadata; }
@@ -10,7 +10,7 @@ export class RenderSellerConversionError extends Error { readonly code: RenderSe
 export interface RenderSellerConversionDependencies {
   readonly marketplaceCaptures: MarketplaceCaptureRepository;
   readonly draftInventories: DraftInventoryRepository;
-  readonly marketplaceSellerVerifications: MarketplaceSellerVerificationRepository;
+  readonly ownershipAttestations: MarketplaceOwnershipAttestationRepository;
   readonly renderConversions: RenderConversionRepository;
   readonly contacts: ContactRepository;
   readonly auditLogs: AuditLogRepository;
@@ -44,7 +44,7 @@ export class RenderSellerConversionService {
     if (draft === null) throw this.error(context.correlation, "SERVICE_NOT_FOUND", "Draft inventory is required before seller conversion", 404);
     if (draft.status !== "CLAIMED" && capture.status !== "CLAIMED") throw this.error(context.correlation, "SERVICE_INVALID_STATE_TRANSITION", "Draft inventory must be claimed before seller conversion", 422, { draftInventoryStatus: draft.status });
 
-    const attestation = await this.deps.marketplaceSellerVerifications.findLatestByMarketplaceCaptureId(scope, capture.id);
+    const attestation = await this.deps.ownershipAttestations.findByMarketplaceCaptureId(scope, capture.id);
     if (attestation === null) throw this.error(context.correlation, "SERVICE_NOT_FOUND", "Ownership attestation is required before seller conversion", 404);
 
     const contactId = capture.contactId ?? draft.contactId ?? attestation.contactId;
