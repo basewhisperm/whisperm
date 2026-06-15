@@ -31,9 +31,25 @@ interface Deal {
 }
 
 interface AcquisitionAnalytics {
-  readonly acquisition: { readonly captures: number; readonly invitationsSent: number; readonly claimRate: number; readonly conversionRate: number; readonly expiredCount: number };
-  readonly inventory: { readonly listingsConverted: number };
-  readonly conversion: { readonly conversionFailures: number };
+  readonly acquisition: {
+    readonly captures: number;
+    readonly invitationsSent: number;
+    readonly claimRate: number;
+    readonly conversionRate: number;
+    readonly expiredCount: number;
+  };
+  readonly inventory: {
+    readonly listingsCaptured: number;
+    readonly listingsClaimed: number;
+    readonly listingsConverted: number;
+    readonly listingsExpired: number;
+  };
+  readonly conversion: {
+    readonly sellerConversionsSucceeded: number;
+    readonly inventoryConversionsSucceeded: number;
+    readonly conversionFailures: number;
+    readonly deadLetteredConversions: number;
+  };
 }
 
 const acquisitionStages = ["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"] as const;
@@ -52,6 +68,10 @@ function formatValue(value?: number | null, currency?: string | null): string {
 
 function formatUpdatedAt(value: string): string {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function searchText(deal: Deal): string {
@@ -110,6 +130,13 @@ export default function MarketplaceAcquisitionPage() {
 
   const summary = useMemo(() => computeAcquisitionSummary(pipeline, filteredDeals), [pipeline, filteredDeals]);
   const stageByName = useMemo(() => new Map((pipeline?.stages ?? []).map((stage) => [stageKey(stage.name), stage])), [pipeline]);
+  const fullyConverted = Math.min(
+    analytics?.conversion.sellerConversionsSucceeded ?? 0,
+    analytics?.conversion.inventoryConversionsSucceeded ?? 0,
+  );
+  const expirationRate = analytics?.acquisition.captures
+    ? (analytics.acquisition.expiredCount / analytics.acquisition.captures)
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -138,13 +165,18 @@ export default function MarketplaceAcquisitionPage() {
         <SummaryCard label="Recent opportunities" value={String(summary.recentCount)} description="Opportunities currently loaded from the board" />
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7" aria-label="Seller acquisition analytics">
-        <SummaryCard label="Captures" value={String(analytics?.acquisition.captures ?? 0)} description="Tenant-scoped captures in range" />
-        <SummaryCard label="Invitations sent" value={String(analytics?.acquisition.invitationsSent ?? 0)} description="Sent acquisition invitations" />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Seller acquisition lifecycle analytics">
+        <SummaryCard label="Captures" value={String(analytics?.acquisition.captures ?? 0)} description="Captured seller opportunities" />
+        <SummaryCard label="Invitations sent" value={String(analytics?.acquisition.invitationsSent ?? 0)} description="Seller invitations sent" />
+        <SummaryCard label="Claim started" value={String(summary.claimStarted)} description="Claim links opened or started" />
+        <SummaryCard label="Claimed" value={String(analytics?.inventory.listingsClaimed ?? summary.claimed)} description="Seller inventory claimed" />
+        <SummaryCard label="Seller converted" value={String(analytics?.conversion.sellerConversionsSucceeded ?? 0)} description="Sellers created in Render" />
+        <SummaryCard label="Listings converted" value={String(analytics?.conversion.inventoryConversionsSucceeded ?? 0)} description="Inventory converted into Render listings" />
+        <SummaryCard label="Fully converted" value={String(fullyConverted)} description="Seller and inventory both converted" />
+        <SummaryCard label="Expired" value={String(analytics?.acquisition.expiredCount ?? 0)} description="Expired captures or invitations" />
         <SummaryCard label="Claim rate" value={formatPercent(analytics?.acquisition.claimRate ?? 0)} description="Claims divided by invitations" />
         <SummaryCard label="Conversion rate" value={formatPercent(analytics?.acquisition.conversionRate ?? 0)} description="Converted divided by claimed" />
-        <SummaryCard label="Expired" value={String(analytics?.acquisition.expiredCount ?? 0)} description="Expired captures or invitations" />
-        <SummaryCard label="Listings converted" value={String(analytics?.inventory.listingsConverted ?? 0)} description="Draft listings converted" />
+        <SummaryCard label="Expiration rate" value={formatPercent(expirationRate)} description="Expired divided by captured" />
         <SummaryCard label="Failed conversions" value={String(analytics?.conversion.conversionFailures ?? 0)} description="Render conversion failures" />
       </section>
 
@@ -221,10 +253,6 @@ export default function MarketplaceAcquisitionPage() {
       )}
     </div>
   );
-}
-
-function formatPercent(value: number): string {
-  return new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 }).format(value);
 }
 
 function SummaryCard({ label, value, description }: { readonly label: string; readonly value: string; readonly description: string }) {

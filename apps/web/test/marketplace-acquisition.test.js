@@ -92,3 +92,21 @@ test("marketplace acquisition dashboard renders compact analytics cards", () => 
   }
   assert.match(source, /analytics\?\.acquisition\.captures \?\? 0/u);
 });
+
+
+test("marketplace acquisition dashboard renders lifecycle analytics cards", () => {
+  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  for (const label of [
+    "Seller acquisition lifecycle analytics",
+    "Claim started",
+    "Seller converted",
+    "Inventory converted",
+    "Fully converted",
+    "Expiration rate",
+  ]) {
+    assert.match(source, new RegExp(label, "u"));
+  }
+  assert.match(source, /sellerConversionsSucceeded/u);
+  assert.match(source, /inventoryConversionsSucceeded/u);
+  assert.match(source, /listingsClaimed/u);
+});
