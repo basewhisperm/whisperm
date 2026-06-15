@@ -110,3 +110,16 @@ test("seller acquisition dashboard renders lifecycle analytics cards", () => {
   assert.match(source, /inventoryConversionsSucceeded/u);
   assert.match(source, /listingsClaimed/u);
 });
+
+test("seller acquisition detail renders invitation UX with WhatsApp first, SMS fallback, and email optional", () => {
+  const detailPage = read("app/(app)/marketplace-acquisition/[dealId]/page.tsx");
+  const invitePanel = read("components/seller-acquisition/invite-panel.tsx");
+
+  assert.match(detailPage, /SellerAcquisitionInvitePanel/u);
+  assert.match(invitePanel, /WhatsApp is the preferred cellphone-first channel/u);
+  assert.match(invitePanel, /SMS remains the fallback/u);
+  assert.match(invitePanel, /email is available for non-cellphone-first markets/u);
+  assert.match(invitePanel, /preferredChannel: channel/u);
+  assert.match(invitePanel, /Send Seller Acquisition invite/u);
+  assert.match(invitePanel, /role="status"/u);
+});
