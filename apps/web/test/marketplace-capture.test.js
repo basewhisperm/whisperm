@@ -102,3 +102,19 @@ test('intake page submits seller and inventory data to capture API', () => {
   }
   assert.match(source, /fetch\("\/marketplace-acquisition\/captures"/u);
 });
+
+test('mobile URL capture posts URL only and does not require manual seller fields', () => {
+  const capturePage = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/capture/page.tsx', import.meta.url), 'utf8');
+  const route = readFileSync(new URL('../src/app/api/marketplace-acquisition/captures/from-url/route.ts', import.meta.url), 'utf8');
+
+  assert.match(capturePage, /Mobile URL capture/u);
+  assert.match(capturePage, /name="url"/u);
+  assert.match(capturePage, /\/api\/marketplace-acquisition\/captures\/from-url/u);
+
+  assert.match(route, /parseRequest/u);
+  assert.match(route, /fetch\(url/u);
+  assert.match(route, /extractFromHtml/u);
+  assert.match(route, /marketplaceAcquisition\.capture/u);
+
+  assert.doesNotMatch(route, /claimantName|manual seller|sellerName.*request|phone.*request|priceText.*request/u);
+});

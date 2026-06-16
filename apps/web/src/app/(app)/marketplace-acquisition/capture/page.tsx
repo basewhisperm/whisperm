@@ -25,19 +25,30 @@ export default function MarketplaceCapturePage() {
           click it to capture lightweight public metadata into WhispeRM.
         </p>
 
-        <div className="mt-5 flex flex-col gap-3 rounded-2xl bg-secondary p-4 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid hsl(var(--border))" }}>
-          <div>
-            <p className="text-sm font-medium text-foreground">Render Seller Capture</p>
-            <p className="mt-1 text-xs text-muted-foreground">Drag the button below to your bookmarks bar.</p>
+        <div className="mt-5 grid gap-4">
+          <form action="/api/marketplace-acquisition/captures/from-url" className="rounded-2xl bg-secondary p-4" method="post" style={{ border: "0.5px solid hsl(var(--border))" }}>
+            <p className="text-sm font-medium text-foreground">Mobile URL capture</p>
+            <p className="mt-1 text-xs text-muted-foreground">Paste a public listing URL. WhispeRM will fetch the public page and create the seller acquisition capture.</p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input className="min-h-11 flex-1 rounded-xl bg-background px-3 py-2 text-sm text-foreground" name="url" placeholder="https://jiji.com.gh/... or https://tonaton.com/..." type="url" required />
+              <button className="min-h-11 rounded-xl bg-whisper px-4 text-sm font-semibold text-white" type="submit">Capture URL</button>
+            </div>
+          </form>
+
+          <div className="flex flex-col gap-3 rounded-2xl bg-secondary p-4 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid hsl(var(--border))" }}>
+            <div>
+              <p className="text-sm font-medium text-foreground">Desktop bookmarklet capture</p>
+              <p className="mt-1 text-xs text-muted-foreground">Drag the button below to your desktop bookmarks bar.</p>
+            </div>
+            <a
+              className="inline-flex h-10 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+              draggable="true"
+              href={bookmarkletHref}
+              style={{ background: "var(--color-whisper)" }}
+            >
+              Render Seller Capture
+            </a>
           </div>
-          <a
-            className="inline-flex h-10 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-            draggable="true"
-            href={bookmarkletHref}
-            style={{ background: "var(--color-whisper)" }}
-          >
-            Render Seller Capture
-          </a>
         </div>
       </section>
 
