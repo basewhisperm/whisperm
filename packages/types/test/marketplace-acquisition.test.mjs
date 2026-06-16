@@ -90,3 +90,55 @@ test("seller acquisition assignment contract supports ownership and resolution w
 
   assert.equal(unassigned.resolution, "UNASSIGNED");
 });
+
+import {
+  sellerAcquisitionSlaRecordSchema,
+  sellerAcquisitionSlaStatusValues,
+  sellerAcquisitionSlaTypeValues,
+} from "../dist/index.js";
+
+test("seller acquisition SLA contracts preserve operational governance states", () => {
+  assert.deepEqual(sellerAcquisitionSlaTypeValues, [
+    "FIRST_RESPONSE",
+    "INVITATION_DELIVERY",
+    "CLAIM_FOLLOW_UP",
+    "EXPIRATION_WARNING",
+    "ESCALATION_RESPONSE",
+  ]);
+
+  assert.deepEqual(sellerAcquisitionSlaStatusValues, [
+    "ON_TIME",
+    "AT_RISK",
+    "BREACHED",
+  ]);
+
+  const record = sellerAcquisitionSlaRecordSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    slaType: "EXPIRATION_WARNING",
+    status: "AT_RISK",
+    startedAt: "2026-06-15T00:00:00.000Z",
+    dueAt: "2026-06-16T00:00:00.000Z",
+  });
+
+  assert.equal(record.completedAt, undefined);
+  assert.deepEqual(record.metadata, {});
+
+  assert.throws(() => sellerAcquisitionSlaRecordSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    slaType: "BAD_SLA",
+    status: "ON_TIME",
+    startedAt: "2026-06-15T00:00:00.000Z",
+    dueAt: "2026-06-16T00:00:00.000Z",
+  }));
+
+  assert.throws(() => sellerAcquisitionSlaRecordSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    slaType: "FIRST_RESPONSE",
+    status: "BAD_STATUS",
+    startedAt: "2026-06-15T00:00:00.000Z",
+    dueAt: "2026-06-16T00:00:00.000Z",
+  }));
+});
