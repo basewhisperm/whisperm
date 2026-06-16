@@ -1228,7 +1228,12 @@ const resolveInviteChannel = (contact: { readonly phone?: string; readonly email
 const recipientFor = (channel: SellerInvitationChannel, contact: { readonly phone?: string; readonly email?: string }): string => channel === "EMAIL" ? contact.email ?? "" : contact.phone ?? "";
 
 export class SellerInvitationService {
-  constructor(private readonly deps: ServiceDependencies & { readonly notifications?: SellerInvitationProviderPorts | undefined }) {}
+  constructor(private readonly deps: ServiceDependencies & {
+    readonly notifications?: SellerInvitationProviderPorts | undefined;
+    readonly claimLifecycleScheduler?: {
+      scheduleClaimLifecycle(context: ServiceContext, invitationId: string): Promise<readonly unknown[]> | readonly unknown[];
+    } | undefined;
+  }) {}
 
   async createSellerInvitation(contextInput: ServiceContext, input: SellerInviteServiceInput): Promise<SellerInvitationResponse> {
     const context = ensureContext(contextInput);
@@ -1284,6 +1289,7 @@ export class SellerInvitationService {
       if (sent.status === "SENT") {
         await repositories.marketplaceClaimTokens.update(scope, claimToken.id, { status: "SENT" });
         await this.moveToInvited(context, repositories, capture);
+        await this.deps.claimLifecycleScheduler?.scheduleClaimLifecycle(context, claimToken.id);
       }
 
       return sellerInvitationResponseSchema.parse({
