@@ -178,6 +178,28 @@ export const sellerAcquisitionWorkQueueItemSchema = z.object({
 }).strict();
 export type SellerAcquisitionWorkQueueItem = z.output<typeof sellerAcquisitionWorkQueueItemSchema>;
 
+
+export const sellerAcquisitionSlaStatusValues = ["ON_TIME", "AT_RISK", "BREACHED"] as const;
+export const sellerAcquisitionSlaStatusSchema = z.enum(sellerAcquisitionSlaStatusValues);
+export type SellerAcquisitionSlaStatus = z.output<typeof sellerAcquisitionSlaStatusSchema>;
+
+export const sellerAcquisitionSlaTypeValues = ["FIRST_RESPONSE", "INVITATION_DELIVERY", "CLAIM_FOLLOW_UP", "EXPIRATION_WARNING", "ESCALATION_RESPONSE"] as const;
+export const sellerAcquisitionSlaTypeSchema = z.enum(sellerAcquisitionSlaTypeValues);
+export type SellerAcquisitionSlaType = z.output<typeof sellerAcquisitionSlaTypeSchema>;
+
+export const sellerAcquisitionSlaRecordSchema = z.object({
+  tenantId: idSchema,
+  captureId: idSchema,
+  slaType: sellerAcquisitionSlaTypeSchema,
+  status: sellerAcquisitionSlaStatusSchema,
+  startedAt: isoDateSchema,
+  dueAt: isoDateSchema,
+  completedAt: isoDateSchema.optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).strict();
+export type SellerAcquisitionSlaRecord = z.output<typeof sellerAcquisitionSlaRecordSchema>;
+
+
 export const sellerAcquisitionAssignmentResolutionValues = ["UNASSIGNED", "ASSIGNED", "ESCALATED", "RESOLVED", "DISMISSED"] as const;
 export const sellerAcquisitionAssignmentResolutionSchema = z.enum(sellerAcquisitionAssignmentResolutionValues);
 export type SellerAcquisitionAssignmentResolution = z.output<typeof sellerAcquisitionAssignmentResolutionSchema>;
