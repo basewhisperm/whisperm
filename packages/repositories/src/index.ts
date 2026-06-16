@@ -5,6 +5,9 @@ import { PrismaMarketplaceAcquisitionRepository, type MarketplaceAcquisitionRepo
 import {
   PersistenceError,
   type PersistenceCorrelationMetadata,
+  type ScheduledJob,
+  type ScheduledJobRepository,
+  scheduledJobSchema,
   assertTenantScope,
   contactStageSchema,
   persistenceCorrelationMetadataSchema,
@@ -96,6 +99,7 @@ export interface PrismaPersistenceClient {
   readonly marketplaceSellerVerification: PrismaDelegate;
   readonly renderConversion: PrismaDelegate;
   readonly subscription: PrismaDelegate;
+  readonly scheduledJob: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
 
@@ -1478,6 +1482,80 @@ export class PrismaBillingRepository implements BillingRepository {
   async findUsageByIdempotencyKey(context: TenantScoped, idempotencyKey: string): Promise<BillingUsageRecord | null> { const page = await this.audit.listByTarget(context, "BILLING_USAGE", idempotencyKey, { limit: 100 }); const row = page.items.find((item) => item.action === "BILLING_USAGE_RECORDED"); if (row === undefined) return null; const metadata = (row.metadata ?? {}) as JsonObject; const usage = metadata.usage; return usage === undefined ? null : billingUsageRecordSchema.parse({ ...(usage as JsonObject), id: row.id, createdAt: row.occurredAt }); }
 }
 
+
+const scheduledJobToContract = (row: unknown): ScheduledJob => {
+  const data = row as Readonly<Record<string, unknown>>;
+  const runAt = data.runAt instanceof Date ? data.runAt.toISOString() : data.runAt;
+  const correlationId = typeof data.correlationId === "string" ? data.correlationId : undefined;
+
+  return scheduledJobSchema.parse({
+    tenantId: data.tenantId,
+    scheduleName: data.scheduleName,
+    jobName: data.jobName,
+    cron: data.cron ?? undefined,
+    runAt: runAt ?? undefined,
+    payload: data.payload ?? {},
+    correlation: correlationId === undefined ? undefined : { correlationId },
+  });
+};
+
+export class PrismaScheduledJobRepository implements ScheduledJobRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async upsert(input: ScheduledJob): Promise<ScheduledJob> {
+    ensureTenantInput(input, input);
+    const parsed = scheduledJobSchema.parse(input);
+    const runAt = parsed.runAt === undefined ? undefined : new Date(parsed.runAt);
+
+    const row = await this.prisma.scheduledJob.upsert?.({
+      where: { tenantId_scheduleName: { tenantId: parsed.tenantId, scheduleName: parsed.scheduleName } },
+      create: dataWithDefined({
+        tenantId: parsed.tenantId,
+        scheduleName: parsed.scheduleName,
+        jobName: parsed.jobName,
+        cron: parsed.cron,
+        runAt,
+        nextRunAt: runAt,
+        payload: parsed.payload,
+        correlationId: parsed.correlation?.correlationId,
+      }),
+      update: dataWithDefined({
+        jobName: parsed.jobName,
+        cron: parsed.cron,
+        runAt,
+        nextRunAt: runAt,
+        payload: parsed.payload,
+        correlationId: parsed.correlation?.correlationId,
+      }),
+    });
+
+    if (row === undefined) {
+      throw new PersistenceError({
+        code: "PERSISTENCE_VALIDATION_FAILED",
+        message: "Scheduled job upsert is not available",
+        status: 500,
+      });
+    }
+
+    return scheduledJobToContract(row);
+  }
+
+  async cancel(input: TenantScoped & { readonly scheduleName: string }): Promise<void> {
+    ensureContext(input);
+    const result = await this.prisma.scheduledJob.deleteMany?.({
+      where: withTenant(input, { scheduleName: input.scheduleName }),
+    });
+
+    if (result === undefined) {
+      throw new PersistenceError({
+        code: "PERSISTENCE_VALIDATION_FAILED",
+        message: "Scheduled job cancellation is not available",
+        status: 500,
+      });
+    }
+  }
+}
+
 export class PrismaAuditLogRepository implements AuditLogRepository {
   constructor(private readonly prisma: PrismaPersistenceClient) {}
   async append(context: TenantScoped, input: CreateAuditLogInput): Promise<AuditLogRecord> { ensureTenantInput(context, input); return parseRecord(auditLogRecordSchema, await this.prisma.auditLog.create({ data: dataWithDefined({ occurredAt: new Date(), ...input }) })); }
@@ -1508,6 +1586,7 @@ export interface PrismaRepositories {
   readonly marketplaceAcquisition: MarketplaceAcquisitionRepository;
   readonly marketplaceClaimTokens: MarketplaceClaimTokenRepository;
   readonly ownershipAttestations: MarketplaceOwnershipAttestationRepository;
+  readonly scheduledJobs: ScheduledJobRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -1535,6 +1614,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     marketplaceAcquisition: new PrismaMarketplaceAcquisitionRepository(prisma),
     marketplaceClaimTokens: new PrismaMarketplaceClaimTokenRepository(prisma),
     ownershipAttestations: new PrismaMarketplaceOwnershipAttestationRepository(prisma),
+    scheduledJobs: new PrismaScheduledJobRepository(prisma),
     auditLogs
   };
 };
