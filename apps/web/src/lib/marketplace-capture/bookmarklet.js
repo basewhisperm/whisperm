@@ -61,7 +61,12 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
   const bodyText = clean(doc.body?.innerText || '', 5000);
   const email = clean((bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu) || [])[0] || '', 320);
   const phone = clean((bodyText.match(/(?:\+?\d[\d\s().-]{7,}\d)/u) || [])[0] || '', 64);
-  const price = clean((offer?.priceCurrency ? `${offer.priceCurrency} ` : '') + (offer?.price || ''), 120) || meta('product:price:amount') || meta('og:price:amount') || selectorText(['[itemprop="price"]', '[class*="price" i]', '[data-testid*="price" i]'], 120);
+  const price = clean((offer?.priceCurrency ? `${offer.priceCurrency} ` : '') + (offer?.price || ''), 120) || meta('product:price:amount') || meta('og:price:amount') || selectorText([
+    '.qa-advert-price-view',
+    '[itemprop="price"]',
+    '[class*="price" i]',
+    '[data-testid*="price" i]'
+  ], 120);
   const images = arr(product?.image).concat([meta('og:image'), meta('twitter:image')], Array.from(doc.querySelectorAll('[itemprop="image"], img')).map((img) => img.getAttribute('content') || img.getAttribute('src'))).map((url) => { try { return new URL(clean(String(url), 2000), href).toString(); } catch { return clean(String(url), 2000); } }).filter(Boolean);
   const sellerName = clean(product?.brand?.name, 255) || selectorText(['[itemprop="seller"]', '[rel="author"]', 'a[href*="seller" i]', 'a[href*="profile" i]', '[class*="seller" i]', '[data-testid*="seller" i]'], 255);
   const sellerProfileUrl = selectorHref(['a[href*="seller" i]', 'a[href*="profile" i]', '[rel="author"]']);
