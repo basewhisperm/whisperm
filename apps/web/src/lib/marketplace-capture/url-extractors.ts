@@ -83,13 +83,30 @@ const listingIdFromUrl = (url: string): string | undefined => {
 };
 
 const priceFromText = (bodyText: string): string | undefined => {
-  const match = bodyText.match(/(?:GH₵|GHS|₵)\s?[0-9][0-9,.\s]*/iu);
+  const match = bodyText.match(/(?:GH₵|GHS|₵)\s*[0-9][0-9,.\s]*/iu);
   return match ? text(match[0], 120) : undefined;
 };
 
+const priceFromHtml = (html: string, bodyText: string): string | undefined =>
+  metaFromHtml(html, "product:price:amount") ||
+  metaFromHtml(html, "og:price:amount") ||
+  metaFromHtml(html, "twitter:data1") ||
+  priceFromText(bodyText) ||
+  priceFromText(decodeHtml(html));
+
 const phoneFromText = (bodyText: string): string | undefined => {
-  const match = bodyText.match(/(?:\+233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}/u);
-  return match ? text(match[0], 64) : undefined;
+  const match = bodyText.match(/(?:\+233|233|0)[\s.-]?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}/u);
+  return match ? text(match[0].replace(/[\s.-]+/gu, ""), 64) : undefined;
+};
+
+const phoneFromHtml = (html: string, bodyText: string): string | undefined => {
+  const decoded = decodeHtml(html);
+  const direct =
+    decoded.match(/(?:tel:|wa\.me\/|whatsapp:\/\/send\?phone=)(\+?233[\d\s.-]{8,12}|0[\d\s.-]{8,11})/iu)?.[1] ||
+    decoded.match(/["'](?:phone|sellerPhone|telephone|contactPhone|mobile)["']\s*:\s*["'](\+?233[\d\s.-]{8,12}|0[\d\s.-]{8,11})["']/iu)?.[1];
+
+  const candidate = direct || phoneFromText(bodyText) || phoneFromText(decoded);
+  return candidate ? text(candidate.replace(/[\s.-]+/gu, ""), 64) : undefined;
 };
 
 const imagesFromHtml = (html: string, url: string): string[] => {
@@ -151,11 +168,7 @@ export const extractMarketplaceUrlCapture = (url: string, html: string, now: Dat
   const marketplaceSource = detectMarketplaceSource(url);
   const adapter = adapterFor(url);
 
-  const priceText =
-    metaFromHtml(html, "product:price:amount") ||
-    metaFromHtml(html, "og:price:amount") ||
-    priceFromText(bodyText) ||
-    "";
+  const priceText = priceFromHtml(html, bodyText) || "";
 
   const title =
     metaFromHtml(html, "og:title") ||
@@ -170,7 +183,7 @@ export const extractMarketplaceUrlCapture = (url: string, html: string, now: Dat
     "";
 
   const sellerProfileUrl = sellerProfileFromHtml(html, url);
-  const phone = phoneFromText(bodyText);
+  const phone = phoneFromHtml(html, bodyText);
   const sellerName = sellerNameFromText(bodyText);
   const location = locationFromText(bodyText);
   const images = imagesFromHtml(html, url);
