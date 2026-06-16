@@ -22,7 +22,12 @@ export async function POST(request: NextRequest) {
   const tenant = await getTenantForCurrentUser();
   if (!tenant) return NextResponse.json({ ok: false, error: { message: "Unauthorized" } }, { status: 401 });
 
-  const parsed = parseRequest(await request.json().catch(() => ({})));
+  const contentType = request.headers.get("content-type") ?? "";
+  const parsed =
+    contentType.toLowerCase().includes("application/json")
+      ? parseRequest(await request.json().catch(() => ({})))
+      : parseRequest(Object.fromEntries((await request.formData()).entries()));
+
   if (parsed === null) return NextResponse.json({ ok: false, error: { message: "A valid listing URL is required." } }, { status: 400 });
 
   const url = parsed.url;
