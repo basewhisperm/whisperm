@@ -41,6 +41,10 @@ const createRepositories = (overrides = {}) => {
       }
     },
     contacts: {
+      async findByPhone(scope, phone) {
+        push("contacts", "findByPhone", [scope, phone]);
+        return [...contacts.values()].find((contact) => contact.tenantId === scope.tenantId && contact.phone === phone) ?? null;
+      },
       async findByEmails(scope, emails) {
         push("contacts", "findByEmails", [scope, emails]);
         return [...contacts.values()].filter((contact) => contact.tenantId === scope.tenantId && emails.includes(contact.email));
@@ -211,6 +215,56 @@ test("capture creates a marketplace acquisition deal linked to contact and Captu
   assert.equal(draft.status, "DRAFT");
   const contact = repositories.contactsById.get("contact-1");
   assert.equal(contact.email, "seller@example.com");
+});
+
+
+test("multiple listings from same seller phone reuse one contact and one acquisition deal", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const first = await services.marketplaceAcquisition.capture(context, {
+    ...captureInput,
+    sourceUrl: "https://tonaton.com/listing-1",
+    listingUrl: "https://tonaton.com/listing-1",
+    externalId: "tonaton-listing-1",
+    marketplaceListingId: "tonaton-listing-1",
+    marketplaceIdentifier: "kwame-motors",
+    title: "Honda Civic",
+    sellerName: "Kwame Motors",
+    phone: "0241234567",
+    sellerPhone: "0241234567",
+    email: undefined,
+    sellerEmail: undefined,
+    marketplaceSource: "TONATON"
+  });
+
+  const second = await services.marketplaceAcquisition.capture(context, {
+    ...captureInput,
+    sourceUrl: "https://tonaton.com/listing-2",
+    listingUrl: "https://tonaton.com/listing-2",
+    externalId: "tonaton-listing-2",
+    marketplaceListingId: "tonaton-listing-2",
+    marketplaceIdentifier: "kwame-motors",
+    title: "Toyota Corolla",
+    sellerName: "Kwame Motors",
+    phone: "0241234567",
+    sellerPhone: "0241234567",
+    email: undefined,
+    sellerEmail: undefined,
+    marketplaceSource: "TONATON"
+  });
+
+  assert.equal(first.contactId, second.contactId);
+  assert.equal(first.dealId, second.dealId);
+  assert.notEqual(first.captureId, second.captureId);
+  assert.notEqual(first.draftInventoryId, second.draftInventoryId);
+  assert.equal(first.contactMatchStrategy, "created");
+  assert.equal(second.contactMatchStrategy, "phone");
+  assert.equal(first.dealCreated, true);
+  assert.equal(second.dealCreated, false);
+  assert.equal(repositories.contactsById.size, 1);
+  assert.equal(repositories.dealsByExternalId.size, 1);
+  assert.equal(repositories.draftInventoriesByCapture.size, 2);
 });
 
 test("second capture for same source URL links existing deal without duplication", async () => {
