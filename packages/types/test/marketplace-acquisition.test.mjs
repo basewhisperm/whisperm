@@ -6,6 +6,9 @@ import {
   sellerAcquisitionAssignmentSchema,
   sellerAcquisitionAutomationEventSchema,
   sellerAcquisitionAutomationTriggerValues,
+  sellerAcquisitionNotificationDeliveryStatusValues,
+  sellerAcquisitionNotificationPolicyRecordSchema,
+  sellerAcquisitionNotificationPolicyValues,
   sellerAcquisitionWorkQueueItemSchema,
   sellerAcquisitionWorkQueueReasonValues,
   sellerInvitationChannelValues,
@@ -173,5 +176,43 @@ test("seller acquisition automation trigger contracts preserve workflow events",
     captureId: "capture-1",
     trigger: "BAD_TRIGGER",
     occurredAt: "2026-06-16T00:00:00.000Z",
+  }));
+});
+
+
+test("seller acquisition notification policy contracts preserve WhatsApp-first delivery governance", () => {
+  assert.deepEqual(sellerAcquisitionNotificationPolicyValues, [
+    "WHATSAPP_PRIMARY",
+    "SMS_FALLBACK",
+    "EMAIL_OPTIONAL",
+    "RETRY_WHATSAPP",
+    "RETRY_SMS",
+    "ESCALATE_TO_OPERATOR",
+  ]);
+
+  assert.deepEqual(sellerAcquisitionNotificationDeliveryStatusValues, [
+    "PENDING",
+    "SENT",
+    "DELIVERED",
+    "OPENED",
+    "FAILED",
+    "RETRY_SCHEDULED",
+    "ESCALATED",
+  ]);
+
+  const record = sellerAcquisitionNotificationPolicyRecordSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    policy: "WHATSAPP_PRIMARY",
+    channel: "WHATSAPP",
+  });
+
+  assert.equal(record.status, "PENDING");
+  assert.deepEqual(record.metadata, {});
+  assert.throws(() => sellerAcquisitionNotificationPolicyRecordSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    policy: "BAD_POLICY",
+    channel: "WHATSAPP",
   }));
 });

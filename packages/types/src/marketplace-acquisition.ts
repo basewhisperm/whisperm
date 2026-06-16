@@ -206,6 +206,46 @@ export const sellerAcquisitionAutomationEventSchema = z.object({
 export type SellerAcquisitionAutomationEvent = z.output<typeof sellerAcquisitionAutomationEventSchema>;
 
 
+export const sellerAcquisitionNotificationPolicyValues = [
+  "WHATSAPP_PRIMARY",
+  "SMS_FALLBACK",
+  "EMAIL_OPTIONAL",
+  "RETRY_WHATSAPP",
+  "RETRY_SMS",
+  "ESCALATE_TO_OPERATOR",
+] as const;
+
+export const sellerAcquisitionNotificationPolicySchema = z.enum(sellerAcquisitionNotificationPolicyValues);
+export type SellerAcquisitionNotificationPolicy = z.output<typeof sellerAcquisitionNotificationPolicySchema>;
+
+export const sellerAcquisitionNotificationDeliveryStatusValues = [
+  "PENDING",
+  "SENT",
+  "DELIVERED",
+  "OPENED",
+  "FAILED",
+  "RETRY_SCHEDULED",
+  "ESCALATED",
+] as const;
+
+export const sellerAcquisitionNotificationDeliveryStatusSchema = z.enum(sellerAcquisitionNotificationDeliveryStatusValues);
+export type SellerAcquisitionNotificationDeliveryStatus = z.output<typeof sellerAcquisitionNotificationDeliveryStatusSchema>;
+
+export const sellerAcquisitionNotificationPolicyRecordSchema = z.object({
+  tenantId: idSchema,
+  captureId: idSchema,
+  policy: sellerAcquisitionNotificationPolicySchema,
+  channel: sellerInvitationChannelSchema,
+  status: sellerAcquisitionNotificationDeliveryStatusSchema.default("PENDING"),
+  scheduledAt: isoDateSchema.optional(),
+  lastAttemptAt: isoDateSchema.optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).strict();
+
+export type SellerAcquisitionNotificationPolicyRecord = z.output<typeof sellerAcquisitionNotificationPolicyRecordSchema>;
+
+
+
 
 export const sellerAcquisitionSlaStatusValues = ["ON_TIME", "AT_RISK", "BREACHED"] as const;
 export const sellerAcquisitionSlaStatusSchema = z.enum(sellerAcquisitionSlaStatusValues);
