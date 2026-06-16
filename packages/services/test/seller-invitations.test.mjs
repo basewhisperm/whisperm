@@ -7,7 +7,7 @@ import { SellerInvitationService, ServiceError } from "../dist/index.js";
 const now = "2026-06-14T00:00:00.000Z";
 const context = { tenantId: "tenant-a", actorId: "actor-1", correlation: { correlationId: "corr-invite" } };
 
-const createStore = () => ({ captures: new Map(), invitations: [], claimTokens: [], audits: [], sent: [], stageUpdates: [] });
+const createStore = () => ({ captures: new Map(), invitations: [], claimTokens: [], audits: [], sent: [], stageUpdates: [], scheduledLifecycle: [] });
 const baseCapture = (overrides = {}) => ({ id: "capture-1", tenantId: "tenant-a", listingUrl: "https://market.example/listing/1", title: "Desk", status: "CAPTURED", dealId: "deal-1", capturedAt: now, createdAt: now, updatedAt: now, metadata: {}, ...overrides });
 
 const deps = (store, options = {}) => ({
@@ -28,6 +28,7 @@ const deps = (store, options = {}) => ({
   deals: { async updateStage(workspaceId, dealId, stageId) { store.stageUpdates.push({ workspaceId, dealId, stageId }); return {}; } },
   auditLogs: { async append(scope, input) { store.audits.push({ tenantId: scope.tenantId, ...input }); return {}; } },
   notifications: { inviteBaseUrl: options.inviteBaseUrl ?? "https://app.example/invite", now: () => new Date(now), whatsappEnabled: options.whatsappEnabled, fallbackToSmsWhenWhatsappMissing: options.fallbackToSmsWhenWhatsappMissing, whatsapp: options.whatsapp, sms: options.sms, email: options.email },
+  claimLifecycleScheduler: options.claimLifecycleScheduler ?? { async scheduleClaimLifecycle(context, invitationId) { store.scheduledLifecycle.push({ context, invitationId }); return []; } },
 });
 
 const run = async (capture, options, input = {}) => { const store = createStore(); store.captures.set(`${capture.tenantId}:${capture.id}`, capture); const service = new SellerInvitationService(deps(store, options)); const result = await service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id, ...input }); return { store, result }; };
@@ -89,4 +90,26 @@ test("provider delivery failure produces deterministic failure metadata", async 
   assert.equal(r.store.invitations[0].metadata.providerOutcome, "FAILED");
   assert.equal(r.store.invitations[0].metadata.failureReason, "INVITATION_PROVIDER_UNAVAILABLE");
   assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FAILED"), true);
+});
+
+
+test("successful invitation schedules claim lifecycle jobs for the claim token", async () => {
+  const store = createStore();
+  const p = providers(store);
+  const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), { email: p.email });
+
+  assert.equal(r.result.status, "SENT");
+  assert.equal(r.store.claimTokens.length, 1);
+  assert.equal(r.store.scheduledLifecycle.length, 1);
+  assert.equal(r.store.scheduledLifecycle[0].invitationId, r.store.claimTokens[0].id);
+  assert.equal(r.store.scheduledLifecycle[0].context.tenantId, "tenant-a");
+});
+
+test("failed invitation does not schedule claim lifecycle jobs", async () => {
+  const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {
+    email: { async send() { throw new Error("provider down"); } },
+  });
+
+  assert.equal(r.result.status, "FAILED");
+  assert.equal(r.store.scheduledLifecycle.length, 0);
 });
