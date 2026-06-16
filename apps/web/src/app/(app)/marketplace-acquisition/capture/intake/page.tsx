@@ -22,8 +22,9 @@ function CaptureForm({ payload }: { readonly payload: MarketplaceCapturePayload 
     const clean = (value: string) => value.trim() || undefined;
     const body = { ...payload, ...Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, clean(value)])), images: payload.images, imageUrls: payload.imageUrls, sourceUrl: payload.sourceUrl, sourceHost: payload.sourceHost, pageUrl: payload.pageUrl ?? payload.sourceUrl };
     try {
-      const response = await fetch("/marketplace-acquisition/captures", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      const json = await response.json() as { readonly ok?: boolean; readonly data?: Record<string, unknown>; readonly error?: { readonly message?: string } };
+      const response = await fetch("/api/marketplace-acquisition/captures", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const responseText = await response.text();
+      const json = responseText ? JSON.parse(responseText) as { readonly ok?: boolean; readonly data?: Record<string, unknown>; readonly error?: { readonly message?: string } } : {};
       if (!response.ok || json.ok === false) throw new Error(json.error?.message ?? "Capture failed");
       setState({ status: "success", data: json.data ?? {} });
     } catch (error) {

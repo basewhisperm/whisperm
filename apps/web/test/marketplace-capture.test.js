@@ -100,7 +100,7 @@ test('intake page submits seller and inventory data to capture API', () => {
   for (const field of ['sellerName', 'sellerProfileUrl', 'phone', 'email', 'location', 'title', 'priceText', 'category', 'listingUrl', 'marketplaceSource', 'marketplaceListingId']) {
     assert.match(source, new RegExp(field, 'u'));
   }
-  assert.match(source, /fetch\("\/marketplace-acquisition\/captures"/u);
+  assert.match(source, /fetch\("\/api\/marketplace-acquisition\/captures"/u);
 });
 
 test('mobile URL capture posts URL only and does not require manual seller fields', () => {
