@@ -178,3 +178,21 @@ export const sellerAcquisitionWorkQueueItemSchema = z.object({
 }).strict();
 export type SellerAcquisitionWorkQueueItem = z.output<typeof sellerAcquisitionWorkQueueItemSchema>;
 
+export const sellerAcquisitionAssignmentResolutionValues = ["UNASSIGNED", "ASSIGNED", "ESCALATED", "RESOLVED", "DISMISSED"] as const;
+export const sellerAcquisitionAssignmentResolutionSchema = z.enum(sellerAcquisitionAssignmentResolutionValues);
+export type SellerAcquisitionAssignmentResolution = z.output<typeof sellerAcquisitionAssignmentResolutionSchema>;
+
+export const sellerAcquisitionAssignmentSchema = z.object({
+  tenantId: idSchema,
+  captureId: idSchema,
+  workQueueReason: sellerAcquisitionWorkQueueReasonSchema,
+  assignedToUserId: idSchema.optional(),
+  resolution: sellerAcquisitionAssignmentResolutionSchema.default("UNASSIGNED"),
+  resolvedAt: isoDateSchema.optional(),
+  note: z.string().trim().max(1000).optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).strict();
+
+export type SellerAcquisitionAssignment = z.output<typeof sellerAcquisitionAssignmentSchema>;
+
+

@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  sellerAcquisitionAssignmentResolutionValues,
+  sellerAcquisitionAssignmentSchema,
+  sellerAcquisitionWorkQueueItemSchema,
+  sellerAcquisitionWorkQueueReasonValues,
   sellerInvitationChannelValues,
   sellerInvitationCreateRequestSchema,
   sellerInvitationResponseSchema,
@@ -34,11 +38,6 @@ test("seller invitation contracts preserve WhatsApp-first channel support with o
   assert.equal(response.channel, "WHATSAPP");
 });
 
-import {
-  sellerAcquisitionWorkQueueItemSchema,
-  sellerAcquisitionWorkQueueReasonValues,
-} from "../dist/index.js";
-
 test("seller acquisition work queue contract preserves operator follow-up reasons", () => {
   assert.deepEqual(sellerAcquisitionWorkQueueReasonValues, [
     "NEEDS_FOLLOW_UP",
@@ -58,4 +57,36 @@ test("seller acquisition work queue contract preserves operator follow-up reason
 
   assert.equal(item.priority, "NORMAL");
   assert.deepEqual(item.metadata, {});
+});
+
+
+test("seller acquisition assignment contract supports ownership and resolution workflow", () => {
+  assert.deepEqual(sellerAcquisitionAssignmentResolutionValues, [
+    "UNASSIGNED",
+    "ASSIGNED",
+    "ESCALATED",
+    "RESOLVED",
+    "DISMISSED",
+  ]);
+
+  const assignment = sellerAcquisitionAssignmentSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    workQueueReason: "FAILED_DELIVERY",
+    assignedToUserId: "user-1",
+    resolution: "ASSIGNED",
+    note: "Operator should retry WhatsApp first, then SMS fallback.",
+  });
+
+  assert.equal(assignment.assignedToUserId, "user-1");
+  assert.equal(assignment.resolution, "ASSIGNED");
+  assert.deepEqual(assignment.metadata, {});
+
+  const unassigned = sellerAcquisitionAssignmentSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-2",
+    workQueueReason: "NEEDS_FOLLOW_UP",
+  });
+
+  assert.equal(unassigned.resolution, "UNASSIGNED");
 });
