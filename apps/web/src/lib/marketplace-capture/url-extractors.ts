@@ -32,6 +32,7 @@ const decodeHtml = (value: string): string =>
   value
     .replace(/&amp;/giu, "&")
     .replace(/&quot;/giu, '"')
+    .replace(/&#34;/giu, '"')
     .replace(/&#39;|&apos;/giu, "'")
     .replace(/&lt;/giu, "<")
     .replace(/&gt;/giu, ">")
@@ -83,30 +84,43 @@ const listingIdFromUrl = (url: string): string | undefined => {
 };
 
 const priceFromText = (bodyText: string): string | undefined => {
-  const match = bodyText.match(/(?:GH₵|GHS|₵)\s*[0-9][0-9,.\s]*/iu);
+  const match = bodyText.match(/(?:GH₵|GHS|₵|GH¢)\s?[0-9][0-9,.\s]*/iu);
   return match ? text(match[0], 120) : undefined;
 };
 
-const priceFromHtml = (html: string, bodyText: string): string | undefined =>
-  metaFromHtml(html, "product:price:amount") ||
-  metaFromHtml(html, "og:price:amount") ||
-  metaFromHtml(html, "twitter:data1") ||
-  priceFromText(bodyText) ||
-  priceFromText(decodeHtml(html));
+const priceFromHtml = (html: string, bodyText: string): string | undefined => {
+  const decoded = decodeHtml(html);
+
+  const jsonPrice =
+    decoded.match(/"price"\s*:\s*"([^"]+)"/iu)?.[1] ||
+    decoded.match(/"price"\s*:\s*([0-9][0-9,.]*)/iu)?.[1] ||
+    decoded.match(/"amount"\s*:\s*"([^"]+)"/iu)?.[1];
+
+  const metaPrice =
+    metaFromHtml(html, "product:price:amount") ||
+    metaFromHtml(html, "og:price:amount") ||
+    metaFromHtml(html, "twitter:data1");
+
+  const raw = text(jsonPrice || metaPrice || priceFromText(bodyText), 120);
+  if (!raw) return undefined;
+  return /^(?:GH₵|GHS|₵|GH¢)/iu.test(raw) ? raw : `GH₵ ${raw}`;
+};
 
 const phoneFromText = (bodyText: string): string | undefined => {
-  const match = bodyText.match(/(?:\+233|233|0)[\s.-]?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}/u);
-  return match ? text(match[0].replace(/[\s.-]+/gu, ""), 64) : undefined;
+  const match = bodyText.match(/(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}/u);
+  return match ? text(match[0].replace(/\s|\.|-/gu, ""), 64) : undefined;
 };
 
 const phoneFromHtml = (html: string, bodyText: string): string | undefined => {
   const decoded = decodeHtml(html);
-  const direct =
-    decoded.match(/(?:tel:|wa\.me\/|whatsapp:\/\/send\?phone=)(\+?233[\d\s.-]{8,12}|0[\d\s.-]{8,11})/iu)?.[1] ||
-    decoded.match(/["'](?:phone|sellerPhone|telephone|contactPhone|mobile)["']\s*:\s*["'](\+?233[\d\s.-]{8,12}|0[\d\s.-]{8,11})["']/iu)?.[1];
+  const candidates = [
+    ...Array.from(decoded.matchAll(/href=["']tel:([^"']+)["']/giu)).map((match) => match[1]),
+    ...Array.from(decoded.matchAll(/"phone(?:Number)?"\s*:\s*"([^"]+)"/giu)).map((match) => match[1]),
+    ...Array.from(decoded.matchAll(/"telephone"\s*:\s*"([^"]+)"/giu)).map((match) => match[1]),
+    phoneFromText(bodyText),
+  ];
 
-  const candidate = direct || phoneFromText(bodyText) || phoneFromText(decoded);
-  return candidate ? text(candidate.replace(/[\s.-]+/gu, ""), 64) : undefined;
+  return candidates.map((candidate) => text(candidate, 64).replace(/\s|\.|-/gu, "")).find(Boolean);
 };
 
 const imagesFromHtml = (html: string, url: string): string[] => {
@@ -169,7 +183,6 @@ export const extractMarketplaceUrlCapture = (url: string, html: string, now: Dat
   const adapter = adapterFor(url);
 
   const priceText = priceFromHtml(html, bodyText) || "";
-
   const title =
     metaFromHtml(html, "og:title") ||
     metaFromHtml(html, "twitter:title") ||
@@ -199,7 +212,7 @@ export const extractMarketplaceUrlCapture = (url: string, html: string, now: Dat
     description,
     priceText,
     price: priceText,
-    currency: /GH₵|GHS|₵/iu.test(priceText) ? "GHS" : undefined,
+    currency: /GH₵|GHS|₵|GH¢/iu.test(priceText) ? "GHS" : undefined,
     images,
     imageUrls: images,
     sellerName,
