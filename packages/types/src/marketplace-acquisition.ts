@@ -179,6 +179,34 @@ export const sellerAcquisitionWorkQueueItemSchema = z.object({
 export type SellerAcquisitionWorkQueueItem = z.output<typeof sellerAcquisitionWorkQueueItemSchema>;
 
 
+export const sellerAcquisitionAutomationTriggerValues = [
+  "INVITATION_SENT",
+  "INVITATION_FAILED",
+  "CLAIM_STARTED",
+  "CLAIM_COMPLETED",
+  "CLAIM_ABANDONED",
+  "CLAIM_EXPIRING",
+  "SLA_AT_RISK",
+  "SLA_BREACHED",
+  "CONVERSION_SUCCEEDED",
+  "CONVERSION_FAILED",
+] as const;
+
+export const sellerAcquisitionAutomationTriggerSchema = z.enum(sellerAcquisitionAutomationTriggerValues);
+export type SellerAcquisitionAutomationTrigger = z.output<typeof sellerAcquisitionAutomationTriggerSchema>;
+
+export const sellerAcquisitionAutomationEventSchema = z.object({
+  tenantId: idSchema,
+  captureId: idSchema,
+  trigger: sellerAcquisitionAutomationTriggerSchema,
+  occurredAt: isoDateSchema,
+  metadata: z.record(z.string(), z.unknown()).default({}),
+}).strict();
+
+export type SellerAcquisitionAutomationEvent = z.output<typeof sellerAcquisitionAutomationEventSchema>;
+
+
+
 export const sellerAcquisitionSlaStatusValues = ["ON_TIME", "AT_RISK", "BREACHED"] as const;
 export const sellerAcquisitionSlaStatusSchema = z.enum(sellerAcquisitionSlaStatusValues);
 export type SellerAcquisitionSlaStatus = z.output<typeof sellerAcquisitionSlaStatusSchema>;

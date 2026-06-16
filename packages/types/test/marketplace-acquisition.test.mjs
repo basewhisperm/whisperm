@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   sellerAcquisitionAssignmentResolutionValues,
   sellerAcquisitionAssignmentSchema,
+  sellerAcquisitionAutomationEventSchema,
+  sellerAcquisitionAutomationTriggerValues,
   sellerAcquisitionWorkQueueItemSchema,
   sellerAcquisitionWorkQueueReasonValues,
   sellerInvitationChannelValues,
@@ -140,5 +142,36 @@ test("seller acquisition SLA contracts preserve operational governance states", 
     status: "BAD_STATUS",
     startedAt: "2026-06-15T00:00:00.000Z",
     dueAt: "2026-06-16T00:00:00.000Z",
+  }));
+});
+
+
+test("seller acquisition automation trigger contracts preserve workflow events", () => {
+  assert.deepEqual(sellerAcquisitionAutomationTriggerValues, [
+    "INVITATION_SENT",
+    "INVITATION_FAILED",
+    "CLAIM_STARTED",
+    "CLAIM_COMPLETED",
+    "CLAIM_ABANDONED",
+    "CLAIM_EXPIRING",
+    "SLA_AT_RISK",
+    "SLA_BREACHED",
+    "CONVERSION_SUCCEEDED",
+    "CONVERSION_FAILED",
+  ]);
+
+  const event = sellerAcquisitionAutomationEventSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    trigger: "SLA_BREACHED",
+    occurredAt: "2026-06-16T00:00:00.000Z",
+  });
+
+  assert.deepEqual(event.metadata, {});
+  assert.throws(() => sellerAcquisitionAutomationEventSchema.parse({
+    tenantId: "tenant-1",
+    captureId: "capture-1",
+    trigger: "BAD_TRIGGER",
+    occurredAt: "2026-06-16T00:00:00.000Z",
   }));
 });
