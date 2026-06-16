@@ -16,123 +16,7 @@ const parseRequest = (value: unknown): { readonly url: string } | null => {
   }
 };
 
-const text = (value: string | undefined | null, max = 1000): string =>
-  (value ?? "").replace(/\s+/gu, " ").trim().slice(0, max);
-
-const decodeHtml = (value: string): string =>
-  value
-    .replace(/&amp;/giu, "&")
-    .replace(/&quot;/giu, '"')
-    .replace(/&#39;|&apos;/giu, "'")
-    .replace(/&lt;/giu, "<")
-    .replace(/&gt;/giu, ">")
-    .replace(/&nbsp;/giu, " ");
-
-const meta = (html: string, name: string): string => {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const patterns = [
-    new RegExp(`<meta[^>]+(?:property|name)=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, "iu"),
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${escaped}["'][^>]*>`, "iu"),
-  ];
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match?.[1]) return text(decodeHtml(match[1]), 1000);
-  }
-
-  return "";
-};
-
-const titleFromHtml = (html: string): string => {
-  const match = html.match(/<title[^>]*>([^<]+)<\/title>/iu);
-  return text(decodeHtml(match?.[1] ?? ""), 300);
-};
-
-const visibleText = (html: string): string =>
-  text(
-    decodeHtml(
-      html
-        .replace(/<script[\s\S]*?<\/script>/giu, " ")
-        .replace(/<style[\s\S]*?<\/style>/giu, " ")
-        .replace(/<[^>]+>/gu, " "),
-    ),
-    12000,
-  );
-
-const detectMarketplaceSource = (url: string): string => {
-  const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./u, "");
-  if (hostname.endsWith("jiji.com.gh")) return "jiji.com.gh";
-  if (hostname.endsWith("tonaton.com")) return "tonaton.com";
-  return hostname;
-};
-
-const listingIdFromUrl = (url: string): string | undefined => {
-  const parsed = new URL(url);
-  return text(parsed.searchParams.get("lid") ?? parsed.pathname.split("/").filter(Boolean).at(-1), 255) || undefined;
-};
-
-const priceFromText = (bodyText: string): string | undefined => {
-  const match = bodyText.match(/(?:GH₵|GHS|₵)\s?[0-9][0-9,.\s]*/iu);
-  return match ? text(match[0], 120) : undefined;
-};
-
-const phoneFromText = (bodyText: string): string | undefined => {
-  const match = bodyText.match(/(?:\+233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}/u);
-  return match ? text(match[0], 64) : undefined;
-};
-
-const imagesFromHtml = (html: string, url: string): readonly string[] => {
-  const candidates = [
-    meta(html, "og:image"),
-    meta(html, "twitter:image"),
-    ...Array.from(html.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/giu)).map((match) => match[1] ?? ""),
-  ];
-
-  return Array.from(
-    new Set(
-      candidates
-        .map((candidate) => {
-          try {
-            return new URL(text(candidate, 2048), url).toString();
-          } catch {
-            return "";
-          }
-        })
-        .filter(Boolean),
-    ),
-  ).slice(0, 10);
-};
-
-const extractFromHtml = (url: string, html: string) => {
-  const parsed = new URL(url);
-  const bodyText = visibleText(html);
-  const marketplaceSource = detectMarketplaceSource(url);
-  const priceText = meta(html, "product:price:amount") || meta(html, "og:price:amount") || priceFromText(bodyText) || "";
-  const title = meta(html, "og:title") || meta(html, "twitter:title") || titleFromHtml(html) || parsed.pathname.split("/").filter(Boolean).at(-1) || url;
-  const description = meta(html, "og:description") || meta(html, "description") || "";
-
-  return {
-    sourceUrl: url,
-    sourceHost: parsed.hostname.toLowerCase(),
-    listingUrl: url,
-    marketplaceSource,
-    sourceMarketplace: marketplaceSource,
-    marketplaceListingId: listingIdFromUrl(url),
-    title,
-    description,
-    priceText,
-    price: priceText,
-    currency: /GH₵|GHS|₵/iu.test(priceText) ? "GHS" : undefined,
-    images: imagesFromHtml(html, url),
-    imageUrls: imagesFromHtml(html, url),
-    sellerName: undefined,
-    phone: phoneFromText(bodyText),
-    location: undefined,
-    pageUrl: url,
-    capturedAt: new Date().toISOString(),
-    rawExtract: { strategy: "url-fetch" },
-  };
-};
+import { extractMarketplaceUrlCapture } from "@/lib/marketplace-capture/url-extractors";
 
 export async function POST(request: NextRequest) {
   const tenant = await getTenantForCurrentUser();
@@ -167,7 +51,7 @@ export async function POST(request: NextRequest) {
     }
 
     const html = (await response.text()).slice(0, 500_000);
-    const captureInput = extractFromHtml(response.url || url, html);
+    const captureInput = extractMarketplaceUrlCapture(response.url || url, html);
 
     const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
     const services = createWhispeRMServices(repositories);
