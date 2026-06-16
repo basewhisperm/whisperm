@@ -113,8 +113,20 @@ test('mobile URL capture posts URL only and does not require manual seller field
 
   assert.match(route, /parseRequest/u);
   assert.match(route, /fetch\(url/u);
-  assert.match(route, /extractFromHtml/u);
+  assert.match(route, /extractMarketplaceUrlCapture/u);
   assert.match(route, /marketplaceAcquisition\.capture/u);
 
   assert.doesNotMatch(route, /claimantName|manual seller|sellerName.*request|phone.*request|priceText.*request/u);
+});
+
+test('URL extractor adapters are wired for Jiji and Tonaton without runtime TS import drift', () => {
+  const source = readFileSync(new URL('../src/lib/marketplace-capture/url-extractors.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /jiji\.com\.gh/u);
+  assert.match(source, /tonaton\.com/u);
+  assert.match(source, /phoneFromText/u);
+  assert.match(source, /sellerNameFromText/u);
+  assert.match(source, /locationFromText/u);
+  assert.match(source, /extractMarketplaceUrlCapture/u);
+  assert.match(source, /url-fetch/u);
 });

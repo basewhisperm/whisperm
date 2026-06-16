@@ -1,0 +1,201 @@
+export interface UrlCaptureExtraction {
+  readonly sourceUrl: string;
+  readonly sourceHost: string;
+  readonly listingUrl: string;
+  readonly marketplaceSource: string;
+  readonly sourceMarketplace: string;
+  readonly marketplaceListingId?: string | undefined;
+  readonly title: string;
+  readonly description: string;
+  readonly priceText: string;
+  readonly price: string;
+  readonly currency?: string | undefined;
+  readonly images: string[];
+  readonly imageUrls: string[];
+  readonly sellerName?: string | undefined;
+  readonly sellerProfileUrl?: string | undefined;
+  readonly marketplaceIdentifier?: string | undefined;
+  readonly phone?: string | undefined;
+  readonly location?: string | undefined;
+  readonly pageUrl: string;
+  readonly capturedAt: string;
+  readonly rawExtract: {
+    readonly strategy: "url-fetch";
+    readonly adapter: "jiji" | "tonaton" | "fallback";
+  };
+}
+
+const text = (value: string | undefined | null, max = 1000): string =>
+  (value ?? "").replace(/\s+/gu, " ").trim().slice(0, max);
+
+const decodeHtml = (value: string): string =>
+  value
+    .replace(/&amp;/giu, "&")
+    .replace(/&quot;/giu, '"')
+    .replace(/&#39;|&apos;/giu, "'")
+    .replace(/&lt;/giu, "<")
+    .replace(/&gt;/giu, ">")
+    .replace(/&nbsp;/giu, " ");
+
+const escapedRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+export const metaFromHtml = (html: string, name: string): string => {
+  const escaped = escapedRegex(name);
+  const patterns = [
+    new RegExp(`<meta[^>]+(?:property|name)=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, "iu"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${escaped}["'][^>]*>`, "iu"),
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return text(decodeHtml(match[1]), 1000);
+  }
+
+  return "";
+};
+
+const titleFromHtml = (html: string): string => {
+  const match = html.match(/<title[^>]*>([^<]+)<\/title>/iu);
+  return text(decodeHtml(match?.[1] ?? ""), 300);
+};
+
+const visibleText = (html: string): string =>
+  text(
+    decodeHtml(
+      html
+        .replace(/<script[\s\S]*?<\/script>/giu, " ")
+        .replace(/<style[\s\S]*?<\/style>/giu, " ")
+        .replace(/<[^>]+>/gu, " "),
+    ),
+    12000,
+  );
+
+export const detectMarketplaceSource = (url: string): string => {
+  const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./u, "");
+  if (hostname.endsWith("jiji.com.gh")) return "jiji.com.gh";
+  if (hostname.endsWith("tonaton.com")) return "tonaton.com";
+  return hostname;
+};
+
+const listingIdFromUrl = (url: string): string | undefined => {
+  const parsed = new URL(url);
+  return text(parsed.searchParams.get("lid") ?? parsed.pathname.split("/").filter(Boolean).at(-1), 255) || undefined;
+};
+
+const priceFromText = (bodyText: string): string | undefined => {
+  const match = bodyText.match(/(?:GH₵|GHS|₵)\s?[0-9][0-9,.\s]*/iu);
+  return match ? text(match[0], 120) : undefined;
+};
+
+const phoneFromText = (bodyText: string): string | undefined => {
+  const match = bodyText.match(/(?:\+233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}/u);
+  return match ? text(match[0], 64) : undefined;
+};
+
+const imagesFromHtml = (html: string, url: string): string[] => {
+  const candidates = [
+    metaFromHtml(html, "og:image"),
+    metaFromHtml(html, "twitter:image"),
+    ...Array.from(html.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/giu)).map((match) => match[1] ?? ""),
+  ];
+
+  return Array.from(
+    new Set(
+      candidates
+        .map((candidate) => {
+          try {
+            return new URL(text(candidate, 2048), url).toString();
+          } catch {
+            return "";
+          }
+        })
+        .filter(Boolean),
+    ),
+  ).slice(0, 10);
+};
+
+const sellerProfileFromHtml = (html: string, url: string): string | undefined => {
+  const href = Array.from(html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/giu))
+    .map((match) => text(match[1], 2048))
+    .find((candidate) => /seller|profile|user|shop|store/iu.test(candidate));
+
+  if (!href) return undefined;
+
+  try {
+    return new URL(href, url).toString();
+  } catch {
+    return href;
+  }
+};
+
+const locationFromText = (bodyText: string): string | undefined => {
+  const match = bodyText.match(/\b(?:Accra Metropolitan|East Legon|Cape Coast|Accra|Kumasi|Tema|Takoradi|Tamale|Spintex|Osu|Madina|Kasoa|Achimota|Dansoman|Adenta|Ashaiman)\b(?:[\w\s,-]{0,80}?)(?=\s+(?:Call|Seller|Posted by|Dealer|Vendor|\+233|0\d)|$)/iu);
+  return match ? text(match[0], 255) : undefined;
+};
+
+const sellerNameFromText = (bodyText: string): string | undefined => {
+  const match = bodyText.match(/(?:Seller|Posted by|Dealer|Vendor)\s*:?\s*([A-Z][\w .'-]{2,80}?)(?=\s+(?:Accra|Kumasi|Tema|Takoradi|Cape Coast|Tamale|East Legon|Spintex|Osu|Madina|Kasoa|Achimota|Dansoman|Adenta|Ashaiman|Accra Metropolitan|Call|\+233|0\d)|$)/u);
+  return match?.[1] ? text(match[1], 120) : undefined;
+};
+
+const adapterFor = (url: string): UrlCaptureExtraction["rawExtract"]["adapter"] => {
+  const host = new URL(url).hostname.toLowerCase().replace(/^www\./u, "");
+  if (host.endsWith("jiji.com.gh")) return "jiji";
+  if (host.endsWith("tonaton.com")) return "tonaton";
+  return "fallback";
+};
+
+export const extractMarketplaceUrlCapture = (url: string, html: string, now: Date = new Date()): UrlCaptureExtraction => {
+  const parsed = new URL(url);
+  const bodyText = visibleText(html);
+  const marketplaceSource = detectMarketplaceSource(url);
+  const adapter = adapterFor(url);
+
+  const priceText =
+    metaFromHtml(html, "product:price:amount") ||
+    metaFromHtml(html, "og:price:amount") ||
+    priceFromText(bodyText) ||
+    "";
+
+  const title =
+    metaFromHtml(html, "og:title") ||
+    metaFromHtml(html, "twitter:title") ||
+    titleFromHtml(html) ||
+    parsed.pathname.split("/").filter(Boolean).at(-1) ||
+    url;
+
+  const description =
+    metaFromHtml(html, "og:description") ||
+    metaFromHtml(html, "description") ||
+    "";
+
+  const sellerProfileUrl = sellerProfileFromHtml(html, url);
+  const phone = phoneFromText(bodyText);
+  const sellerName = sellerNameFromText(bodyText);
+  const location = locationFromText(bodyText);
+  const images = imagesFromHtml(html, url);
+
+  return {
+    sourceUrl: url,
+    sourceHost: parsed.hostname.toLowerCase(),
+    listingUrl: url,
+    marketplaceSource,
+    sourceMarketplace: marketplaceSource,
+    marketplaceListingId: listingIdFromUrl(url),
+    title,
+    description,
+    priceText,
+    price: priceText,
+    currency: /GH₵|GHS|₵/iu.test(priceText) ? "GHS" : undefined,
+    images,
+    imageUrls: images,
+    sellerName,
+    sellerProfileUrl,
+    marketplaceIdentifier: phone ?? sellerProfileUrl ?? sellerName,
+    phone,
+    location,
+    pageUrl: url,
+    capturedAt: now.toISOString(),
+    rawExtract: { strategy: "url-fetch", adapter },
+  };
+};
