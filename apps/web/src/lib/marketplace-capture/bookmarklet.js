@@ -107,7 +107,7 @@ export function encodeMarketplaceCapturePayload(payload) {
 
 export function createMarketplaceCaptureBookmarklet(options) {
   const intakeUrlLiteral = JSON.stringify(options.intakeUrl);
-  const source = `const clean=${clean.toString()};${detectMarketplaceSource.toString()};${deriveMarketplaceListingId.toString()};${extractMarketplaceCapturePayload.toString()};const MAX=${marketplaceCaptureMaxPayloadBytes};const INTAKE=${intakeUrlLiteral};const extract=extractMarketplaceCapturePayload;const payload=extract(document,window.location,navigator.userAgent);const json=JSON.stringify(payload);if(new TextEncoder().encode(json).length>MAX){alert('WhispeRM capture is too large. Capture a single public listing page and try again.');return}window.open(INTAKE+'?payload='+encodeURIComponent(json),'_blank','noopener,noreferrer')`;
+  const source = `const clean=${clean.toString()};${detectMarketplaceSource.toString()};${deriveMarketplaceListingId.toString()};const extract=${extractMarketplaceCapturePayload.toString()};const MAX=${marketplaceCaptureMaxPayloadBytes};const INTAKE=${intakeUrlLiteral};const payload=extract(document,window.location,navigator.userAgent);const json=JSON.stringify(payload);if(new TextEncoder().encode(json).length>MAX){alert('WhispeRM capture is too large. Capture a single public listing page and try again.');return}window.open(INTAKE+'?payload='+encodeURIComponent(json),'_blank','noopener,noreferrer')`;
   return `javascript:(function(){${source}})()`;
 }
 
