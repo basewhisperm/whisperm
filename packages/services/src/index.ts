@@ -1341,7 +1341,21 @@ export class SellerInvitationService {
       } catch {
         return null;
       }
-      const sent = await this.deps.sellerInvitations!.update(scope, record.id, { status: "SENT", metadata: { ...(record.metadata ?? {}), sentAt: new Date().toISOString(), providerOutcome: "DELIVERED" } });
+      const sentAt = new Date().toISOString();
+      const sent = await this.deps.sellerInvitations!.update(scope, record.id, { status: "SENT", metadata: { ...(record.metadata ?? {}), sentAt, providerOutcome: "DELIVERED" } });
+      const sentCapture = await repositories.marketplaceCaptures.findById(scope, sent.marketplaceCaptureId);
+      if (repositories.activities !== undefined && context.actorId !== undefined && sentCapture?.dealId != null) {
+        await repositories.activities.create({ ...scope, actorId: context.actorId, correlation: context.correlation }, {
+          tenantId: context.tenantId,
+          contactId: sentCapture.contactId ?? null,
+          dealId: sentCapture.dealId,
+          createdById: context.actorId,
+          type: "NOTE",
+          note: `Seller Acquisition invitation sent via ${channel}`,
+          occurredAt: sentAt,
+          metadata: { eventType: "INVITATION_SENT", marketplaceCaptureId: sent.marketplaceCaptureId, invitationId: sent.id, channel },
+        });
+      }
       await appendAudit(repositories, context, { action: "INVITATION_SENT", targetType: "SELLER_INVITATION", targetId: sent.id, metadata: { captureId: sent.marketplaceCaptureId, channel } });
       return sent;
     };
