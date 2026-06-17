@@ -1,8 +1,19 @@
-import type { AuditLogRepository, DealsRepository, DraftInventoryRecord, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, RenderConversionRepository } from "@whisperm/repositories";
+import type {
+  AuditLogRepository,
+  DealsRepository,
+  DraftInventoryRecord,
+  DraftInventoryRepository,
+  MarketplaceCaptureRecord,
+  MarketplaceCaptureRepository,
+  RenderConversionRecord,
+  RenderConversionRepository,
+} from "@whisperm/repositories";
 import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
 
 export interface RenderInventoryConnector {
-  createRenderInventory(input: Readonly<Record<string, unknown>> & { readonly idempotencyKey: string }): Promise<{ readonly renderInventoryId: string; readonly status: "CREATED" | "EXISTS" }>;
+  createRenderInventory(
+    input: Readonly<Record<string, unknown>> & { readonly idempotencyKey: string },
+  ): Promise<{ readonly renderInventoryId: string; readonly status: "CREATED" | "EXISTS" }>;
 }
 
 export interface RenderInventoryConversionContext {
@@ -55,6 +66,7 @@ export interface RenderInventoryConversionDependencies {
 export interface RenderInventoryConversionResult {
   readonly captureId: string;
   readonly draftInventoryId: string;
+  readonly renderSellerId: string;
   readonly renderInventoryId: string;
   readonly conversionStatus: "SUCCESS";
   readonly conversionId: string;
@@ -65,37 +77,78 @@ export interface RenderInventoryConversionResult {
 const eligibleCaptureStatuses = new Set(["CLAIMED", "CONVERTED"]);
 const eligibleDraftStatuses = new Set(["CLAIMED", "CONVERTED"]);
 
+const metadataString = (metadata: unknown, key: string): string | undefined => {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return undefined;
+  const value = (metadata as Readonly<Record<string, unknown>>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+};
+
 export class RenderInventoryConversionService {
   constructor(private readonly deps: RenderInventoryConversionDependencies) {}
 
-  async convertClaimedInventoryToRender(context: RenderInventoryConversionContext, input: { readonly tenantId: string; readonly marketplaceCaptureId: string }): Promise<RenderInventoryConversionResult> {
-    if (context.tenantId !== input.tenantId) throw this.error(context.correlation, "SERVICE_TENANT_MISMATCH", "Conversion tenant does not match request tenant", 403);
+  async convertClaimedInventoryToRender(
+    context: RenderInventoryConversionContext,
+    input: { readonly tenantId: string; readonly marketplaceCaptureId: string },
+  ): Promise<RenderInventoryConversionResult> {
+    if (context.tenantId !== input.tenantId) {
+      throw this.error(
+        context.correlation,
+        "SERVICE_TENANT_MISMATCH",
+        "Conversion tenant does not match request tenant",
+        403,
+      );
+    }
 
     const scope = { tenantId: context.tenantId };
     const capture = await this.requireCapture(scope, input.marketplaceCaptureId, context.correlation);
 
     if (!eligibleCaptureStatuses.has(capture.status)) {
-      throw this.error(context.correlation, "SERVICE_INVALID_STATE_TRANSITION", "Only claimed marketplace captures can be converted to Render inventory", capture.status === "EXPIRED" ? 410 : 422, { status: capture.status });
+      throw this.error(
+        context.correlation,
+        "SERVICE_INVALID_STATE_TRANSITION",
+        "Only claimed marketplace captures can be converted to Render inventory",
+        capture.status === "EXPIRED" ? 410 : 422,
+        { status: capture.status },
+      );
     }
 
     const draft = await this.deps.draftInventories.findByMarketplaceCaptureId(scope, capture.id);
-    if (draft === null) throw this.error(context.correlation, "SERVICE_NOT_FOUND", "Draft inventory is required before inventory conversion", 404);
-
-    if (!eligibleDraftStatuses.has(draft.status)) {
-      throw this.error(context.correlation, "SERVICE_INVALID_STATE_TRANSITION", "Draft inventory must be claimed before inventory conversion", draft.status === "EXPIRED" ? 410 : 422, { draftInventoryStatus: draft.status });
+    if (draft === null) {
+      throw this.error(
+        context.correlation,
+        "SERVICE_NOT_FOUND",
+        "Draft inventory is required before inventory conversion",
+        404,
+      );
     }
 
+    if (!eligibleDraftStatuses.has(draft.status)) {
+      throw this.error(
+        context.correlation,
+        "SERVICE_INVALID_STATE_TRANSITION",
+        "Draft inventory must be claimed before inventory conversion",
+        draft.status === "EXPIRED" ? 410 : 422,
+        { draftInventoryStatus: draft.status },
+      );
+    }
+
+    const sellerConversion = await this.requireSellerConversion(scope, capture, draft, context.correlation);
+
     const existing = await this.deps.renderConversions.findSuccessfulInventoryConversion(scope, capture.id, draft.id);
-    if (existing?.externalId != null) {
-      return {
-        captureId: capture.id,
-        draftInventoryId: draft.id,
-        renderInventoryId: existing.externalId,
-        conversionStatus: "SUCCESS",
-        conversionId: existing.id,
-        idempotent: true,
-        acquisitionConverted: capture.status === "CONVERTED" && draft.status === "CONVERTED",
-      };
+    if (existing !== null) {
+      const renderInventoryId = metadataString(existing.metadata, "renderInventoryId") ?? existing.renderSellerId ?? existing.externalId;
+      if (renderInventoryId !== undefined && renderInventoryId !== null) {
+        return {
+          captureId: capture.id,
+          draftInventoryId: draft.id,
+          renderSellerId: sellerConversion.renderSellerId,
+          renderInventoryId,
+          conversionStatus: "SUCCESS",
+          conversionId: existing.id,
+          idempotent: true,
+          acquisitionConverted: capture.status === "CONVERTED" && draft.status === "CONVERTED",
+        };
+      }
     }
 
     const startedAt = this.now().toISOString();
@@ -108,18 +161,24 @@ export class RenderInventoryConversionService {
       status: "PROCESSING",
       conversionKind: "INVENTORY",
       startedAt,
-      metadata: { source: "DRAFT_INVENTORY", draftInventoryId: draft.id },
+      metadata: {
+        source: "DRAFT_INVENTORY",
+        draftInventoryId: draft.id,
+        renderSellerId: sellerConversion.renderSellerId,
+        sellerConversionId: sellerConversion.id,
+      },
     });
 
     await this.audit(scope, context.correlation, "RENDER_INVENTORY_CONVERSION_STARTED", conversion.id, {
       marketplaceCaptureId: capture.id,
       draftInventoryId: draft.id,
       conversionId: conversion.id,
+      renderSellerId: sellerConversion.renderSellerId,
     });
 
     try {
       const providerResult = await this.deps.connector.createRenderInventory({
-        ...this.buildPayload(scope, capture, draft),
+        ...this.buildPayload(scope, capture, draft, sellerConversion.renderSellerId),
         idempotencyKey: `render-inventory:${scope.tenantId}:${draft.id}`,
       });
 
@@ -129,7 +188,14 @@ export class RenderInventoryConversionService {
         externalId: draft.id,
         completedAt,
         convertedAt: completedAt,
-        metadata: { source: "DRAFT_INVENTORY", draftInventoryId: draft.id, renderInventoryId: providerResult.renderInventoryId, providerStatus: providerResult.status },
+        metadata: {
+          source: "DRAFT_INVENTORY",
+          draftInventoryId: draft.id,
+          renderSellerId: sellerConversion.renderSellerId,
+          sellerConversionId: sellerConversion.id,
+          renderInventoryId: providerResult.renderInventoryId,
+          providerStatus: providerResult.status,
+        },
       });
 
       await this.deps.draftInventories.update(scope, draft.id, { status: "CONVERTED" });
@@ -138,12 +204,14 @@ export class RenderInventoryConversionService {
         marketplaceCaptureId: capture.id,
         draftInventoryId: draft.id,
         conversionId: conversion.id,
+        renderSellerId: sellerConversion.renderSellerId,
         renderInventoryId: providerResult.renderInventoryId,
       });
 
       return {
         captureId: capture.id,
         draftInventoryId: draft.id,
+        renderSellerId: sellerConversion.renderSellerId,
         renderInventoryId: providerResult.renderInventoryId,
         conversionStatus: "SUCCESS",
         conversionId: updated.id,
@@ -152,20 +220,63 @@ export class RenderInventoryConversionService {
       };
     } catch (cause) {
       const failureReason = cause instanceof Error ? cause.message : "Render inventory connector failed";
-      await this.deps.renderConversions.update(scope, conversion.id, { status: "FAILED", failedAt: this.now().toISOString(), failureReason });
+      await this.deps.renderConversions.update(scope, conversion.id, {
+        status: "FAILED",
+        failedAt: this.now().toISOString(),
+        failureReason,
+      });
       await this.audit(scope, context.correlation, "RENDER_INVENTORY_CONVERSION_FAILED", conversion.id, {
         marketplaceCaptureId: capture.id,
         draftInventoryId: draft.id,
         conversionId: conversion.id,
+        renderSellerId: sellerConversion.renderSellerId,
         failureReason,
       });
-      throw this.error(context.correlation, "SERVICE_REPOSITORY_FAILED", `Render inventory conversion failed: ${failureReason}`, 502, { conversionId: conversion.id }, cause);
+      throw this.error(
+        context.correlation,
+        "SERVICE_REPOSITORY_FAILED",
+        `Render inventory conversion failed: ${failureReason}`,
+        502,
+        { conversionId: conversion.id },
+        cause,
+      );
     }
   }
 
-  private buildPayload(scope: TenantScoped, capture: MarketplaceCaptureRecord, draft: DraftInventoryRecord): Readonly<Record<string, unknown>> {
+  private async requireSellerConversion(
+    scope: TenantScoped,
+    capture: MarketplaceCaptureRecord,
+    draft: DraftInventoryRecord,
+    correlation: PersistenceCorrelationMetadata,
+  ): Promise<RenderConversionRecord & { readonly renderSellerId: string }> {
+    const sellerConversion = await this.deps.renderConversions.findSuccessfulSellerConversion(
+      scope,
+      capture.id,
+      capture.contactId ?? draft.contactId ?? null,
+    );
+
+    if (sellerConversion === null || sellerConversion.renderSellerId === undefined || sellerConversion.renderSellerId === null) {
+      throw this.error(
+        correlation,
+        "SERVICE_INVALID_STATE_TRANSITION",
+        "Render seller conversion must succeed before inventory conversion",
+        422,
+        { marketplaceCaptureId: capture.id, draftInventoryId: draft.id },
+      );
+    }
+
+    return sellerConversion as RenderConversionRecord & { readonly renderSellerId: string };
+  }
+
+  private buildPayload(
+    scope: TenantScoped,
+    capture: MarketplaceCaptureRecord,
+    draft: DraftInventoryRecord,
+    renderSellerId: string,
+  ): Readonly<Record<string, unknown>> {
     return {
       tenantId: scope.tenantId,
+      renderSellerId,
       marketplaceCaptureId: capture.id,
       draftInventoryId: draft.id,
       title: draft.title,
@@ -184,20 +295,29 @@ export class RenderInventoryConversionService {
     };
   }
 
-  private async moveDealToConverted(scope: TenantScoped, dealId: string): Promise<void> {
-    const pipeline = await this.deps.deals?.findById(scope.tenantId, dealId);
-    if (pipeline === null) return;
-  }
-
-  private async requireCapture(scope: TenantScoped, captureId: string, correlation: PersistenceCorrelationMetadata): Promise<MarketplaceCaptureRecord> {
+  private async requireCapture(
+    scope: TenantScoped,
+    captureId: string,
+    correlation: PersistenceCorrelationMetadata,
+  ): Promise<MarketplaceCaptureRecord> {
     const capture = await this.deps.marketplaceCaptures.findById(scope, captureId);
-    if (capture === null) throw this.error(correlation, "SERVICE_NOT_FOUND", "Marketplace capture was not found for this tenant", 404);
+    if (capture === null) {
+      throw this.error(correlation, "SERVICE_NOT_FOUND", "Marketplace capture was not found for this tenant", 404);
+    }
     return capture;
   }
 
-  private now(): Date { return this.deps.clock?.() ?? new Date(); }
+  private now(): Date {
+    return this.deps.clock?.() ?? new Date();
+  }
 
-  private async audit(scope: TenantScoped, correlation: PersistenceCorrelationMetadata, action: string, targetId: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
+  private async audit(
+    scope: TenantScoped,
+    correlation: PersistenceCorrelationMetadata,
+    action: string,
+    targetId: string,
+    metadata: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
     await this.deps.auditLogs.append(scope, {
       tenantId: scope.tenantId,
       action,
@@ -209,7 +329,14 @@ export class RenderInventoryConversionService {
     });
   }
 
-  private error(correlation: PersistenceCorrelationMetadata | undefined, code: RenderInventoryConversionErrorCode, message: string, status: number, details?: Readonly<Record<string, unknown>>, cause?: unknown): RenderInventoryConversionError {
+  private error(
+    correlation: PersistenceCorrelationMetadata | undefined,
+    code: RenderInventoryConversionErrorCode,
+    message: string,
+    status: number,
+    details?: Readonly<Record<string, unknown>>,
+    cause?: unknown,
+  ): RenderInventoryConversionError {
     return new RenderInventoryConversionError({ code, message, status, correlation, details, cause });
   }
 }
