@@ -98,6 +98,11 @@ const createRenderInventoryConnector = () => ({
       throw new Error("Render inventory connector is not configured.");
     }
 
+    const renderSellerId = clean(input.renderSellerId);
+    if (renderSellerId === undefined) {
+      throw new Error("Render seller conversion must succeed before inventory conversion.");
+    }
+
     const price = numberValue(input.price);
     if (price === undefined) {
       throw new Error("Render inventory conversion requires a positive listing price.");
@@ -111,7 +116,7 @@ const createRenderInventoryConnector = () => ({
         "x-whisperm-internal-key": internalKey,
       },
       body: JSON.stringify({
-        renderSellerId: clean(input.renderSellerId),
+        renderSellerId,
         title: clean(input.title) ?? "Imported marketplace listing",
         description: clean(input.description),
         price,
@@ -195,7 +200,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       data: {
         captureId: result.captureId,
         draftInventoryId: result.draftInventoryId,
-        renderSellerId: result.renderSellerId,
         renderInventoryId: result.renderInventoryId,
         conversionStatus: result.conversionStatus,
         conversionId: result.conversionId,
