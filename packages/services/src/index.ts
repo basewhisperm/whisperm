@@ -564,6 +564,18 @@ const normalizeOptionalText = (value: string | undefined): string | undefined =>
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 };
 
+const normalizeSellerPhoneForMatching = (value: string | null | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed.length === 0) return undefined;
+
+  const compact = trimmed.replace(/[\s().-]/gu, "");
+  if (/^\+233\d{9}$/u.test(compact)) return compact;
+  if (/^233\d{9}$/u.test(compact)) return `+${compact}`;
+  if (/^0\d{9}$/u.test(compact)) return `+233${compact.slice(1)}`;
+
+  return compact.startsWith("+") ? compact : trimmed;
+};
+
 const normalizeImportRow = (row: ContactImportRow): ContactImportRow => ({
   email: normalizeOptionalText(row.email)?.toLowerCase(),
   firstName: normalizeOptionalText(row.firstName),
@@ -1126,7 +1138,7 @@ const marketplaceSellerDealExternalId = (input: MarketplaceCaptureServiceInput, 
   return `marketplace-seller:${normalizeSellerDealIdentity(sellerIdentity)}`;
 };
 
-const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<Record<string, unknown>> => exactInput({ ...(input.metadata ?? {}), sellerEmail: input.sellerEmail ?? input.email ?? undefined, sellerPhone: input.sellerPhone ?? input.phone ?? undefined, sellerLocation: input.sellerLocation ?? input.location ?? undefined, marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? undefined, marketplaceListingId: input.marketplaceListingId ?? input.externalId ?? undefined, imageUrls: input.imageUrls ?? input.images ?? input.metadata?.imageUrls, category: input.category ?? input.metadata?.category, capturedAt: input.capturedAt ?? undefined, capturedBy: input.capturedBy ?? undefined, pageUrl: input.pageUrl ?? input.sourceUrl ?? input.listingUrl ?? undefined, userAgent: input.userAgent ?? undefined });
+const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<Record<string, unknown>> => exactInput({ ...(input.metadata ?? {}), sellerEmail: input.sellerEmail ?? input.email ?? undefined, sellerPhone: normalizeSellerPhoneForMatching(input.sellerPhone ?? input.phone), sellerLocation: input.sellerLocation ?? input.location ?? undefined, marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? undefined, marketplaceListingId: input.marketplaceListingId ?? input.externalId ?? undefined, imageUrls: input.imageUrls ?? input.images ?? input.metadata?.imageUrls, category: input.category ?? input.metadata?.category, capturedAt: input.capturedAt ?? undefined, capturedBy: input.capturedBy ?? undefined, pageUrl: input.pageUrl ?? input.sourceUrl ?? input.listingUrl ?? undefined, userAgent: input.userAgent ?? undefined });
 
 const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => input.sellerName?.trim() || input.title.trim();
 
@@ -1492,8 +1504,8 @@ export class MarketplaceAcquisitionCaptureService {
       }
       return { contact: existingById, strategy: "provided" };
     }
-    const sellerPhone = input.sellerPhone ?? input.phone;
-    if (sellerPhone !== undefined && sellerPhone !== null) {
+    const sellerPhone = normalizeSellerPhoneForMatching(input.sellerPhone ?? input.phone);
+    if (sellerPhone !== undefined) {
       const existingByPhone = await repositories.contacts.findByPhone(tenantScope, sellerPhone);
       if (existingByPhone !== null) return { contact: existingByPhone, strategy: "phone" };
     }
@@ -1505,7 +1517,7 @@ export class MarketplaceAcquisitionCaptureService {
     const contact = contactRecordSchema.parse(await repositories.contacts.create(tenantScope, {
       tenantId: context.tenantId,
       email: sellerEmail ?? undefined,
-      phone: input.sellerPhone ?? input.phone ?? undefined,
+      phone: sellerPhone,
       firstName: input.sellerName ?? undefined,
       metadata: { marketplaceAcquisition: true, sellerProfileUrl: input.sellerProfileUrl ?? null, sellerLocation: input.sellerLocation ?? input.location ?? null, marketplaceIdentifier: input.marketplaceIdentifier ?? null }
     }));
