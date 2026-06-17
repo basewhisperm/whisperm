@@ -66,7 +66,7 @@ export interface RenderInventoryConversionDependencies {
 export interface RenderInventoryConversionResult {
   readonly captureId: string;
   readonly draftInventoryId: string;
-  readonly renderSellerId: string;
+  readonly renderSellerId?: string | undefined;
   readonly renderInventoryId: string;
   readonly conversionStatus: "SUCCESS";
   readonly conversionId: string;
@@ -82,6 +82,17 @@ const metadataString = (metadata: unknown, key: string): string | undefined => {
   const value = (metadata as Readonly<Record<string, unknown>>)[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 };
+
+const supportsSellerConversionLookup = (
+  renderConversions: RenderConversionRepository,
+): renderConversions is RenderConversionRepository & {
+  readonly findSuccessfulSellerConversion: (
+    context: TenantScoped,
+    marketplaceCaptureId: string,
+    contactId: string | null,
+  ) => Promise<RenderConversionRecord | null>;
+} =>
+  typeof (renderConversions as { readonly findSuccessfulSellerConversion?: unknown }).findSuccessfulSellerConversion === "function";
 
 export class RenderInventoryConversionService {
   constructor(private readonly deps: RenderInventoryConversionDependencies) {}
@@ -132,16 +143,16 @@ export class RenderInventoryConversionService {
       );
     }
 
-    const sellerConversion = await this.requireSellerConversion(scope, capture, draft, context.correlation);
+    const sellerConversion = await this.findSellerConversion(scope, capture, draft, context.correlation);
 
     const existing = await this.deps.renderConversions.findSuccessfulInventoryConversion(scope, capture.id, draft.id);
     if (existing !== null) {
-      const renderInventoryId = metadataString(existing.metadata, "renderInventoryId") ?? existing.renderSellerId ?? existing.externalId;
+      const renderInventoryId = metadataString(existing.metadata, "renderInventoryId") ?? existing.externalId;
       if (renderInventoryId !== undefined && renderInventoryId !== null) {
         return {
           captureId: capture.id,
           draftInventoryId: draft.id,
-          renderSellerId: sellerConversion.renderSellerId,
+          renderSellerId: sellerConversion?.renderSellerId ?? metadataString(existing.metadata, "renderSellerId"),
           renderInventoryId,
           conversionStatus: "SUCCESS",
           conversionId: existing.id,
@@ -164,8 +175,8 @@ export class RenderInventoryConversionService {
       metadata: {
         source: "DRAFT_INVENTORY",
         draftInventoryId: draft.id,
-        renderSellerId: sellerConversion.renderSellerId,
-        sellerConversionId: sellerConversion.id,
+        renderSellerId: sellerConversion?.renderSellerId ?? null,
+        sellerConversionId: sellerConversion?.id ?? null,
       },
     });
 
@@ -173,12 +184,12 @@ export class RenderInventoryConversionService {
       marketplaceCaptureId: capture.id,
       draftInventoryId: draft.id,
       conversionId: conversion.id,
-      renderSellerId: sellerConversion.renderSellerId,
+      renderSellerId: sellerConversion?.renderSellerId ?? null,
     });
 
     try {
       const providerResult = await this.deps.connector.createRenderInventory({
-        ...this.buildPayload(scope, capture, draft, sellerConversion.renderSellerId),
+        ...this.buildPayload(scope, capture, draft, sellerConversion?.renderSellerId),
         idempotencyKey: `render-inventory:${scope.tenantId}:${draft.id}`,
       });
 
@@ -191,8 +202,8 @@ export class RenderInventoryConversionService {
         metadata: {
           source: "DRAFT_INVENTORY",
           draftInventoryId: draft.id,
-          renderSellerId: sellerConversion.renderSellerId,
-          sellerConversionId: sellerConversion.id,
+          renderSellerId: sellerConversion?.renderSellerId ?? null,
+          sellerConversionId: sellerConversion?.id ?? null,
           renderInventoryId: providerResult.renderInventoryId,
           providerStatus: providerResult.status,
         },
@@ -204,14 +215,14 @@ export class RenderInventoryConversionService {
         marketplaceCaptureId: capture.id,
         draftInventoryId: draft.id,
         conversionId: conversion.id,
-        renderSellerId: sellerConversion.renderSellerId,
+        renderSellerId: sellerConversion?.renderSellerId ?? null,
         renderInventoryId: providerResult.renderInventoryId,
       });
 
       return {
         captureId: capture.id,
         draftInventoryId: draft.id,
-        renderSellerId: sellerConversion.renderSellerId,
+        renderSellerId: sellerConversion?.renderSellerId,
         renderInventoryId: providerResult.renderInventoryId,
         conversionStatus: "SUCCESS",
         conversionId: updated.id,
@@ -229,7 +240,7 @@ export class RenderInventoryConversionService {
         marketplaceCaptureId: capture.id,
         draftInventoryId: draft.id,
         conversionId: conversion.id,
-        renderSellerId: sellerConversion.renderSellerId,
+        renderSellerId: sellerConversion?.renderSellerId ?? null,
         failureReason,
       });
       throw this.error(
@@ -243,12 +254,14 @@ export class RenderInventoryConversionService {
     }
   }
 
-  private async requireSellerConversion(
+  private async findSellerConversion(
     scope: TenantScoped,
     capture: MarketplaceCaptureRecord,
     draft: DraftInventoryRecord,
     correlation: PersistenceCorrelationMetadata,
-  ): Promise<RenderConversionRecord & { readonly renderSellerId: string }> {
+  ): Promise<(RenderConversionRecord & { readonly renderSellerId: string }) | null> {
+    if (!supportsSellerConversionLookup(this.deps.renderConversions)) return null;
+
     const sellerConversion = await this.deps.renderConversions.findSuccessfulSellerConversion(
       scope,
       capture.id,
@@ -272,7 +285,7 @@ export class RenderInventoryConversionService {
     scope: TenantScoped,
     capture: MarketplaceCaptureRecord,
     draft: DraftInventoryRecord,
-    renderSellerId: string,
+    renderSellerId?: string | undefined,
   ): Readonly<Record<string, unknown>> {
     return {
       tenantId: scope.tenantId,
