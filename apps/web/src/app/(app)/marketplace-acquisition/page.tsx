@@ -44,6 +44,11 @@ interface AcquisitionAnalytics {
     readonly listingsConverted: number;
     readonly listingsExpired: number;
   };
+  readonly operations: {
+    readonly averageTimeToInviteHours: number | null;
+    readonly averageTimeToClaimHours: number | null;
+    readonly averageTimeToConversionHours: number | null;
+  };
   readonly conversion: {
     readonly sellerConversionsSucceeded: number;
     readonly inventoryConversionsSucceeded: number;
@@ -74,12 +79,15 @@ function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function searchText(deal: Deal): string {
-  return [deal.title, deal.currency, deal.id, marketplaceSource(deal)].filter(Boolean).join(" ").toLowerCase();
+function formatHours(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "N/A";
+  if (value < 1) return `${Math.round(value * 60)}m`;
+  if (value < 24) return `${Math.round(value)}h`;
+  return `${Math.round(value / 24)}d`;
 }
 
-function marketplaceSource(deal: Deal): string {
-  return deal.currency ?? "";
+function searchText(deal: Deal): string {
+  return [deal.title, deal.currency, deal.id].filter(Boolean).join(" ").toLowerCase();
 }
 
 export default function MarketplaceAcquisitionPage() {
@@ -118,34 +126,37 @@ export default function MarketplaceAcquisitionPage() {
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
     return deals.filter((deal) => {
-      const matchesSearch =
-        normalizedSearchQuery.length === 0 || searchText(deal).includes(normalizedSearchQuery);
-      const dealStageName =
-        pipeline?.stages.find((stage) => stage.id === deal.pipelineStageId)?.name ?? "";
+      const matchesSearch = normalizedSearchQuery.length === 0 || searchText(deal).includes(normalizedSearchQuery);
+      const dealStageName = pipeline?.stages.find((stage) => stage.id === deal.pipelineStageId)?.name ?? "";
       if (stageFilter !== "all" && stageKey(dealStageName) !== stageKey(stageFilter)) return false;
-
       return matchesSearch;
     });
   }, [deals, searchQuery, stageFilter, pipeline?.stages]);
 
   const summary = useMemo(() => computeAcquisitionSummary(pipeline, filteredDeals), [pipeline, filteredDeals]);
   const stageByName = useMemo(() => new Map((pipeline?.stages ?? []).map((stage) => [stageKey(stage.name), stage])), [pipeline]);
+
   const fullyConverted = Math.min(
     analytics?.conversion.sellerConversionsSucceeded ?? 0,
     analytics?.conversion.inventoryConversionsSucceeded ?? 0,
   );
+
   const expirationRate = analytics?.acquisition.captures
-    ? (analytics.acquisition.expiredCount / analytics.acquisition.captures)
+    ? analytics.acquisition.expiredCount / analytics.acquisition.captures
     : 0;
+
+  const recoveryRisk =
+    (analytics?.conversion.conversionFailures ?? 0) +
+    (analytics?.conversion.deadLetteredConversions ?? 0);
 
   return (
     <div className="space-y-6">
       <section className="flex flex-col gap-4 rounded-2xl bg-background p-5 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Seller Acquisition</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Seller Acquisition</h1>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Seller Acquisition Dashboard</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Capture, invite, and convert marketplace sellers into Render sellers
+            Monitor captured marketplace sellers from invitation through claim, conversion, and completion.
           </p>
         </div>
         <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse" href="/marketplace-acquisition/capture" style={{ background: "var(--color-whisper)" }}>
@@ -154,55 +165,61 @@ export default function MarketplaceAcquisitionPage() {
         </Link>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Seller acquisition summary">
-        <SummaryCard label="Captured" value={String(summary.captured)} description="Deals in the Captured stage" />
-        <SummaryCard label="Invited" value={String(summary.invited)} description="Deals in the Invited stage" />
-        <SummaryCard label="Claim Started" value={String(summary.claimStarted)} description="Deals in the Claim Started stage" />
-        <SummaryCard label="Claimed" value={String(summary.claimed)} description="Deals in the Claimed stage" />
-        <SummaryCard label="Converted" value={String(summary.converted)} description="Deals in the Converted stage" />
-        <SummaryCard label="Expired" value={String(summary.expired)} description="Deals in the Expired stage" />
-        <SummaryCard label="Conversion rate" value={formatAcquisitionConversionRate(summary.conversionRate)} description="Converted divided by captured" />
-        <SummaryCard label="Recent opportunities" value={String(summary.recentCount)} description="Opportunities currently loaded from the board" />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-label="Seller acquisition funnel">
+        <SummaryCard label="Captured" value={String(analytics?.acquisition.captures ?? summary.captured)} description="Seller opportunities captured" />
+        <SummaryCard label="Invited" value={String(analytics?.acquisition.invitationsSent ?? summary.invited)} description="Invitations successfully sent" />
+        <SummaryCard label="Claim Started" value={String(summary.claimStarted)} description="Sellers entering the claim flow" />
+        <SummaryCard label="Claimed" value={String(analytics?.inventory.listingsClaimed ?? summary.claimed)} description="Claimed seller inventory" />
+        <SummaryCard label="Seller Converted" value={String(analytics?.conversion.sellerConversionsSucceeded ?? 0)} description="Render seller records created" />
+        <SummaryCard label="Completed" value={String(summary.converted)} description="Acquisitions fully completed" />
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Seller acquisition lifecycle analytics">
-        <SummaryCard label="Captures" value={String(analytics?.acquisition.captures ?? 0)} description="Captured seller opportunities" />
-        <SummaryCard label="Invitations sent" value={String(analytics?.acquisition.invitationsSent ?? 0)} description="Seller invitations sent" />
-        <SummaryCard label="Claim started" value={String(summary.claimStarted)} description="Claim links opened or started" />
-        <SummaryCard label="Claimed" value={String(analytics?.inventory.listingsClaimed ?? summary.claimed)} description="Seller inventory claimed" />
-        <SummaryCard label="Seller converted" value={String(analytics?.conversion.sellerConversionsSucceeded ?? 0)} description="Sellers created in Render" />
-        <SummaryCard label="Listings converted" value={String(analytics?.conversion.inventoryConversionsSucceeded ?? 0)} description="Inventory converted into Render listings" />
-        <SummaryCard label="Fully converted" value={String(fullyConverted)} description="Seller and inventory both converted" />
-        <SummaryCard label="Expired" value={String(analytics?.acquisition.expiredCount ?? 0)} description="Expired captures or invitations" />
-        <SummaryCard label="Claim rate" value={formatPercent(analytics?.acquisition.claimRate ?? 0)} description="Claims divided by invitations" />
-        <SummaryCard label="Conversion rate" value={formatPercent(analytics?.acquisition.conversionRate ?? 0)} description="Converted divided by claimed" />
-        <SummaryCard label="Expiration rate" value={formatPercent(expirationRate)} description="Expired divided by captured" />
-        <SummaryCard label="Failed conversions" value={String(analytics?.conversion.conversionFailures ?? 0)} description="Render conversion failures" />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Seller acquisition health">
+        <SummaryCard label="Board conversion" value={formatAcquisitionConversionRate(summary.conversionRate)} description="Converted divided by captured board deals" />
+        <SummaryCard label="Claim rate" value={formatPercent(analytics?.acquisition.claimRate ?? 0)} description="Claims divided by sent invitations" />
+        <SummaryCard label="Completion readiness" value={String(fullyConverted)} description="Seller and inventory conversions both succeeded" />
+        <SummaryCard label="Expiration rate" value={formatPercent(expirationRate)} description="Expired captures, invitations, or tokens" />
       </section>
 
-      <input
-        aria-label="Search acquisitions"
-        className="h-10 w-full rounded-xl bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-        placeholder="Search by deal or contact"
-        value={searchQuery}
-        onChange={(event) => setSearchQuery(event.target.value)}
-        style={{ border: "0.5px solid var(--color-border)" }}
-      />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Seller acquisition operations">
+        <SummaryCard label="Avg time to invite" value={formatHours(analytics?.operations.averageTimeToInviteHours)} description="Capture to invitation sent" />
+        <SummaryCard label="Avg time to claim" value={formatHours(analytics?.operations.averageTimeToClaimHours)} description="Invitation or capture to attestation" />
+        <SummaryCard label="Avg time to convert" value={formatHours(analytics?.operations.averageTimeToConversionHours)} description="Capture to successful conversion" />
+        <SummaryCard label="Recent opportunities" value={String(summary.recentCount)} description="Deals currently loaded on this board" />
+      </section>
 
-      <select
-        aria-label="Filter by acquisition stage"
-        className="h-10 w-full rounded-xl bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-        value={stageFilter}
-        onChange={(event) => setStageFilter(event.target.value)}
-        style={{ border: "0.5px solid var(--color-border)" }}
-      >
-        <option value="all">All stages</option>
-        {acquisitionStages.map((stageName) => (
-          <option key={stageName} value={stageName}>
-            {stageName}
-          </option>
-        ))}
-      </select>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Seller acquisition recovery">
+        <SummaryCard label="Inventory converted" value={String(analytics?.conversion.inventoryConversionsSucceeded ?? 0)} description="Draft inventory converted to Render" />
+        <SummaryCard label="Failed conversions" value={String(analytics?.conversion.conversionFailures ?? 0)} description="Conversions requiring retry or review" />
+        <SummaryCard label="Dead-lettered" value={String(analytics?.conversion.deadLetteredConversions ?? 0)} description="Conversions no longer retrying" />
+        <SummaryCard label="Recovery risk" value={String(recoveryRisk)} description="Failed plus dead-lettered conversions" />
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-[1fr_220px]" aria-label="Seller acquisition filters">
+        <input
+          aria-label="Search acquisitions"
+          className="h-10 w-full rounded-xl bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+          placeholder="Search by deal title or ID"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          style={{ border: "0.5px solid var(--color-border)" }}
+        />
+
+        <select
+          aria-label="Filter by acquisition stage"
+          className="h-10 w-full rounded-xl bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+          value={stageFilter}
+          onChange={(event) => setStageFilter(event.target.value)}
+          style={{ border: "0.5px solid var(--color-border)" }}
+        >
+          <option value="all">All stages</option>
+          {acquisitionStages.map((stageName) => (
+            <option key={stageName} value={stageName}>
+              {stageName}
+            </option>
+          ))}
+        </select>
+      </section>
 
       {!loading && pipeline !== null && filteredDeals.length === 0 && (
         <p className="rounded-xl bg-background px-4 py-6 text-center text-sm text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>
@@ -216,11 +233,13 @@ export default function MarketplaceAcquisitionPage() {
         <section className="flex flex-col items-center justify-center rounded-2xl bg-background px-6 py-16 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
           <IconBookmark aria-hidden="true" className="size-8 text-muted-foreground" stroke={1.5} />
           <h2 className="mt-4 text-sm font-semibold text-foreground">No seller acquisition deals yet</h2>
-          <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Start by configuring marketplace capture, then captured sellers will appear on this acquisition board.</p>
+          <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+            Start by configuring marketplace capture. Captured sellers will appear on this acquisition board.
+          </p>
         </section>
       ) : (
         <div className="overflow-x-auto pb-2">
-          <div className="grid min-w-[760px] grid-cols-3 gap-3">
+          <div className="grid min-w-[1180px] grid-cols-6 gap-3">
             {acquisitionStages.map((stageName) => {
               const stage = stageByName.get(stageKey(stageName));
               const stageDeals = stage === undefined ? [] : filteredDeals.filter((deal) => deal.pipelineStageId === stage.id);
