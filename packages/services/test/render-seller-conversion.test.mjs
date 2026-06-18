@@ -10,7 +10,7 @@ const attestation = (overrides = {}) => ({ id: 'att-1', tenantId: 'tenant-1', ma
 const contact = (overrides = {}) => ({ id: 'contact-1', tenantId: 'tenant-1', firstName: 'Sam', lastName: 'Seller', email: 'sam@example.com', phone: '+15555550123', stage: 'PROSPECT', createdAt: now, updatedAt: now, ...overrides });
 
 function deps(options = {}) {
-  const state = { conversions: [], audits: [], connectorCalls: [] };
+  const state = { conversions: [], audits: [], activities: [], connectorCalls: [] };
   return { state, deps: {
     marketplaceCaptures: { async findById(scope, id) { return options.captureTenantMismatch ? null : (options.capture ?? capture()); } },
     draftInventories: { async findByMarketplaceCaptureId() { return options.draft === undefined ? draft() : options.draft; } },
@@ -22,6 +22,7 @@ function deps(options = {}) {
       async update(scope, id, input) { const row = { ...state.conversions.at(-1), id, ...input, updatedAt: now }; state.conversions.push(row); return row; },
     },
     auditLogs: { async append(scope, input) { state.audits.push(input); return { id: `audit-${state.audits.length}`, tenantId: scope.tenantId, occurredAt: now, ...input }; } },
+    activities: { async create(scope, input) { state.activities.push(input); return { id: `activity-${state.activities.length}`, tenantId: scope.tenantId, occurredAt: now, createdAt: now, updatedAt: now, ...input }; } },
     connector: { async createRenderSeller(input) { state.connectorCalls.push(input); if (options.connectorFails) throw new Error('provider down'); return { renderSellerId: 'render-seller-1', status: 'CREATED' }; } },
     clock: () => new Date(now),
   }};
@@ -35,6 +36,8 @@ test('claimed acquisition with attestation converts seller and stores render sel
   assert.equal(result.renderSellerId, 'render-seller-1');
   assert.equal(setup.state.conversions.at(-1).status, 'SUCCESS');
   assert.equal(setup.state.conversions.at(-1).renderSellerId, 'render-seller-1');
+  assert.equal(setup.state.activities.length, 1);
+  assert.equal(setup.state.activities[0].metadata.eventType, 'RENDER_SELLER_CONVERSION_SUCCEEDED');
 });
 
 test('unclaimed acquisition cannot convert', async () => { const setup = deps({ capture: capture({ status: 'INVITED' }) }); await rejectsWithCode(() => new RenderSellerConversionService(setup.deps).convertClaimedSellerToRender(context, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' }), 'SERVICE_INVALID_STATE_TRANSITION'); });

@@ -174,6 +174,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     draftInventories: repositories.draftInventories,
     renderConversions: repositories.renderConversions,
     auditLogs: repositories.auditLogs,
+    activities: repositories.activities,
     connector: createRenderInventoryConnector(),
   });
 

@@ -14,7 +14,7 @@ export interface RenderSellerConversionDependencies {
   readonly renderConversions: RenderConversionRepository;
   readonly contacts: ContactRepository;
   readonly auditLogs: AuditLogRepository;
-  readonly activities?: ActivityRepository | undefined;
+  readonly activities: ActivityRepository;
   readonly connector: RenderSellerConnector;
   readonly clock?: (() => Date) | undefined;
 }
@@ -90,7 +90,8 @@ export class RenderSellerConversionService {
   private async requireCapture(scope: TenantScoped, captureId: string, correlation: PersistenceCorrelationMetadata): Promise<MarketplaceCaptureRecord> { const capture = await this.deps.marketplaceCaptures.findById(scope, captureId); if (capture === null) throw this.error(correlation, "SERVICE_NOT_FOUND", "Marketplace capture was not found for this tenant", 404); return capture; }
   private now(): Date { return this.deps.clock?.() ?? new Date(); }
   private async appendActivity(scope: TenantScoped, context: RenderSellerConversionContext, capture: MarketplaceCaptureRecord, contactId: string, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
-    if (this.deps.activities === undefined || capture.dealId == null) return;
+    // Activity records are deal-scoped in CRM; captures without a deal intentionally have no activity target.
+    if (capture.dealId == null) return;
     await this.deps.activities.create({ ...scope, actorId: context.actorId, correlation: context.correlation }, {
       tenantId: scope.tenantId,
       contactId,
