@@ -117,9 +117,16 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly upgradePorts?: UpgradeServicePorts | undefined;
   readonly workspaceProvisioningPort?: WorkspaceProvisioningPort | undefined;
   readonly onboardingStatePort?: OnboardingStatePort | undefined;
-    readonly renderSellerConversion?: RenderSellerConversionRouteDependencies["renderSellerConversion"] | undefined;
-    readonly marketplaceAcquisitionAnalytics?: MarketplaceAcquisitionAnalyticsRouteDependencies["analytics"] | undefined;
-    readonly marketplaceAcquisition?: {
+  readonly renderSellerConversion?: RenderSellerConversionRouteDependencies["renderSellerConversion"] | undefined;
+  readonly marketplaceAcquisitionAnalytics?: MarketplaceAcquisitionAnalyticsRouteDependencies["analytics"] | undefined;
+  readonly marketplaceAcquisitionLifecycle?: {
+    createInvitation?(context: { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: { readonly correlationId: string; readonly requestId?: string | undefined } }, input: { readonly tenantId: string; readonly captureId: string; readonly preferredChannel?: string | undefined }): Promise<unknown>;
+    previewClaim?(context: { readonly correlation: { readonly correlationId: string; readonly requestId?: string | undefined } }, token: string): Promise<unknown>;
+    acceptClaim?(context: { readonly correlation: { readonly correlationId: string; readonly requestId?: string | undefined } }, token: string, input: unknown): Promise<unknown>;
+    convertInventory?(context: { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: { readonly correlationId: string; readonly requestId?: string | undefined } }, input: { readonly tenantId: string; readonly marketplaceCaptureId: string }): Promise<unknown>;
+    completeCapture?(context: { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: { readonly correlationId: string; readonly requestId?: string | undefined } }, input: { readonly tenantId: string; readonly marketplaceCaptureId: string }): Promise<unknown>;
+  } | undefined;
+  readonly marketplaceAcquisition?: {
     capture(
       context: {
         readonly tenantId: string;
@@ -205,6 +212,21 @@ class MemoryReply implements FastifyReplyLike {
     };
   }
 }
+
+
+const readTenantActor = (request: FastifyRequestLike): { readonly tenantId?: string; readonly actorId?: string } => {
+  const tenantId = firstHeaderValue(request.headers, "x-tenant-id")?.trim();
+  const actorId = firstHeaderValue(request.headers, "x-user-id")?.trim();
+  return {
+    ...(tenantId === undefined ? {} : { tenantId }),
+    ...(actorId === undefined ? {} : { actorId }),
+  };
+};
+
+const routeCorrelation = (request: FastifyRequestLike): { readonly correlationId: string; readonly requestId?: string | undefined } => ({
+  correlationId: request.correlationId ?? request.id ?? "unknown",
+  requestId: request.id,
+});
 
 const apiKeyHeaderName = "x-api-key";
 const hmacSignatureHeaderName = "x-whisperm-signature";
@@ -817,6 +839,76 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         const body = request.body as { context: UpgradeWorkspaceContext; plan: string };
         const result = await initiateUpgrade(dependencies.upgradePorts, body.context, body.plan);
 
+        reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+      const inviteMatch = /^\/marketplace-acquisition\/captures\/([^/?#]+)\/invite\/?$/u.exec(parsedUrl.pathname);
+      if (options.method === "POST" && inviteMatch !== null) {
+        const lifecycle = dependencies.marketplaceAcquisitionLifecycle;
+        if (lifecycle?.createInvitation === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Seller invitation is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const { tenantId, actorId } = readTenantActor(request);
+        if (!tenantId || !actorId) {
+          reply.code(401).send({ ok: false, error: { code: "TENANT_CONTEXT_MISMATCH", message: "Seller invitation requires authenticated tenant and actor context" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const result = await lifecycle.createInvitation({ tenantId, actorId, correlation: routeCorrelation(request) }, { tenantId, captureId: decodeURIComponent(inviteMatch[1] ?? ""), ...((request.body ?? {}) as Record<string, unknown>) });
+        reply.code(201).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+      const claimAcceptMatch = /^\/marketplace-acquisition\/claims\/([^/?#]+)\/accept\/?$/u.exec(parsedUrl.pathname);
+      if (options.method === "POST" && claimAcceptMatch !== null) {
+        const acceptClaim = dependencies.marketplaceAcquisitionLifecycle?.acceptClaim;
+        if (acceptClaim === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Claim acceptance is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const result = await acceptClaim({ correlation: routeCorrelation(request) }, decodeURIComponent(claimAcceptMatch[1] ?? ""), request.body ?? {});
+        reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+      const claimPreviewMatch = /^\/marketplace-acquisition\/claims\/([^/?#]+)\/?$/u.exec(parsedUrl.pathname);
+      if (options.method === "GET" && claimPreviewMatch !== null) {
+        const previewClaim = dependencies.marketplaceAcquisitionLifecycle?.previewClaim;
+        if (previewClaim === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Claim preview is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const result = await previewClaim({ correlation: routeCorrelation(request) }, decodeURIComponent(claimPreviewMatch[1] ?? ""));
+        reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+      const inventoryConversionMatch = /^\/marketplace-acquisition\/captures\/([^/?#]+)\/convert\/render-inventory\/?$/u.exec(parsedUrl.pathname);
+      if (options.method === "POST" && inventoryConversionMatch !== null) {
+        const convertInventory = dependencies.marketplaceAcquisitionLifecycle?.convertInventory;
+        if (convertInventory === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Render inventory conversion is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const { tenantId, actorId } = readTenantActor(request);
+        if (!tenantId || !actorId) {
+          reply.code(401).send({ ok: false, error: { code: "TENANT_CONTEXT_MISMATCH", message: "Render inventory conversion requires authenticated tenant and actor context" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const result = await convertInventory({ tenantId, actorId, correlation: routeCorrelation(request) }, { tenantId, marketplaceCaptureId: decodeURIComponent(inventoryConversionMatch[1] ?? "") });
+        reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
+        return reply.toInjectResponse();
+      }
+      const completionMatch = /^\/marketplace-acquisition\/captures\/([^/?#]+)\/complete\/?$/u.exec(parsedUrl.pathname);
+      if (options.method === "POST" && completionMatch !== null) {
+        const completeCapture = dependencies.marketplaceAcquisitionLifecycle?.completeCapture;
+        if (completeCapture === undefined) {
+          reply.code(503).send({ ok: false, error: { code: "MARKETPLACE_ACQUISITION_NOT_CONFIGURED", message: "Capture completion is not configured" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const { tenantId, actorId } = readTenantActor(request);
+        if (!tenantId || !actorId) {
+          reply.code(401).send({ ok: false, error: { code: "TENANT_CONTEXT_MISMATCH", message: "Capture completion requires authenticated tenant and actor context" }, meta: { correlationId: request.correlationId } });
+          return reply.toInjectResponse();
+        }
+        const result = await completeCapture({ tenantId, actorId, correlation: routeCorrelation(request) }, { tenantId, marketplaceCaptureId: decodeURIComponent(completionMatch[1] ?? "") });
         reply.code(200).send({ ok: true, data: result, meta: { correlationId: request.correlationId } });
         return reply.toInjectResponse();
       }
