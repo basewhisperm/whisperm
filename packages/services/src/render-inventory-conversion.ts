@@ -1,4 +1,5 @@
 import type {
+  ActivityRepository,
   AuditLogRepository,
   DealsRepository,
   DraftInventoryRecord,
@@ -59,6 +60,7 @@ export interface RenderInventoryConversionDependencies {
   readonly renderConversions: RenderConversionRepository;
   readonly deals?: DealsRepository | undefined;
   readonly auditLogs: AuditLogRepository;
+  readonly activities?: ActivityRepository | undefined;
   readonly connector: RenderInventoryConnector;
   readonly clock?: (() => Date) | undefined;
 }
@@ -218,6 +220,7 @@ export class RenderInventoryConversionService {
         renderSellerId: sellerConversion?.renderSellerId ?? null,
         renderInventoryId: providerResult.renderInventoryId,
       });
+      await this.appendActivity(scope, context, capture, draft, "Render inventory conversion succeeded", completedAt, { eventType: "RENDER_INVENTORY_CONVERSION_SUCCEEDED", marketplaceCaptureId: capture.id, draftInventoryId: draft.id, conversionId: conversion.id, renderSellerId: sellerConversion?.renderSellerId ?? null, renderInventoryId: providerResult.renderInventoryId });
 
       return {
         captureId: capture.id,
@@ -243,6 +246,7 @@ export class RenderInventoryConversionService {
         renderSellerId: sellerConversion?.renderSellerId ?? null,
         failureReason,
       });
+      await this.appendActivity(scope, context, capture, draft, "Render inventory conversion failed", this.now().toISOString(), { eventType: "RENDER_INVENTORY_CONVERSION_FAILED", marketplaceCaptureId: capture.id, draftInventoryId: draft.id, conversionId: conversion.id, renderSellerId: sellerConversion?.renderSellerId ?? null, failureReason });
       throw this.error(
         context.correlation,
         "SERVICE_REPOSITORY_FAILED",
@@ -254,6 +258,21 @@ export class RenderInventoryConversionService {
     }
   }
 
+  private async appendActivity(scope: TenantScoped, context: RenderInventoryConversionContext, capture: MarketplaceCaptureRecord, draft: DraftInventoryRecord, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
+    if (this.deps.activities === undefined) return;
+    const dealId = capture.dealId ?? draft.dealId ?? null;
+    if (dealId == null) return;
+    await this.deps.activities.create({ ...scope, actorId: context.actorId, correlation: context.correlation }, {
+      tenantId: scope.tenantId,
+      contactId: capture.contactId ?? draft.contactId ?? null,
+      dealId,
+      createdById: context.actorId ?? "system",
+      type: "NOTE",
+      note,
+      occurredAt,
+      metadata,
+    });
+  }
   private async findSellerConversion(
     scope: TenantScoped,
     capture: MarketplaceCaptureRecord,
