@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { SellerClaimPortalError, SellerClaimPortalService } from '../dist/index.js';
+import { hashClaimToken } from '../dist/claim-token-hash.js';
 
 const now = new Date('2026-01-01T00:00:00.000Z');
-const hash = (token) => createHash('sha256').update(token).digest('hex');
 const baseContext = { correlation: { correlationId: 'corr-1' } };
 
 function makeService(overrides = {}) {
   const state = {
-    token: { id: 'token-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', tokenHash: hash('raw-token'), status: 'SENT', expiresAt: '2026-01-08T00:00:00.000Z', metadata: {} },
+    token: { id: 'token-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', tokenHash: hashClaimToken('raw-token'), status: 'SENT', expiresAt: '2026-01-08T00:00:00.000Z', metadata: {} },
     capture: { id: 'capture-1', tenantId: 'tenant-1', contactId: 'contact-1', dealId: 'deal-1', listingUrl: 'https://market.test/listing/1', title: 'Bike', description: 'Nice bike', price: '100', currency: 'USD', sellerName: 'Sam Seller', status: 'INVITED', capturedAt: now.toISOString(), metadata: { sellerPhone: '+15555550123', sellerEmail: 'sam@example.com', sellerLocation: 'Austin' }, createdAt: now.toISOString(), updatedAt: now.toISOString() },
     draft: { id: 'draft-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', contactId: 'contact-1', dealId: 'deal-1', title: 'Bike', description: 'Nice bike', price: '100', currency: 'USD', category: 'Bicycles', images: ['https://cdn.test/bike.jpg'], listingUrl: 'https://market.test/listing/1', marketplaceSource: 'market', status: 'DRAFT', createdAt: now.toISOString(), updatedAt: now.toISOString() },
     stages: [], audits: [], attestations: [], ...overrides,
@@ -30,6 +29,13 @@ function makeService(overrides = {}) {
   return { service, state };
 }
 
+
+test('claim token hashing remains compatible with existing token resolution', async () => {
+  assert.equal(hashClaimToken('raw-token'), '34d328009b123fbbb0dc93f18b3e6de1ecf7b1a5783c33dff7ffe1926f09e943');
+  const { service } = makeService();
+  const preview = await service.preview(baseContext, 'raw-token');
+  assert.equal(preview.capture.id, 'capture-1');
+});
 test('valid token returns preview without raw token and moves Invited to Claim Started', async () => {
   const { service, state } = makeService();
   const preview = await service.preview(baseContext, 'raw-token');

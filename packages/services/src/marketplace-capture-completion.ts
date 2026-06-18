@@ -1,4 +1,5 @@
 import type { ActivityRepository, AuditLogRepository, DealsRepository, DraftInventoryRepository, MarketplaceCaptureRepository, PipelineRepository, RenderConversionRepository } from "@whisperm/repositories";
+import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
 
 export interface MarketplaceCaptureCompletionContext {
@@ -43,7 +44,7 @@ export class MarketplaceCaptureCompletionError extends Error {
   }
 }
 
-const pipelineKey = "marketplace_acquisition";
+const pipelineKey = MARKETPLACE_ACQUISITION_PIPELINE_KEY;
 const convertedStageName = "Converted";
 
 export class MarketplaceCaptureCompletionService {
