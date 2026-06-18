@@ -1,5 +1,5 @@
 import type { CreateRenderSellerInput, RenderSellerConnector } from "@whisperm/provider-adapters";
-import type { AuditLogRepository, ContactRepository, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, MarketplaceSellerVerificationRepository, RenderConversionRecord, RenderConversionRepository } from "@whisperm/repositories";
+import type { AuditLogRepository, ContactRepository, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, RenderConversionRecord, RenderConversionRepository } from "@whisperm/repositories";
 import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
 
 export type RenderConversionRetryStatus = "RETRYING" | "SUCCESS" | "FAILED" | "DEAD_LETTERED";
@@ -9,7 +9,7 @@ export class RenderConversionRetryError extends Error { readonly code: RetryErro
 
 export interface RenderInventoryConnector { createRenderInventory(input: Readonly<Record<string, unknown>> & { readonly idempotencyKey: string }): Promise<{ readonly renderInventoryId: string; readonly status: "CREATED" | "EXISTS" }>; }
 export interface RenderConversionRetryContext { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: PersistenceCorrelationMetadata; }
-export interface RenderConversionRetryDependencies { readonly renderConversions: RenderConversionRepository; readonly marketplaceCaptures: MarketplaceCaptureRepository; readonly draftInventories: DraftInventoryRepository; readonly marketplaceSellerVerifications: MarketplaceSellerVerificationRepository; readonly contacts: ContactRepository; readonly auditLogs: AuditLogRepository; readonly sellerConnector: RenderSellerConnector; readonly inventoryConnector?: RenderInventoryConnector | undefined; readonly clock?: (() => Date) | undefined; }
+export interface RenderConversionRetryDependencies { readonly renderConversions: RenderConversionRepository; readonly marketplaceCaptures: MarketplaceCaptureRepository; readonly draftInventories: DraftInventoryRepository; readonly contacts: ContactRepository; readonly auditLogs: AuditLogRepository; readonly sellerConnector: RenderSellerConnector; readonly inventoryConnector?: RenderInventoryConnector | undefined; readonly clock?: (() => Date) | undefined; }
 export interface RenderConversionRetryResult { readonly conversionId: string; readonly status: RenderConversionRetryStatus; readonly attemptCount: number; readonly nextAttemptAt: string | null; }
 
 const retryableStatuses = new Set(["FAILED", "RETRYING"]);

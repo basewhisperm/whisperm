@@ -14,7 +14,6 @@ const deps = (options = {}) => {
     clock: () => new Date(now),
     marketplaceCaptures: { findById: async (_ctx, id) => id === 'capture-1' ? (options.capture ?? capture()) : null },
     draftInventories: { findByMarketplaceCaptureId: async () => options.draft ?? draft() },
-    marketplaceSellerVerifications: { findLatestByMarketplaceCaptureId: async () => ({ id: 'verify-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', contactId: 'contact-1', status: 'VERIFIED', createdAt: now, updatedAt: now }) },
     contacts: { findById: async () => ({ id: 'contact-1', tenantId: 'tenant-1', firstName: 'Seller', lastName: 'One', email: 'seller@example.com', phone: '+15555550123', stage: 'PROSPECT', createdAt: now, updatedAt: now }) },
     auditLogs: { append: async (_ctx, input) => { state.audits.push(input); return { id: `audit-${state.audits.length}`, ...input, createdAt: now }; } },
     renderConversions: {
