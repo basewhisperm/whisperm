@@ -1,5 +1,5 @@
 import type { CreateRenderSellerInput, RenderSellerConnector } from "@whisperm/provider-adapters";
-import type { AuditLogRepository, ContactRepository, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, MarketplaceOwnershipAttestationRepository, RenderConversionRepository } from "@whisperm/repositories";
+import type { ActivityRepository, AuditLogRepository, ContactRepository, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, MarketplaceOwnershipAttestationRepository, RenderConversionRepository } from "@whisperm/repositories";
 import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
 
 export interface RenderSellerConversionContext { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: PersistenceCorrelationMetadata; }
@@ -14,6 +14,7 @@ export interface RenderSellerConversionDependencies {
   readonly renderConversions: RenderConversionRepository;
   readonly contacts: ContactRepository;
   readonly auditLogs: AuditLogRepository;
+  readonly activities?: ActivityRepository | undefined;
   readonly connector: RenderSellerConnector;
   readonly clock?: (() => Date) | undefined;
 }
@@ -65,11 +66,13 @@ export class RenderSellerConversionService {
       const completedAt = this.now().toISOString();
       const updated = await this.deps.renderConversions.update(scope, conversion.id, { status: "SUCCESS", renderSellerId: providerResult.renderSellerId, completedAt, convertedAt: completedAt, metadata: { source: "MARKETPLACE_CAPTURE", providerStatus: providerResult.status } });
       await this.audit(scope, context.correlation, "RENDER_SELLER_CONVERSION_SUCCEEDED", conversion.id, { marketplaceCaptureId: capture.id, contactId, attestationId: attestation.id, conversionId: conversion.id, renderSellerId: providerResult.renderSellerId });
+      await this.appendActivity(scope, context, capture, contactId, "Render seller conversion succeeded", completedAt, { eventType: "RENDER_SELLER_CONVERSION_SUCCEEDED", marketplaceCaptureId: capture.id, contactId, attestationId: attestation.id, conversionId: conversion.id, renderSellerId: providerResult.renderSellerId });
       return { captureId: capture.id, contactId, attestationId: attestation.id, renderSellerId: providerResult.renderSellerId, conversionStatus: "SUCCESS", conversionId: updated.id, idempotent: false };
     } catch (cause) {
       const failureReason = cause instanceof Error ? cause.message : "Render seller connector failed";
       await this.deps.renderConversions.update(scope, conversion.id, { status: "FAILED", failedAt: this.now().toISOString(), failureReason });
       await this.audit(scope, context.correlation, "RENDER_SELLER_CONVERSION_FAILED", conversion.id, { marketplaceCaptureId: capture.id, contactId, attestationId: attestation.id, conversionId: conversion.id, failureReason });
+      await this.appendActivity(scope, context, capture, contactId, "Render seller conversion failed", this.now().toISOString(), { eventType: "RENDER_SELLER_CONVERSION_FAILED", marketplaceCaptureId: capture.id, contactId, attestationId: attestation.id, conversionId: conversion.id, failureReason });
       throw this.error(context.correlation, "SERVICE_REPOSITORY_FAILED", `Render seller conversion failed: ${failureReason}`, 502, { conversionId: conversion.id }, cause);
     }
   }
@@ -86,6 +89,19 @@ export class RenderSellerConversionService {
 
   private async requireCapture(scope: TenantScoped, captureId: string, correlation: PersistenceCorrelationMetadata): Promise<MarketplaceCaptureRecord> { const capture = await this.deps.marketplaceCaptures.findById(scope, captureId); if (capture === null) throw this.error(correlation, "SERVICE_NOT_FOUND", "Marketplace capture was not found for this tenant", 404); return capture; }
   private now(): Date { return this.deps.clock?.() ?? new Date(); }
+  private async appendActivity(scope: TenantScoped, context: RenderSellerConversionContext, capture: MarketplaceCaptureRecord, contactId: string, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
+    if (this.deps.activities === undefined || capture.dealId == null) return;
+    await this.deps.activities.create({ ...scope, actorId: context.actorId, correlation: context.correlation }, {
+      tenantId: scope.tenantId,
+      contactId,
+      dealId: capture.dealId,
+      createdById: context.actorId ?? "system",
+      type: "NOTE",
+      note,
+      occurredAt,
+      metadata,
+    });
+  }
   private async audit(scope: TenantScoped, correlation: PersistenceCorrelationMetadata, action: string, targetId: string, metadata: Readonly<Record<string, unknown>>): Promise<void> { await this.deps.auditLogs.append(scope, { tenantId: scope.tenantId, action, targetType: "RENDER_CONVERSION", targetId, correlationId: correlation.correlationId, requestId: correlation.requestId, metadata }); }
   private error(correlation: PersistenceCorrelationMetadata | undefined, code: RenderSellerConversionErrorCode, message: string, status: number, details?: Readonly<Record<string, unknown>>, cause?: unknown): RenderSellerConversionError { return new RenderSellerConversionError({ code, message, status, correlation, details, cause }); }
 }
