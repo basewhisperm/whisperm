@@ -355,7 +355,7 @@ const mapRepositoryError = (error: unknown, correlation: PersistenceCorrelationM
       error.status === 404 ? "SERVICE_NOT_FOUND" :
       error.status === 409 ? "SERVICE_CONFLICT" :
       "SERVICE_REPOSITORY_FAILED";
-    throw new ServiceError({ code, message: error.message, status: error.status, correlation, cause: error });
+    throw new ServiceError({ code, message: error.message, status: error.status, details: error.details, correlation, cause: error });
   }
   throw new ServiceError({
     code: "SERVICE_REPOSITORY_FAILED",
