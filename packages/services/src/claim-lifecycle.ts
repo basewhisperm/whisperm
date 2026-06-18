@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { DraftInventoryRecord, MarketplaceCaptureRecord } from "@whisperm/repositories";
+import type { ActivityRepository, DraftInventoryRecord, MarketplaceCaptureRecord } from "@whisperm/repositories";
 import { type PersistenceCorrelationMetadata, type TenantScoped, assertTenantScope } from "@whisperm/types";
 
 const idSchema = z.string().min(1);
@@ -92,6 +92,7 @@ export interface ClaimLifecycleDependencies {
   readonly notifications: ClaimLifecycleNotificationPort;
   readonly scheduler: ClaimLifecycleSchedulerPort;
   readonly auditLogs: ClaimLifecycleAuditPort;
+  readonly activities?: ActivityRepository | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -164,6 +165,13 @@ export class MarketplaceClaimLifecycleService {
     const draft = await this.deps.draftInventories.findByMarketplaceCaptureId(scope, capture.id);
     if (draft !== null && draft.status !== "CLAIMED" && draft.status !== "CONVERTED" && draft.status !== "EXPIRED") await this.deps.draftInventories.update(scope, draft.id, { status: "EXPIRED" });
     await this.audit(context, "MARKETPLACE_CLAIM_INVITATION_EXPIRED", id, { marketplaceCaptureId: capture.id, expiredAt });
+    await this.appendActivity(context, capture, "Seller claim invitation expired", expiredAt, {
+      eventType: "MARKETPLACE_CLAIM_INVITATION_EXPIRED",
+      marketplaceCaptureId: capture.id,
+      claimTokenId: id,
+      draftInventoryId: draft?.id ?? null,
+      expiredAt,
+    });
     return { expired: true };
   }
 
@@ -171,5 +179,19 @@ export class MarketplaceClaimLifecycleService {
   private job(context: ClaimLifecycleServiceContext, invitationId: string, jobType: ClaimLifecycleScheduleJob["jobType"], runAt: Date, reminderType?: ClaimReminderType): ClaimLifecycleScheduleJob { return { tenantId: context.tenantId, invitationId, jobType, reminderType, runAt: runAt.toISOString(), dedupeKey: `${jobType}:${context.tenantId}:${invitationId}:${reminderType ?? "expire"}`, correlation: context.correlation }; }
   private async requireToken(scope: TenantScoped, id: string, context: ClaimLifecycleServiceContext): Promise<MarketplaceClaimTokenRecord> { const token = await this.deps.claimTokens.findById(scope, id); if (token === null) throw new ClaimLifecycleServiceError({ code: "SERVICE_NOT_FOUND", message: "Claim invitation not found", status: 404, correlation: context.correlation }); assertTenantScope(scope, token); return token; }
   private async requireCapture(scope: TenantScoped, id: string, context: ClaimLifecycleServiceContext): Promise<MarketplaceCaptureRecord> { const capture = await this.deps.marketplaceCaptures.findById(scope, id); if (capture === null) throw new ClaimLifecycleServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation }); assertTenantScope(scope, capture); return capture; }
+  private async appendActivity(context: ClaimLifecycleServiceContext, capture: MarketplaceCaptureRecord, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
+    if (this.deps.activities === undefined || capture.dealId == null) return;
+    await this.deps.activities.create({ ...tenantScope(context), actorId: context.actorId, correlation: context.correlation }, {
+      tenantId: context.tenantId,
+      contactId: capture.contactId ?? null,
+      dealId: capture.dealId,
+      createdById: context.actorId ?? "system",
+      type: "NOTE",
+      note,
+      occurredAt,
+      metadata,
+    });
+  }
+
   private async audit(context: ClaimLifecycleServiceContext, action: string, targetId: string, metadata: Readonly<Record<string, unknown>>): Promise<void> { await this.deps.auditLogs.append(tenantScope(context), { tenantId: context.tenantId, action, targetType: "MARKETPLACE_CLAIM_TOKEN", targetId, correlationId: context.correlation.correlationId, requestId: context.correlation.requestId, metadata }); }
 }
