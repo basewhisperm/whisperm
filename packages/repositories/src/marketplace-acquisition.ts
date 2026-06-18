@@ -186,6 +186,10 @@ export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquis
     const convertedCount = captures.filter((row) => row.status === "CONVERTED").length;
     const captureById = new Map(captures.map((capture) => [String(capture.id), capture]));
     const sentByCapture = new Map(sentInvitations.map((invitation) => [String(invitation.marketplaceCaptureId), invitation]));
+    const expiredCaptureIds = new Set<string>();
+    for (const row of captures) if (row.status === "EXPIRED") expiredCaptureIds.add(String(row.id));
+    for (const row of invitationRows) if (row.status === "EXPIRED") expiredCaptureIds.add(String(row.marketplaceCaptureId));
+    for (const row of tokenRows) if (row.status === "EXPIRED") expiredCaptureIds.add(String(row.marketplaceCaptureId));
     const hours = (from: unknown, to: unknown): number | null => {
       if (typeof from !== "string" || typeof to !== "string") return null;
       const diff = Date.parse(to) - Date.parse(from);
@@ -208,7 +212,7 @@ export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquis
         invitationsSent: sentInvitations.length,
         claimRate: sentInvitations.length === 0 ? 0 : claimedCount / sentInvitations.length,
         conversionRate: claimedCount === 0 ? 0 : convertedCount / claimedCount,
-        expiredCount: captures.filter((row) => row.status === "EXPIRED").length + invitationRows.filter((row) => row.status === "EXPIRED").length + tokenRows.filter((row) => row.status === "EXPIRED").length,
+        expiredCount: expiredCaptureIds.size,
       },
       inventory: {
         listingsCaptured: draftRows.length,
