@@ -691,11 +691,26 @@ const cursorWhere = (context: TenantScoped, cursor?: string, extra: PrismaWhere 
 
 const mapPrismaError = (error: unknown, conflictMessage: string): never => {
   const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : undefined;
+  const meta = typeof error === "object" && error !== null && "meta" in error ? error.meta : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+
   if (code === "P2002") {
-    throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: conflictMessage, status: 409 });
+    throw new PersistenceError({
+      code: "PERSISTENCE_CONFLICT",
+      message: conflictMessage,
+      status: 409,
+      details: { prismaCode: code, prismaMeta: meta, prismaMessage: message },
+    });
   }
+
   if (error instanceof PersistenceError) throw error;
-  throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Prisma repository operation failed", status: 503 });
+
+  throw new PersistenceError({
+    code: "PERSISTENCE_TRANSIENT",
+    message: `Prisma repository operation failed${code === undefined ? "" : ` (${code})`}`,
+    status: 503,
+    details: { prismaCode: code, prismaMeta: meta, prismaMessage: message },
+  });
 };
 
 const updateOptimistic = async <TSchema extends z.ZodTypeAny>(delegate: PrismaDelegate, schema: TSchema, context: TenantScoped, id: string, input: OptimisticLock & object): Promise<z.output<TSchema>> => {
