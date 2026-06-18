@@ -1,4 +1,4 @@
-import type { AuditLogRepository, DealsRepository, DraftInventoryRepository, MarketplaceCaptureRepository, PipelineRepository, RenderConversionRepository } from "@whisperm/repositories";
+import type { ActivityRepository, AuditLogRepository, DealsRepository, DraftInventoryRepository, MarketplaceCaptureRepository, PipelineRepository, RenderConversionRepository } from "@whisperm/repositories";
 import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
 
 export interface MarketplaceCaptureCompletionContext {
@@ -14,6 +14,7 @@ export interface MarketplaceCaptureCompletionDependencies {
   readonly pipelines?: PipelineRepository | undefined;
   readonly deals?: DealsRepository | undefined;
   readonly auditLogs: AuditLogRepository;
+  readonly activities?: ActivityRepository | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -96,6 +97,20 @@ export class MarketplaceCaptureCompletionService {
     });
 
     return { captureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, status: "CONVERTED", idempotent: false };
+  }
+
+  private async appendActivity(context: MarketplaceCaptureCompletionContext, capture: { readonly contactId?: string | null; readonly dealId?: string | null }, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
+    if (this.deps.activities === undefined || capture.dealId == null) return;
+    await this.deps.activities.create({ tenantId: context.tenantId, actorId: context.actorId, correlation: context.correlation }, {
+      tenantId: context.tenantId,
+      contactId: capture.contactId ?? null,
+      dealId: capture.dealId,
+      createdById: context.actorId ?? "system",
+      type: "NOTE",
+      note,
+      occurredAt,
+      metadata,
+    });
   }
 
   private now(): Date { return this.deps.clock?.() ?? new Date(); }
