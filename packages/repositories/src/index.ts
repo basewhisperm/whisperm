@@ -166,7 +166,7 @@ export const contactRecordSchema = baseRecordSchema.extend({
   lastName: z.string().min(1).nullable().optional(),
   stage: contactStageSchema.default("PROSPECT"),
   metadata: metadataSchema.nullable().optional()
-}).required({ updatedAt: true }).strict();
+}).required({ updatedAt: true }).passthrough();
 export type ContactRecord = z.output<typeof contactRecordSchema>;
 export type CreateContactInput = TenantScoped & Partial<Pick<ContactRecord, "externalId" | "email" | "phone" | "firstName" | "lastName" | "stage" | "metadata">>;
 export type UpdateContactInput = Partial<Pick<ContactRecord, "externalId" | "email" | "phone" | "firstName" | "lastName" | "stage" | "metadata">> & OptimisticLock;
