@@ -95,7 +95,11 @@ export default function MarketplaceAcquisitionPage() {
 
     Promise.all([
       fetch("/api/deals?pipelineDefaultKey=marketplace_acquisition").then((response) => response.json()),
-      fetch("/api/marketplace-acquisition/analytics").then((response) => response.ok ? response.json() : null),
+      fetch("/api/marketplace-acquisition/analytics").then(async (response) => {
+        if (!response.ok) return null;
+        const payload = await response.json() as { readonly data?: AcquisitionAnalytics };
+        return payload.data ?? null;
+      }),
     ])
       .then(([data, analyticsData]: [{ readonly pipeline: Pipeline | null; readonly deals?: readonly Deal[] }, AcquisitionAnalytics | null]) => {
         if (!cancelled) {
