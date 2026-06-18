@@ -12,7 +12,7 @@ function makeService(overrides = {}) {
     token: { id: 'token-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', tokenHash: hash('raw-token'), status: 'SENT', expiresAt: '2026-01-08T00:00:00.000Z', metadata: {} },
     capture: { id: 'capture-1', tenantId: 'tenant-1', contactId: 'contact-1', dealId: 'deal-1', listingUrl: 'https://market.test/listing/1', title: 'Bike', description: 'Nice bike', price: '100', currency: 'USD', sellerName: 'Sam Seller', status: 'INVITED', capturedAt: now.toISOString(), metadata: { sellerPhone: '+15555550123', sellerEmail: 'sam@example.com', sellerLocation: 'Austin' }, createdAt: now.toISOString(), updatedAt: now.toISOString() },
     draft: { id: 'draft-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', contactId: 'contact-1', dealId: 'deal-1', title: 'Bike', description: 'Nice bike', price: '100', currency: 'USD', category: 'Bicycles', images: ['https://cdn.test/bike.jpg'], listingUrl: 'https://market.test/listing/1', marketplaceSource: 'market', status: 'DRAFT', createdAt: now.toISOString(), updatedAt: now.toISOString() },
-    stages: [], audits: [], attestations: [], ...overrides,
+    stages: [], audits: [], activities: [], attestations: [], ...overrides,
   };
   const service = new SellerClaimPortalService({
     clock: () => now,
@@ -26,6 +26,7 @@ function makeService(overrides = {}) {
     pipelines: { async findByDefaultKey(tenantId, key) { assert.equal(tenantId, 'tenant-1'); assert.equal(key, 'marketplace_acquisition'); return { id: 'pipeline-1', tenantId, name: 'Marketplace Acquisition', defaultKey: key, stages: [{ id: 'stage-started', name: 'Claim Started' }, { id: 'stage-claimed', name: 'Claimed' }] }; } },
     deals: { async updateStage(tenantId, dealId, stageId) { state.stages.push(stageId); return { id: dealId, tenantId, pipelineStageId: stageId, updatedAt: now.toISOString() }; } },
     auditLogs: { async append(context, input) { assert.equal(context.tenantId, input.tenantId); state.audits.push(input); return { id: `audit-${state.audits.length}`, ...input, createdAt: now.toISOString() }; } },
+    activities: { async create(context, input) { assert.equal(context.tenantId, input.tenantId); state.activities.push(input); return { id: `activity-${state.activities.length}`, ...input, createdAt: now.toISOString(), updatedAt: now.toISOString() }; } },
   });
   return { service, state };
 }
@@ -60,6 +61,8 @@ test('accept requires terms, claims capture and draft, is idempotent, and blocks
   assert.equal(state.attestations.length, 1);
   assert.equal(state.attestations[0].attestationStatement.length > 0, true);
   assert.equal(state.audits.some((audit) => audit.action === 'OWNERSHIP_ATTESTED'), true);
+  assert.equal(state.activities.some((activity) => activity.metadata.eventType === 'MARKETPLACE_CLAIM_ACCEPTED'), true);
+  assert.equal(state.activities.at(-1).dealId, 'deal-1');
   assert.equal((await service.accept(baseContext, 'raw-token', { acceptedTerms: true })).status, 'CLAIMED');
   await assert.rejects(() => makeService({ capture: { ...state.capture, status: 'CONVERTED' } }).service.accept(baseContext, 'raw-token', { acceptedTerms: true }), SellerClaimPortalError);
   await assert.rejects(() => makeService({ token: { ...state.token, status: 'EXPIRED' } }).service.accept(baseContext, 'raw-token', { acceptedTerms: true }), SellerClaimPortalError);

@@ -111,6 +111,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     renderConversions: repositories.renderConversions,
     contacts: repositories.contacts,
     auditLogs: repositories.auditLogs,
+    activities: repositories.activities,
     connector: createRenderSellerConnector(),
   });
 

@@ -14,7 +14,7 @@ export interface MarketplaceCaptureCompletionDependencies {
   readonly pipelines?: PipelineRepository | undefined;
   readonly deals?: DealsRepository | undefined;
   readonly auditLogs: AuditLogRepository;
-  readonly activities?: ActivityRepository | undefined;
+  readonly activities: ActivityRepository;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -86,6 +86,9 @@ export class MarketplaceCaptureCompletionService {
       if (convertedStage !== undefined) await this.deps.deals.updateStage(context.tenantId, capture.dealId, convertedStage.id);
     }
 
+    const completedAt = this.now().toISOString();
+    const completionMetadata = { marketplaceCaptureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, completedAt };
+
     await this.deps.auditLogs.append(scope, {
       tenantId: scope.tenantId,
       action: "MARKETPLACE_CAPTURE_COMPLETED",
@@ -93,14 +96,16 @@ export class MarketplaceCaptureCompletionService {
       targetId: capture.id,
       correlationId: context.correlation.correlationId,
       requestId: context.correlation.requestId,
-      metadata: { marketplaceCaptureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, completedAt: this.now().toISOString() },
+      metadata: completionMetadata,
     });
+    await this.appendActivity(context, capture, "Marketplace capture completed", completedAt, { eventType: "MARKETPLACE_CAPTURE_COMPLETED", ...completionMetadata });
 
     return { captureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, status: "CONVERTED", idempotent: false };
   }
 
-  private async appendActivity(context: MarketplaceCaptureCompletionContext, capture: { readonly contactId?: string | null; readonly dealId?: string | null }, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
-    if (this.deps.activities === undefined || capture.dealId == null) return;
+  private async appendActivity(context: MarketplaceCaptureCompletionContext, capture: { readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined }, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
+    // Activity records are deal-scoped in CRM; captures without a deal intentionally have no activity target.
+    if (capture.dealId == null) return;
     await this.deps.activities.create({ tenantId: context.tenantId, actorId: context.actorId, correlation: context.correlation }, {
       tenantId: context.tenantId,
       contactId: capture.contactId ?? null,

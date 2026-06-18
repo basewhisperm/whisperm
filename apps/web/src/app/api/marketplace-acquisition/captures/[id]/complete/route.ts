@@ -47,6 +47,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     pipelines: repositories.pipelines,
     deals: repositories.deals,
     auditLogs: repositories.auditLogs,
+    activities: repositories.activities,
   });
 
   try {

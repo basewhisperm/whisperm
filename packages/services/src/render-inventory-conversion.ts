@@ -60,7 +60,7 @@ export interface RenderInventoryConversionDependencies {
   readonly renderConversions: RenderConversionRepository;
   readonly deals?: DealsRepository | undefined;
   readonly auditLogs: AuditLogRepository;
-  readonly activities?: ActivityRepository | undefined;
+  readonly activities: ActivityRepository;
   readonly connector: RenderInventoryConnector;
   readonly clock?: (() => Date) | undefined;
 }
@@ -259,8 +259,8 @@ export class RenderInventoryConversionService {
   }
 
   private async appendActivity(scope: TenantScoped, context: RenderInventoryConversionContext, capture: MarketplaceCaptureRecord, draft: DraftInventoryRecord, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
-    if (this.deps.activities === undefined) return;
     const dealId = capture.dealId ?? draft.dealId ?? null;
+    // Activity records are deal-scoped in CRM; captures/drafts without a deal intentionally have no activity target.
     if (dealId == null) return;
     await this.deps.activities.create({ ...scope, actorId: context.actorId, correlation: context.correlation }, {
       tenantId: scope.tenantId,

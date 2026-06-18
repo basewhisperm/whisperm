@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import {
+  PrismaActivityRepository,
   PrismaAuditLogRepository,
   PrismaDealsRepository,
   PrismaDraftInventoryRepository,
@@ -45,5 +46,6 @@ export const createSellerClaimService = (): SellerClaimPortalService => {
     pipelines: new PrismaPipelineRepository(client),
     deals: new PrismaDealsRepository(client),
     auditLogs: new PrismaAuditLogRepository(client),
+    activities: new PrismaActivityRepository(client),
   });
 };

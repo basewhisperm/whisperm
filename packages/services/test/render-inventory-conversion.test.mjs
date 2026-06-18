@@ -54,6 +54,7 @@ function deps(options = {}) {
     draft: options.draft === undefined ? draft() : options.draft,
     conversions: [],
     audits: [],
+    activities: [],
     inventoryCalls: [],
   };
 
@@ -73,6 +74,9 @@ function deps(options = {}) {
     },
     auditLogs: {
       async append(scope, input) { state.audits.push(input); return { id: `audit-${state.audits.length}`, tenantId: scope.tenantId, occurredAt: now, ...input }; },
+    },
+    activities: {
+      async create(scope, input) { state.activities.push(input); return { id: `activity-${state.activities.length}`, tenantId: scope.tenantId, occurredAt: now, createdAt: now, updatedAt: now, ...input }; },
     },
     connector: {
       async createRenderInventory(input) {
@@ -106,6 +110,8 @@ test('claimed draft inventory converts to Render inventory without completing ac
   assert.equal(setup.state.inventoryCalls[0].title, 'Bike');
   assert.equal(setup.state.inventoryCalls[0].idempotencyKey, 'render-inventory:tenant-1:draft-1');
   assert.equal(setup.state.audits.some((audit) => audit.action === 'RENDER_INVENTORY_CONVERSION_SUCCEEDED'), true);
+  assert.equal(setup.state.activities.length, 1);
+  assert.equal(setup.state.activities[0].metadata.eventType, 'RENDER_INVENTORY_CONVERSION_SUCCEEDED');
 });
 
 test('unclaimed capture or draft cannot convert inventory', async () => {

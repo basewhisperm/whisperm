@@ -53,6 +53,7 @@ function setup(options = {}) {
     capture: options.capture ?? capture(),
     draft: options.draft === undefined ? draft() : options.draft,
     audits: [],
+    activities: [],
     stageUpdates: [],
   };
 
@@ -104,6 +105,13 @@ function setup(options = {}) {
         return { id: `audit-${state.audits.length}`, ...input, occurredAt: now };
       },
     },
+    activities: {
+      async create(scope, input) {
+        assert.equal(scope.tenantId, input.tenantId);
+        state.activities.push(input);
+        return { id: `activity-${state.activities.length}`, ...input, occurredAt: now, createdAt: now, updatedAt: now };
+      },
+    },
   });
 
   return { service, state };
@@ -123,6 +131,8 @@ test("seller and inventory success complete claimed marketplace capture", async 
   assert.equal(state.capture.status, "CONVERTED");
   assert.equal(state.stageUpdates[0].stageId, "stage-converted");
   assert.equal(state.audits[0].action, "MARKETPLACE_CAPTURE_COMPLETED");
+  assert.equal(state.activities.length, 1);
+  assert.equal(state.activities[0].metadata.eventType, "MARKETPLACE_CAPTURE_COMPLETED");
 });
 
 test("completion is idempotent after capture and draft are converted", async () => {
