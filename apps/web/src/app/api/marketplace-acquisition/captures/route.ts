@@ -43,10 +43,22 @@ const urls = (value: unknown): string[] => {
 };
 
 const safeRecord = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? { ...value } as Record<string, unknown> : {};
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? ({ ...value } as Record<string, unknown>)
+    : {};
 
-const errorResponse = (message: string, status: number) =>
-  NextResponse.json({ ok: false, error: { message } }, { status });
+const errorResponse = (message: string, status: number, code?: string, details?: unknown) =>
+  NextResponse.json(
+    {
+      ok: false,
+      error: {
+        message,
+        ...(code === undefined ? {} : { code }),
+        ...(details === undefined ? {} : { details }),
+      },
+    },
+    { status },
+  );
 
 export async function POST(request: NextRequest) {
   const tenant = await getTenantForCurrentUser();
@@ -127,9 +139,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, data: result });
   } catch (error) {
     if (error instanceof ServiceError) {
-      return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });
+      return errorResponse(error.message, error.status, error.code, error.details);
     }
 
-    return NextResponse.json({ ok: false, error: { message: "Capture failed." } }, { status: 500 });
+    return errorResponse("Capture failed.", 500);
   }
 }
