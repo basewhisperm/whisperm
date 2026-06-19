@@ -1135,6 +1135,34 @@ const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<
 
 const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => input.sellerName?.trim() || input.title.trim();
 
+const marketplacePriceForDecimal = (input: MarketplaceCaptureServiceInput): string | undefined => {
+  const raw = input.price ?? input.priceText;
+
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? String(raw) : undefined;
+  }
+
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+
+  const normalized = raw.replace(/[^\d.]/gu, "");
+
+  if (normalized.length === 0) {
+    return undefined;
+  }
+
+  const firstDot = normalized.indexOf(".");
+
+  const decimal =
+    firstDot === -1
+      ? normalized
+      : `${normalized.slice(0, firstDot + 1)}${normalized
+          .slice(firstDot + 1)
+          .replace(/\./gu, "")}`;
+
+  return /^\d+(\.\d+)?$/u.test(decimal) ? decimal : undefined;
+};
 const listingUrlForCapture = (input: MarketplaceCaptureServiceInput): string => input.listingUrl ?? input.sourceUrl ?? "";
 const externalIdForCapture = (input: MarketplaceCaptureServiceInput): string | undefined => input.externalId ?? input.marketplaceListingId ?? input.marketplaceIdentifier ?? undefined;
 const marketplaceSourceForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => input.marketplaceSource ?? input.sourceMarketplace ?? input.marketplaceSourceId ?? sourceHost(listingUrlForCapture(input));
@@ -1343,7 +1371,7 @@ export class MarketplaceAcquisitionCaptureService {
         listingUrl,
         title: data.title,
         description: data.description,
-        price: data.price ?? data.priceText,
+        price: marketplacePriceForDecimal(data),
         currency: data.currency,
         sellerName: data.sellerName,
         sellerProfileUrl: data.sellerProfileUrl,
