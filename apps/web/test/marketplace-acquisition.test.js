@@ -22,7 +22,7 @@ test("seller acquisition page renders required board copy and stages", () => {
     assert.match(source, new RegExp(stage, "u"));
   }
   assert.match(source, /href="\/marketplace-acquisition\/capture"/u);
-  assert.match(source, /pipelineDefaultKey=marketplace_acquisition/u);
+  assert.match(read("lib/marketplace-acquisition/board-store.ts"), /pipelineDefaultKey=marketplace_acquisition/u);
   assert.match(source, /Search acquisitions/u);
   assert.match(source, /Search by deal or contact/u);
   assert.match(source, /All stages/u);
@@ -125,4 +125,57 @@ test("seller acquisition detail renders invitation UX with WhatsApp first, SMS f
   assert.match(invitePanel, /preferredChannel: channel/u);
   assert.match(invitePanel, /Send Seller Acquisition invite/u);
   assert.match(invitePanel, /role="status"/u);
+});
+
+test("seller acquisition board component preserves safe card rendering protections", () => {
+  const board = read("components/seller-acquisition/acquisition-board.tsx");
+
+  assert.match(board, /export function AcquisitionBoard/u);
+  assert.match(board, /acquisitionStages\.map/u);
+  assert.match(board, /aria-labelledby/u);
+  assert.match(board, /`\/marketplace-acquisition\/\$\{deal\.id\}`/u);
+  assert.match(board, /isSafeListingUrl\(deal\.listingUrl\)/u);
+  assert.match(board, /target="_blank"/u);
+  assert.match(board, /rel="noreferrer"/u);
+  assert.doesNotMatch(board, /\.metadata\b/u);
+  assert.doesNotMatch(board, /claimToken|tokenHash|providerSecret|rawPayload/u);
+});
+
+test("seller acquisition page uses board store and accessible filter chips", () => {
+  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  const store = read("lib/marketplace-acquisition/board-store.ts");
+
+  assert.match(source, /useAcquisitionBoardData\(\)/u);
+  assert.match(source, /<AcquisitionBoard/u);
+  assert.match(store, /api\/deals\?pipelineDefaultKey=marketplace_acquisition/u);
+  assert.match(source, /role="group" aria-label="Filter by acquisition stage"/u);
+  assert.match(source, /aria-pressed=\{stageFilter === "all"\}/u);
+  assert.match(source, /aria-pressed=\{stageFilter === stageName\}/u);
+  assert.doesNotMatch(source, /<select[\s\S]*Filter by acquisition stage/u);
+});
+
+test("seller acquisition board drag drop calls stage endpoint with route request shape and reverts rejected moves", () => {
+  const board = read("components/seller-acquisition/acquisition-board.tsx");
+  const route = read("app/api/marketplace-acquisition/deals/[dealId]/stage/route.ts");
+  const store = read("lib/marketplace-acquisition/board-store.ts");
+
+  assert.match(board, /draggable/u);
+  assert.match(board, /onDrop/u);
+  assert.match(board, /\/api\/marketplace-acquisition\/deals\/\$\{encodeURIComponent\(deal\.id\)\}\/stage/u);
+  assert.match(route, /"stageName" in body/u);
+  assert.match(board, /body: JSON\.stringify\(\{ stageName: targetStage\.name \}\)/u);
+  assert.match(store, /allowedAcquisitionStageTransitions/u);
+  assert.match(board, /canTransitionAcquisitionStage\(currentStage\.name, targetStage\.name\)/u);
+  assert.match(board, /!response\.ok/u);
+  assert.match(board, /onStageUpdated\?\.\(deal\.id, currentStage\.id, deal\.updatedAt\)/u);
+  assert.match(board, /await onRefresh\?\.\(\)/u);
+  assert.match(board, /role="alert"/u);
+});
+
+test("seller acquisition board only renders inline invite for captured cards with capture id", () => {
+  const board = read("components/seller-acquisition/acquisition-board.tsx");
+
+  assert.match(board, /SellerAcquisitionInvitePanel/u);
+  assert.match(board, /stageName === "Captured" && deal\.captureId/u);
+  assert.match(board, /captureId=\{deal\.captureId\}/u);
 });

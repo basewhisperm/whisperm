@@ -5,30 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { IconArrowRight, IconBookmark } from "@tabler/icons-react";
 
 import { computeAcquisitionSummary, formatAcquisitionConversionRate } from "@/lib/acquisition-summary";
-
-interface PipelineStage {
-  readonly id: string;
-  readonly name: string;
-  readonly sortOrder?: number | null;
-  readonly position?: number | null;
-}
-
-interface Pipeline {
-  readonly id: string;
-  readonly tenantId?: string;
-  readonly name: string;
-  readonly stages: readonly PipelineStage[];
-}
-
-interface Deal {
-  readonly id: string;
-  readonly title?: string | null;
-  readonly value?: number | null;
-  readonly currency?: string | null;
-  readonly pipelineId: string;
-  readonly pipelineStageId: string;
-  readonly updatedAt: string;
-}
+import { AcquisitionBoard } from "@/components/seller-acquisition/acquisition-board";
+import { acquisitionStages, stageKey, useAcquisitionBoardData } from "@/lib/marketplace-acquisition/board-store";
 
 interface AcquisitionAnalytics {
   readonly acquisition: {
@@ -52,40 +30,20 @@ interface AcquisitionAnalytics {
   };
 }
 
-const acquisitionStages = ["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"] as const;
-
-function stageKey(name: string): string {
-  return name.trim().toLowerCase();
-}
-
-function formatValue(value?: number | null, currency?: string | null): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency ?? "USD",
-    maximumFractionDigits: 0,
-  }).format(value ?? 0);
-}
-
-function formatUpdatedAt(value: string): string {
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
-}
-
 function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function searchText(deal: Deal): string {
+function searchText(deal: { readonly title?: string | null; readonly currency?: string | null; readonly id: string; readonly marketplaceSource?: string | null }): string {
   return [deal.title, deal.currency, deal.id, marketplaceSource(deal)].filter(Boolean).join(" ").toLowerCase();
 }
 
-function marketplaceSource(deal: Deal): string {
-  return deal.currency ?? "";
+function marketplaceSource(deal: { readonly marketplaceSource?: string | null; readonly currency?: string | null }): string {
+  return deal.marketplaceSource ?? deal.currency ?? "";
 }
 
 export default function MarketplaceAcquisitionPage() {
-  const [pipeline, setPipeline] = useState<Pipeline | null>(null);
-  const [deals, setDeals] = useState<Deal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { pipeline, deals, loading, error: boardError, refresh, updateDealStage } = useAcquisitionBoardData();
   const [analytics, setAnalytics] = useState<AcquisitionAnalytics | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
@@ -93,24 +51,17 @@ export default function MarketplaceAcquisitionPage() {
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all([
-      fetch("/api/deals?pipelineDefaultKey=marketplace_acquisition").then((response) => response.json()),
-      fetch("/api/marketplace-acquisition/analytics").then(async (response) => {
+    fetch("/api/marketplace-acquisition/analytics")
+      .then(async (response) => {
         if (!response.ok) return null;
         const payload = await response.json() as { readonly data?: AcquisitionAnalytics };
         return payload.data ?? null;
-      }),
-    ])
-      .then(([data, analyticsData]: [{ readonly pipeline: Pipeline | null; readonly deals?: readonly Deal[] }, AcquisitionAnalytics | null]) => {
-        if (!cancelled) {
-          setPipeline(data.pipeline);
-          setDeals([...(data.deals ?? [])]);
-          setAnalytics(analyticsData);
-          setLoading(false);
-        }
+      })
+      .then((analyticsData) => {
+        if (!cancelled) setAnalytics(analyticsData);
       })
       .catch(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setAnalytics(null);
       });
 
     return () => {
@@ -133,7 +84,6 @@ export default function MarketplaceAcquisitionPage() {
   }, [deals, searchQuery, stageFilter, pipeline?.stages]);
 
   const summary = useMemo(() => computeAcquisitionSummary(pipeline, filteredDeals), [pipeline, filteredDeals]);
-  const stageByName = useMemo(() => new Map((pipeline?.stages ?? []).map((stage) => [stageKey(stage.name), stage])), [pipeline]);
   const fullyConverted = Math.min(
     analytics?.conversion.sellerConversionsSucceeded ?? 0,
     analytics?.conversion.inventoryConversionsSucceeded ?? 0,
@@ -193,20 +143,29 @@ export default function MarketplaceAcquisitionPage() {
         style={{ border: "0.5px solid var(--color-border)" }}
       />
 
-      <select
-        aria-label="Filter by acquisition stage"
-        className="h-10 w-full rounded-xl bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-        value={stageFilter}
-        onChange={(event) => setStageFilter(event.target.value)}
-        style={{ border: "0.5px solid var(--color-border)" }}
-      >
-        <option value="all">All stages</option>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by acquisition stage">
+        <button
+          type="button"
+          aria-pressed={stageFilter === "all"}
+          className="rounded-full px-3 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+          onClick={() => setStageFilter("all")}
+          style={{ border: "0.5px solid var(--color-border)", background: stageFilter === "all" ? "var(--color-whisper)" : "var(--color-background)", color: stageFilter === "all" ? "white" : "var(--color-foreground)" }}
+        >
+          All stages
+        </button>
         {acquisitionStages.map((stageName) => (
-          <option key={stageName} value={stageName}>
+          <button
+            key={stageName}
+            type="button"
+            aria-pressed={stageFilter === stageName}
+            className="rounded-full px-3 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+            onClick={() => setStageFilter(stageName)}
+            style={{ border: "0.5px solid var(--color-border)", background: stageFilter === stageName ? "var(--color-whisper)" : "var(--color-background)", color: stageFilter === stageName ? "white" : "var(--color-foreground)" }}
+          >
             {stageName}
-          </option>
+          </button>
         ))}
-      </select>
+      </div>
 
       {!loading && pipeline !== null && filteredDeals.length === 0 && (
         <p className="rounded-xl bg-background px-4 py-6 text-center text-sm text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>
@@ -223,37 +182,10 @@ export default function MarketplaceAcquisitionPage() {
           <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Start by configuring marketplace capture, then captured sellers will appear on this acquisition board.</p>
         </section>
       ) : (
-        <div className="overflow-x-auto pb-2">
-          <div className="grid min-w-[760px] grid-cols-3 gap-3">
-            {acquisitionStages.map((stageName) => {
-              const stage = stageByName.get(stageKey(stageName));
-              const stageDeals = stage === undefined ? [] : filteredDeals.filter((deal) => deal.pipelineStageId === stage.id);
-
-              return (
-                <section key={stageName} className="rounded-2xl bg-secondary p-3" style={{ border: "0.5px solid var(--color-border)" }}>
-                  <div className="flex items-center justify-between px-1 pb-3">
-                    <h2 className="text-xs font-semibold text-foreground">{stageName}</h2>
-                    <span className="flex size-5 items-center justify-center rounded-full bg-background text-[11px] font-semibold text-muted-foreground">{stageDeals.length}</span>
-                  </div>
-
-                  <div className="space-y-2">
-                    {stageDeals.length === 0 ? (
-                      <p className="rounded-xl bg-background px-3 py-6 text-center text-xs text-muted-foreground">No deals</p>
-                    ) : (
-                      stageDeals.map((deal) => (
-                        <Link key={deal.id} href={`/marketplace-acquisition/${deal.id}`} className="block rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
-                          <h3 className="truncate text-sm font-semibold text-foreground">{deal.title ?? "Untitled acquisition deal"}</h3>
-                          <p className="mt-2 text-xs text-muted-foreground">{formatValue(deal.value, deal.currency)}</p>
-                          <p className="mt-2 text-xs text-muted-foreground">Updated {formatUpdatedAt(deal.updatedAt)}</p>
-                        </Link>
-                      ))
-                    )}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-        </div>
+        <>
+          {boardError !== null && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{boardError}</p>}
+          <AcquisitionBoard pipeline={pipeline} deals={filteredDeals} onStageUpdated={updateDealStage} onRefresh={refresh} />
+        </>
       )}
     </div>
   );
