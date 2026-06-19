@@ -28,6 +28,13 @@ interface Deal {
   readonly pipelineId: string;
   readonly pipelineStageId: string;
   readonly updatedAt: string;
+  readonly captureId?: string | null;
+  readonly contact?: {
+    readonly firstName?: string | null;
+    readonly lastName?: string | null;
+    readonly email?: string | null;
+    readonly company?: string | null;
+  } | null;
 }
 
 interface AcquisitionAnalytics {
@@ -80,6 +87,22 @@ function searchText(deal: Deal): string {
 
 function marketplaceSource(deal: Deal): string {
   return deal.currency ?? "";
+}
+
+function contactName(deal: Deal): string {
+  const contact = deal.contact;
+  if (contact === null || contact === undefined) return "No linked contact";
+  return [contact.firstName, contact.lastName].filter(Boolean).join(" ") || contact.company || contact.email || "Linked contact";
+}
+
+function actionCopy(stageName: string): string {
+  if (stageName === "Captured") return "Needs invite";
+  if (stageName === "Invited") return "Waiting for claim";
+  if (stageName === "Claim Started") return "Claim in progress";
+  if (stageName === "Claimed") return "Ready to convert";
+  if (stageName === "Converted") return "Converted";
+  if (stageName === "Expired") return "Archived";
+  return "Open";
 }
 
 export default function MarketplaceAcquisitionPage() {
@@ -157,6 +180,38 @@ export default function MarketplaceAcquisitionPage() {
           <IconArrowRight aria-hidden="true" className="size-4" stroke={1.8} />
         </Link>
       </section>
+
+      {!loading && pipeline !== null && (
+        <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Action queue</p>
+              <h2 className="mt-1 text-lg font-semibold text-foreground">Captured sellers that need action</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Open a seller to send the WhatsApp-first invite, convert, or archive.</p>
+            </div>
+            <span className="text-sm font-semibold text-whisper">{filteredDeals.length} loaded</span>
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            {filteredDeals.slice(0, 8).map((deal) => {
+              const dealStageName = pipeline.stages.find((stage) => stage.id === deal.pipelineStageId)?.name ?? "Unknown";
+              return (
+                <Link key={deal.id} href={`/marketplace-acquisition/${deal.id}`} className="block rounded-2xl bg-secondary p-4 transition hover:opacity-90" style={{ border: "0.5px solid var(--color-border)" }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">{deal.title ?? "Untitled acquisition deal"}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{contactName(deal)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{formatValue(deal.value, deal.currency)} · Updated {formatUpdatedAt(deal.updatedAt)}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-background px-3 py-1 text-xs font-semibold text-whisper">{actionCopy(dealStageName)}</span>
+                  </div>
+                  <p className="mt-3 text-xs font-semibold text-whisper">Open seller workflow →</p>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Seller acquisition summary">
         <SummaryCard label="Captured" value={String(summary.captured)} description="Deals in the Captured stage" />
