@@ -3,6 +3,11 @@ import { currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 
 export async function getTenantForCurrentUser() {
+  const context = await getTenantContextForCurrentUser();
+  return context?.tenant ?? null;
+}
+
+export async function getTenantContextForCurrentUser() {
   const user = await currentUser();
   if (!user) return null;
 
@@ -20,5 +25,7 @@ export async function getTenantForCurrentUser() {
     include: { tenant: true },
   });
 
-  return tenantUser?.tenant ?? null;
+  if (!tenantUser) return null;
+
+  return { tenant: tenantUser.tenant, tenantUserId: tenantUser.id };
 }

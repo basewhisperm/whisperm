@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getTenantForCurrentUser } from "@/lib/get-tenant";
+import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { createWhispeRMServices, ServiceError } from "@whisperm/services";
@@ -61,8 +61,9 @@ const errorResponse = (message: string, status: number, code?: string, details?:
   );
 
 export async function POST(request: NextRequest) {
-  const tenant = await getTenantForCurrentUser();
-  if (!tenant) return errorResponse("Unauthorized", 401);
+  const tenantContext = await getTenantContextForCurrentUser();
+  if (!tenantContext) return errorResponse("Unauthorized", 401);
+  const { tenant, tenantUserId } = tenantContext;
 
   let body: Record<string, unknown>;
   try {
@@ -128,6 +129,7 @@ export async function POST(request: NextRequest) {
     const result = await services.marketplaceAcquisition.capture(
       {
         tenantId: tenant.id,
+        actorId: tenantUserId,
         correlation: {
           correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(),
           requestId: request.headers.get("x-request-id") ?? undefined,

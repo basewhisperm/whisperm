@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getTenantForCurrentUser } from "@/lib/get-tenant";
+import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import {
   PrismaAuditLogRepository,
@@ -24,8 +24,9 @@ const serviceDependencies = () => ({
 });
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const tenant = await getTenantForCurrentUser();
-  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const tenantContext = await getTenantContextForCurrentUser();
+  if (!tenantContext) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { tenant, tenantUserId } = tenantContext;
 
   const parsed = sellerInvitationCreateRequestSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   } as unknown as ConstructorParameters<typeof SellerInvitationService>[0]);
 
   try {
-    const result = await service.createSellerInvitation({ tenantId: tenant.id, correlation: { correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(), requestId: request.headers.get("x-request-id") ?? undefined } }, { tenantId: tenant.id, captureId: params.id, ...parsed.data });
+    const result = await service.createSellerInvitation({ tenantId: tenant.id, actorId: tenantUserId, correlation: { correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(), requestId: request.headers.get("x-request-id") ?? undefined } }, { tenantId: tenant.id, captureId: params.id, ...parsed.data });
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ServiceError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });

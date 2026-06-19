@@ -180,12 +180,12 @@ export class MarketplaceClaimLifecycleService {
   private async requireToken(scope: TenantScoped, id: string, context: ClaimLifecycleServiceContext): Promise<MarketplaceClaimTokenRecord> { const token = await this.deps.claimTokens.findById(scope, id); if (token === null) throw new ClaimLifecycleServiceError({ code: "SERVICE_NOT_FOUND", message: "Claim invitation not found", status: 404, correlation: context.correlation }); assertTenantScope(scope, token); return token; }
   private async requireCapture(scope: TenantScoped, id: string, context: ClaimLifecycleServiceContext): Promise<MarketplaceCaptureRecord> { const capture = await this.deps.marketplaceCaptures.findById(scope, id); if (capture === null) throw new ClaimLifecycleServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation }); assertTenantScope(scope, capture); return capture; }
   private async appendActivity(context: ClaimLifecycleServiceContext, capture: MarketplaceCaptureRecord, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
-    if (this.deps.activities === undefined || capture.dealId == null) return;
+    if (this.deps.activities === undefined || capture.dealId == null || context.actorId === undefined) return;
     await this.deps.activities.create({ ...tenantScope(context), actorId: context.actorId, correlation: context.correlation }, {
       tenantId: context.tenantId,
       contactId: capture.contactId ?? null,
       dealId: capture.dealId,
-      createdById: context.actorId ?? "system",
+      createdById: context.actorId,
       type: "NOTE",
       note,
       occurredAt,

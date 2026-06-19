@@ -67,8 +67,7 @@ test('accept requires terms, claims capture and draft, is idempotent, and blocks
   assert.equal(state.attestations.length, 1);
   assert.equal(state.attestations[0].attestationStatement.length > 0, true);
   assert.equal(state.audits.some((audit) => audit.action === 'OWNERSHIP_ATTESTED'), true);
-  assert.equal(state.activities.some((activity) => activity.metadata.eventType === 'MARKETPLACE_CLAIM_ACCEPTED'), true);
-  assert.equal(state.activities.at(-1).dealId, 'deal-1');
+  assert.equal(state.activities.length, 0);
   assert.equal((await service.accept(baseContext, 'raw-token', { acceptedTerms: true })).status, 'CLAIMED');
   await assert.rejects(() => makeService({ capture: { ...state.capture, status: 'CONVERTED' } }).service.accept(baseContext, 'raw-token', { acceptedTerms: true }), SellerClaimPortalError);
   await assert.rejects(() => makeService({ token: { ...state.token, status: 'EXPIRED' } }).service.accept(baseContext, 'raw-token', { acceptedTerms: true }), SellerClaimPortalError);

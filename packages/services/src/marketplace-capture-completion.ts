@@ -106,12 +106,12 @@ export class MarketplaceCaptureCompletionService {
 
   private async appendActivity(context: MarketplaceCaptureCompletionContext, capture: { readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined }, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
     // Activity records are deal-scoped in CRM; captures without a deal intentionally have no activity target.
-    if (capture.dealId == null) return;
+    if (capture.dealId == null || context.actorId === undefined) return;
     await this.deps.activities.create({ tenantId: context.tenantId, actorId: context.actorId, correlation: context.correlation }, {
       tenantId: context.tenantId,
       contactId: capture.contactId ?? null,
       dealId: capture.dealId,
-      createdById: context.actorId ?? "system",
+      createdById: context.actorId,
       type: "NOTE",
       note,
       occurredAt,

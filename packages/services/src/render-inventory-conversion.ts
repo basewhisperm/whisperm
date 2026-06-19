@@ -261,12 +261,12 @@ export class RenderInventoryConversionService {
   private async appendActivity(scope: TenantScoped, context: RenderInventoryConversionContext, capture: MarketplaceCaptureRecord, draft: DraftInventoryRecord, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
     const dealId = capture.dealId ?? draft.dealId ?? null;
     // Activity records are deal-scoped in CRM; captures/drafts without a deal intentionally have no activity target.
-    if (dealId == null) return;
+    if (dealId == null || context.actorId === undefined) return;
     await this.deps.activities.create({ ...scope, actorId: context.actorId, correlation: context.correlation }, {
       tenantId: scope.tenantId,
       contactId: capture.contactId ?? draft.contactId ?? null,
       dealId,
-      createdById: context.actorId ?? "system",
+      createdById: context.actorId,
       type: "NOTE",
       note,
       occurredAt,
