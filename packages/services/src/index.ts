@@ -1537,7 +1537,7 @@ export class MarketplaceAcquisitionCaptureService {
       externalId,
       title: `Marketplace seller: ${sellerDisplayName(input)}`,
       pipelineStageId: capturedStageId,
-      value: input.price ?? input.priceText,
+      value: marketplacePriceForDecimal(input),
       currency: input.currency ?? "USD",
       metadata: { marketplaceCaptureId: capture.id, sourceUrl: listingUrlForCapture(input), marketplaceSourceId: input.marketplaceSourceId ?? null, marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? null }
     }));
