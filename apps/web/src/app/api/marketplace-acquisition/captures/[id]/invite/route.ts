@@ -11,6 +11,7 @@ import {
   PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
+import { createHttpSmsProviderFromEnv } from "@whisperm/provider-adapters";
 import { SellerInvitationService, ServiceError, type SellerInvitationProviderPorts } from "@whisperm/services";
 import { sellerInvitationCreateRequestSchema } from "@whisperm/types";
 
@@ -44,13 +45,24 @@ const configuredEmailProvider = (env: NodeJS.ProcessEnv): SellerInvitationProvid
   };
 };
 
+const configuredSmsProvider = (env: NodeJS.ProcessEnv): SellerInvitationProviderPorts["sms"] | undefined => {
+  const provider = env.SELLER_INVITATION_SMS_PROVIDER?.trim();
+  const apiUrl = env.SELLER_INVITATION_SMS_API_URL?.trim();
+  const apiKey = env.SELLER_INVITATION_SMS_API_KEY?.trim();
+  const senderId = env.SELLER_INVITATION_SMS_SENDER_ID?.trim();
+  if (provider === undefined || provider.length === 0 || apiUrl === undefined || apiUrl.length === 0 || apiKey === undefined || apiKey.length === 0 || senderId === undefined || senderId.length === 0) return undefined;
+  return createHttpSmsProviderFromEnv(env);
+};
+
 const sellerInvitationNotifications = (): SellerInvitationProviderPorts => {
   const email = configuredEmailProvider(process.env);
+  const sms = configuredSmsProvider(process.env);
   const notifications: SellerInvitationProviderPorts = {
     whatsappEnabled: process.env.SELLER_INVITATION_WHATSAPP_ENABLED !== "false",
     fallbackToSmsWhenWhatsappMissing: process.env.SELLER_INVITATION_FALLBACK_TO_SMS !== "false",
     inviteBaseUrl: process.env.SELLER_INVITATION_BASE_URL,
     ...(email === undefined ? {} : { email }),
+    ...(sms === undefined ? {} : { sms }),
   };
   return notifications;
 };
