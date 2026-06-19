@@ -45,8 +45,18 @@ export async function GET(request: Request) {
       select: contactNameSelect,
     });
   const contactById = new Map(contacts.map((contact) => [contact.id, contact] as const));
+  const captureRows = deals.length === 0
+    ? []
+    : await prisma.marketplaceCapture.findMany({
+      where: { tenantId: workspaceId, dealId: { in: deals.map((deal) => deal.id) } },
+      select: { id: true, dealId: true },
+    });
+  const captureIdByDealId = new Map(captureRows.flatMap((capture) => (
+    capture.dealId === undefined || capture.dealId === null ? [] : [[capture.dealId, capture.id] as const]
+  )));
   const dealsWithContacts = deals.map((deal: DealRecord) => ({
     ...deal,
+    captureId: captureIdByDealId.get(deal.id) ?? null,
     contact: deal.contactId === undefined || deal.contactId === null ? null : contactById.get(deal.contactId) ?? null,
   }));
 
