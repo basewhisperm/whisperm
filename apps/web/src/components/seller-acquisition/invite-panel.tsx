@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 
-type Channel = "WHATSAPP" | "SMS" | "EMAIL";
+import { ChannelSelector, type SellerAcquisitionInviteChannel } from "./channel-selector";
 
 export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId: string }) {
-  const [channel, setChannel] = useState<Channel>("WHATSAPP");
+  const [channel, setChannel] = useState<SellerAcquisitionInviteChannel>("WHATSAPP");
   const [status, setStatus] = useState("");
 
   async function sendInvite() {
@@ -17,7 +17,7 @@ export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId
     });
 
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
+    if (!response.ok || result.status !== "SENT") {
       setStatus(typeof result.error === "string" ? result.error : "Seller invitation failed");
       return;
     }
@@ -32,13 +32,7 @@ export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId
         WhatsApp is the preferred cellphone-first channel. SMS remains the fallback for phone delivery, and email is available for non-cellphone-first markets.
       </p>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-3">
-        {(["WHATSAPP", "SMS", "EMAIL"] as const).map((option) => (
-          <button key={option} type="button" onClick={() => setChannel(option)}>
-            {option === "WHATSAPP" ? "WhatsApp first" : option === "SMS" ? "SMS fallback" : "Email optional"}
-          </button>
-        ))}
-      </div>
+      <ChannelSelector onChange={setChannel} value={channel} />
 
       <button type="button" onClick={sendInvite}>
         Send Seller Acquisition invite
