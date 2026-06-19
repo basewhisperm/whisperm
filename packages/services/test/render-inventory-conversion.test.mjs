@@ -142,3 +142,11 @@ test('tenant isolation preserved', async () => {
   const setup = deps();
   await rejectsWithCode(() => setup.service.convertClaimedInventoryToRender({ ...context, tenantId: 'tenant-2' }, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' }), 'SERVICE_TENANT_MISMATCH');
 });
+
+test('inventory conversion skips activity safely when actor is missing', async () => {
+  const setup = deps();
+  const result = await setup.service.convertClaimedInventoryToRender({ tenantId: 'tenant-1', correlation: { correlationId: 'corr-1' } }, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' });
+  assert.equal(result.conversionStatus, 'SUCCESS');
+  assert.equal(setup.state.audits.some((audit) => audit.action === 'RENDER_INVENTORY_CONVERSION_SUCCEEDED'), true);
+  assert.equal(setup.state.activities.length, 0);
+});

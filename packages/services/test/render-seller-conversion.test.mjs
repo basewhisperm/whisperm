@@ -52,3 +52,10 @@ test('tenant isolation preserved', async () => { const setup = deps(); await rej
 test('TrustLayer is not required', async () => { const setup = deps({ attestation: attestation({ method: 'SELF_ATTESTATION', evidence: {} }) }); const result = await new RenderSellerConversionService(setup.deps).convertClaimedSellerToRender(context, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' }); assert.equal(result.conversionStatus, 'SUCCESS'); });
 test('Marketplace is not re-scraped and payload uses captured snapshot', async () => { const setup = deps(); await new RenderSellerConversionService(setup.deps).convertClaimedSellerToRender(context, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' }); assert.equal(setup.state.connectorCalls[0].marketplaceSource, 'MARKET_TEST'); assert.equal(setup.state.connectorCalls[0].phone, '+15555550123'); });
 test('seller-only conversion does not move acquisition to Converted', async () => { const setup = deps(); await new RenderSellerConversionService(setup.deps).convertClaimedSellerToRender(context, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' }); assert.equal(setup.state.conversions.at(-1).status, 'SUCCESS'); assert.equal(setup.state.connectorCalls.length, 1); });
+test('seller conversion skips activity safely when actor is missing', async () => {
+  const setup = deps();
+  const result = await new RenderSellerConversionService(setup.deps).convertClaimedSellerToRender({ tenantId: 'tenant-1', correlation: { correlationId: 'corr-1' } }, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' });
+  assert.equal(result.conversionStatus, 'SUCCESS');
+  assert.equal(setup.state.audits.some((audit) => audit.action === 'RENDER_SELLER_CONVERSION_SUCCEEDED'), true);
+  assert.equal(setup.state.activities.length, 0);
+});

@@ -156,3 +156,13 @@ test("tenant mismatch and invalid statuses fail closed", async () => {
   await rejectsWithCode(() => setup({ capture: capture({ status: "INVITED" }) }).service.completeCapture(context, { tenantId: "tenant-1", marketplaceCaptureId: "capture-1" }), "SERVICE_INVALID_STATE_TRANSITION");
   await rejectsWithCode(() => setup({ draft: draft({ status: "CLAIMED" }) }).service.completeCapture(context, { tenantId: "tenant-1", marketplaceCaptureId: "capture-1" }), "SERVICE_INVALID_STATE_TRANSITION");
 });
+
+test("completion skips activity safely when actor is missing", async () => {
+  const { service, state } = setup();
+
+  const result = await service.completeCapture({ tenantId: "tenant-1", correlation: { correlationId: "corr-complete" } }, { tenantId: "tenant-1", marketplaceCaptureId: "capture-1" });
+
+  assert.equal(result.status, "CONVERTED");
+  assert.equal(state.audits[0].action, "MARKETPLACE_CAPTURE_COMPLETED");
+  assert.equal(state.activities.length, 0);
+});

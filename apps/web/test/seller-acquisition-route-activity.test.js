@@ -72,7 +72,7 @@ const createHarness = async (state) => {
   const tempDir = join(tmpdir(), `whisperm-route-activity-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(tempDir);
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\nexport class NextRequest extends Request {}\n');
-  writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__routeState.tenant;\n');
+  writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__routeState.tenant;\nexport const getTenantContextForCurrentUser = async () => ({ tenant: globalThis.__routeState.tenant, tenantUserId: "tenant-user-1" });\n');
   writeFileSync(join(tempDir, 'prisma.mjs'), 'export const prisma = {};\n');
   writeFileSync(join(tempDir, 'repositories.mjs'), 'export const createPrismaRepositories = () => globalThis.__routeRepositories;\n');
   writeFileSync(join(tempDir, 'claim-service.mjs'), 'export const createSellerClaimService = () => globalThis.__routeClaimService;\n');
@@ -89,7 +89,7 @@ const createHarness = async (state) => {
   };
 };
 
-test('seller acquisition route handlers create CRM activities for live claim-to-completion lifecycle', async () => {
+test('seller acquisition route handlers create authenticated CRM activities for live conversion-to-completion lifecycle', async () => {
   const state = makeState();
   const harness = await createHarness(state);
   const originalFetch = globalThis.fetch;
@@ -112,10 +112,11 @@ test('seller acquisition route handlers create CRM activities for live claim-to-
     harness.cleanup();
   }
 
-  for (const eventType of ['MARKETPLACE_CLAIM_ACCEPTED', 'RENDER_SELLER_CONVERSION_SUCCEEDED', 'RENDER_INVENTORY_CONVERSION_SUCCEEDED', 'MARKETPLACE_CAPTURE_COMPLETED']) {
+  for (const eventType of ['RENDER_SELLER_CONVERSION_SUCCEEDED', 'RENDER_INVENTORY_CONVERSION_SUCCEEDED', 'MARKETPLACE_CAPTURE_COMPLETED']) {
     assert.equal(state.activities.some((activity) => activity.metadata.eventType === eventType), true);
   }
   assert.equal(state.activities.every((activity) => activity.tenantId === tenantId && activity.dealId === 'deal-1' && activity.contactId === 'contact-1'), true);
+  assert.equal(state.activities.every((activity) => activity.createdById === 'tenant-user-1'), true);
   assert.equal(state.conversions.find((row) => row.conversionKind === 'SELLER')?.renderSellerId, 'render-seller-1');
   assert.equal(state.conversions.find((row) => row.conversionKind === 'INVENTORY')?.metadata.renderInventoryId, 'render-inventory-1');
   assert.equal(state.capture.status, 'CONVERTED');

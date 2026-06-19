@@ -13,5 +13,5 @@ export async function GET(request: NextRequest) {
   const service = new SellerAcquisitionAnalyticsService({ repository });
   const filters = Object.fromEntries(request.nextUrl.searchParams.entries());
   const analytics = await service.get({ tenantId: tenant.id }, filters);
-  return NextResponse.json(analytics);
+  return NextResponse.json({ ok: true, data: analytics });
 }

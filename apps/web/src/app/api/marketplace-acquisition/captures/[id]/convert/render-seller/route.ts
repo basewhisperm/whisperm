@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getTenantForCurrentUser } from "@/lib/get-tenant";
+import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import {
@@ -95,8 +95,9 @@ const createRenderSellerConnector = () => ({
 });
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const tenant = await getTenantForCurrentUser();
-  if (!tenant) return errorResponse("Unauthorized", 401, "AUTH_REQUIRED");
+  const tenantContext = await getTenantContextForCurrentUser();
+  if (!tenantContext) return errorResponse("Unauthorized", 401, "AUTH_REQUIRED");
+  const { tenant, tenantUserId } = tenantContext;
 
   const marketplaceCaptureId = clean(params.id);
   if (marketplaceCaptureId === undefined) {
@@ -122,6 +123,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     const result = await service.convertClaimedSellerToRender(
       {
         tenantId: tenant.id,
+        actorId: tenantUserId,
         correlation: {
           correlationId,
           requestId,

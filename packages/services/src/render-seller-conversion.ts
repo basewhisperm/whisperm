@@ -91,12 +91,12 @@ export class RenderSellerConversionService {
   private now(): Date { return this.deps.clock?.() ?? new Date(); }
   private async appendActivity(scope: TenantScoped, context: RenderSellerConversionContext, capture: MarketplaceCaptureRecord, contactId: string, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {
     // Activity records are deal-scoped in CRM; captures without a deal intentionally have no activity target.
-    if (capture.dealId == null) return;
+    if (capture.dealId == null || context.actorId === undefined) return;
     await this.deps.activities.create({ ...scope, actorId: context.actorId, correlation: context.correlation }, {
       tenantId: scope.tenantId,
       contactId,
       dealId: capture.dealId,
-      createdById: context.actorId ?? "system",
+      createdById: context.actorId,
       type: "NOTE",
       note,
       occurredAt,

@@ -86,7 +86,10 @@ test("seller acquisition page filters client-side without backend query changes"
 
 test("seller acquisition dashboard renders compact analytics cards", () => {
   const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  const analyticsRoute = read("app/api/marketplace-acquisition/analytics/route.ts");
   assert.match(source, /api\/marketplace-acquisition\/analytics/u);
+  assert.match(source, /payload\.data \?\? null/u);
+  assert.match(analyticsRoute, /NextResponse\.json\(\{ ok: true, data: analytics \}\)/u);
   for (const label of ["Captures", "Invitations sent", "Claim rate", "Conversion rate", "Expired", "Listings converted", "Failed conversions"]) {
     assert.match(source, new RegExp(label, "u"));
   }
