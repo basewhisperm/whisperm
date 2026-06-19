@@ -1219,6 +1219,7 @@ model MarketplaceClaimToken {
   reminderDay6SentAt   DateTime?
   expiredAt            DateTime?
   claimedAt            DateTime?
+  metadata             Json?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
