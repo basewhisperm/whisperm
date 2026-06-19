@@ -6,11 +6,12 @@ import {
   PrismaAuditLogRepository,
   PrismaDealsRepository,
   PrismaMarketplaceCaptureRepository,
+  PrismaMarketplaceClaimTokenRepository,
   PrismaPipelineRepository,
   PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { SellerInvitationService, ServiceError } from "@whisperm/services";
+import { SellerInvitationService, ServiceError, type SellerInvitationProviderPorts } from "@whisperm/services";
 import { sellerInvitationCreateRequestSchema } from "@whisperm/types";
 
 interface RouteContext { readonly params: { readonly id: string } }
@@ -18,10 +19,41 @@ interface RouteContext { readonly params: { readonly id: string } }
 const serviceDependencies = () => ({
   marketplaceCaptures: new PrismaMarketplaceCaptureRepository(prisma as unknown as PrismaPersistenceClient),
   sellerInvitations: new PrismaSellerInvitationRepository(prisma as unknown as PrismaPersistenceClient),
+  marketplaceClaimTokens: new PrismaMarketplaceClaimTokenRepository(prisma as unknown as PrismaPersistenceClient),
   pipelines: new PrismaPipelineRepository(prisma as unknown as PrismaPersistenceClient),
   deals: new PrismaDealsRepository(prisma as unknown as PrismaPersistenceClient),
   auditLogs: new PrismaAuditLogRepository(prisma as unknown as PrismaPersistenceClient),
 });
+
+const configuredEmailProvider = (env: NodeJS.ProcessEnv): SellerInvitationProviderPorts["email"] | undefined => {
+  const apiKey = env.RESEND_API_KEY?.trim();
+  if (apiKey === undefined || apiKey.length === 0) return undefined;
+  const from = env.EMAIL_FROM ?? "WhispeRM <noreply@whisperm.ai>";
+  return {
+    async send(message) {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ from, to: message.to, subject: message.subject, html: message.html }),
+      });
+      if (!response.ok) throw new Error("Seller invitation email provider failed");
+    },
+  };
+};
+
+const sellerInvitationNotifications = (): SellerInvitationProviderPorts => {
+  const email = configuredEmailProvider(process.env);
+  const notifications: SellerInvitationProviderPorts = {
+    whatsappEnabled: process.env.SELLER_INVITATION_WHATSAPP_ENABLED !== "false",
+    fallbackToSmsWhenWhatsappMissing: process.env.SELLER_INVITATION_FALLBACK_TO_SMS !== "false",
+    inviteBaseUrl: process.env.SELLER_INVITATION_BASE_URL,
+    ...(email === undefined ? {} : { email }),
+  };
+  return notifications;
+};
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
@@ -35,11 +67,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const service = new SellerInvitationService({
     ...serviceDependencies(),
-    notifications: {
-      whatsappEnabled: process.env.SELLER_INVITATION_WHATSAPP_ENABLED !== "false",
-      fallbackToSmsWhenWhatsappMissing: process.env.SELLER_INVITATION_FALLBACK_TO_SMS !== "false",
-      inviteBaseUrl: process.env.SELLER_INVITATION_BASE_URL,
-    },
+    notifications: sellerInvitationNotifications(),
   } as unknown as ConstructorParameters<typeof SellerInvitationService>[0]);
 
   try {

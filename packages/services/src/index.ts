@@ -159,6 +159,7 @@ export const serviceErrorCodeValues = [
   "SERVICE_TRANSACTION_FAILED",
   "SERVICE_REPOSITORY_FAILED",
   "SERVICE_PLAN_LIMIT_EXCEEDED",
+  "SERVICE_PROVIDER_UNAVAILABLE",
 ] as const;
 export const serviceErrorCodeSchema = z.enum(serviceErrorCodeValues);
 export type ServiceErrorCode = z.output<typeof serviceErrorCodeSchema>;
@@ -1213,6 +1214,28 @@ const resolveInviteChannel = (contact: { readonly phone?: string; readonly email
 
 const recipientFor = (channel: SellerInvitationChannel, contact: { readonly phone?: string; readonly email?: string }): string => channel === "EMAIL" ? contact.email ?? "" : contact.phone ?? "";
 
+const hasDeliveryProvider = (channel: SellerInvitationChannel, notifications: SellerInvitationProviderPorts | undefined): boolean => {
+  if (channel === "WHATSAPP") return notifications?.whatsapp !== undefined;
+  if (channel === "SMS") return notifications?.sms !== undefined;
+  return notifications?.email !== undefined;
+};
+
+const canDeliverInvitation = (channel: SellerInvitationChannel, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined): boolean =>
+  hasDeliveryProvider(channel, notifications) ||
+  (channel === "WHATSAPP" && contact.phone !== undefined && notifications?.fallbackToSmsWhenWhatsappMissing !== false && notifications?.sms !== undefined);
+
+const assertInvitationProviderConfigured = (channel: SellerInvitationChannel, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined, correlation: PersistenceCorrelationMetadata): void => {
+  if (canDeliverInvitation(channel, contact, notifications)) return;
+  throw new ServiceError({
+    code: "SERVICE_PROVIDER_UNAVAILABLE",
+    message: "Seller invitation delivery provider is not configured for the selected channel.",
+    status: 503,
+    retryable: true,
+    correlation,
+    details: { channel },
+  });
+};
+
 export class SellerInvitationService {
   constructor(private readonly deps: ServiceDependencies & {
     readonly notifications?: SellerInvitationProviderPorts | undefined;
@@ -1234,6 +1257,7 @@ export class SellerInvitationService {
     const contact = contactFromCapture(capture);
     const notifications = this.deps.notifications;
     const initialChannel = resolveInviteChannel(contact, data.preferredChannel, notifications?.whatsappEnabled !== false);
+    assertInvitationProviderConfigured(initialChannel, contact, notifications, context.correlation);
     const now = notifications?.now?.() ?? new Date();
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const base = notifications?.inviteBaseUrl ?? "https://app.whisperm.ai/claim";
@@ -1249,7 +1273,8 @@ export class SellerInvitationService {
         marketplaceCaptureId: capture.id,
         tokenHash: hashClaimToken(rawToken),
         expiresAt,
-        status: "PENDING"
+        status: "PENDING",
+        metadata: { initialChannel }
       });
       const inviteUrl = `${base.replace(/\/$/, "")}/${rawToken}`;
 
@@ -1273,7 +1298,8 @@ export class SellerInvitationService {
 
       const sent = await this.sendOrFallback(context, scope, repositories, invitation, contact, notifications);
       if (sent.status === "SENT") {
-        await repositories.marketplaceClaimTokens.update(scope, claimToken.id, { status: "SENT" });
+        const tokenSentAt = typeof sent.metadata?.sentAt === "string" ? sent.metadata.sentAt : new Date().toISOString();
+        await repositories.marketplaceClaimTokens.update(scope, claimToken.id, { status: "SENT", sentAt: tokenSentAt, metadata: { ...(claimToken.metadata ?? {}), invitationId: sent.id, successfulChannel: sent.channel } });
         await this.moveToInvited(context, repositories, capture);
         await this.deps.claimLifecycleScheduler?.scheduleClaimLifecycle(context, claimToken.id);
       }

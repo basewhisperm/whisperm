@@ -281,12 +281,17 @@ export const marketplaceClaimTokenRecordSchema = baseRecordSchema.extend({
   marketplaceCaptureId: z.string().min(1),
   tokenHash: z.string().min(1),
   status: z.string().min(1),
+  sentAt: isoDateSchema.nullable().optional(),
   expiresAt: isoDateSchema,
+  reminderDay3SentAt: isoDateSchema.nullable().optional(),
+  reminderDay6SentAt: isoDateSchema.nullable().optional(),
+  expiredAt: isoDateSchema.nullable().optional(),
   claimedAt: isoDateSchema.nullable().optional(),
-}).required({ updatedAt: true }).passthrough();
+  metadata: metadataSchema.nullable().optional(),
+}).required({ updatedAt: true }).strict();
 export type MarketplaceClaimTokenRecord = z.output<typeof marketplaceClaimTokenRecordSchema>;
-export type CreateMarketplaceClaimTokenInput = TenantScoped & Pick<MarketplaceClaimTokenRecord, "marketplaceCaptureId" | "tokenHash" | "expiresAt"> & Partial<Pick<MarketplaceClaimTokenRecord, "status">>;
-export type UpdateMarketplaceClaimTokenInput = Partial<Pick<MarketplaceClaimTokenRecord, "status" | "claimedAt">>;
+export type CreateMarketplaceClaimTokenInput = TenantScoped & Pick<MarketplaceClaimTokenRecord, "marketplaceCaptureId" | "tokenHash" | "expiresAt"> & Partial<Pick<MarketplaceClaimTokenRecord, "status" | "sentAt" | "reminderDay3SentAt" | "reminderDay6SentAt" | "expiredAt" | "claimedAt" | "metadata">>;
+export type UpdateMarketplaceClaimTokenInput = Partial<Pick<MarketplaceClaimTokenRecord, "status" | "sentAt" | "expiresAt" | "reminderDay3SentAt" | "reminderDay6SentAt" | "expiredAt" | "claimedAt" | "metadata">>;
 
 export const marketplaceOwnershipAttestationRecordSchema = baseRecordSchema.extend({
   marketplaceCaptureId: z.string().min(1),
