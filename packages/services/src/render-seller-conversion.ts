@@ -57,7 +57,7 @@ export class RenderSellerConversionService {
     if (existing?.renderSellerId != null) return { captureId: capture.id, contactId, attestationId: attestation.id, renderSellerId: existing.renderSellerId, conversionStatus: "SUCCESS", conversionId: existing.id, idempotent: true };
 
     const startedAt = this.now().toISOString();
-    const conversion = await this.deps.renderConversions.create(scope, { tenantId: scope.tenantId, marketplaceCaptureId: capture.id, sellerVerificationId: attestation.id, contactId, dealId: capture.dealId ?? draft.dealId, status: "PROCESSING", conversionKind: "SELLER", startedAt, metadata: { source: "MARKETPLACE_CAPTURE" } });
+    const conversion = await this.deps.renderConversions.create(scope, { tenantId: scope.tenantId, marketplaceCaptureId: capture.id, sellerVerificationId: null, contactId, dealId: capture.dealId ?? draft.dealId, status: "PROCESSING", conversionKind: "SELLER", startedAt, metadata: { source: "MARKETPLACE_CAPTURE", attestationId: attestation.id } });
     await this.audit(scope, context.correlation, "RENDER_SELLER_CONVERSION_STARTED", conversion.id, { marketplaceCaptureId: capture.id, contactId, attestationId: attestation.id, conversionId: conversion.id });
 
     try {
