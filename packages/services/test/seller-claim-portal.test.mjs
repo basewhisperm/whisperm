@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SellerClaimPortalError, SellerClaimPortalService } from '../dist/index.js';
-import { hashClaimToken } from '../dist/claim-token-hash.js';
+import { hashClaimToken } from '../dist/index.js';
 
 const now = new Date('2026-01-01T00:00:00.000Z');
 const baseContext = { correlation: { correlationId: 'corr-1' } };

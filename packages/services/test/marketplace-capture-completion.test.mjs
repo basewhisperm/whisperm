@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "../dist/index.js";
 import { MarketplaceCaptureCompletionError, MarketplaceCaptureCompletionService } from "../dist/marketplace-capture-completion.js";
 
 const now = "2026-06-15T00:00:00.000Z";
@@ -88,7 +89,7 @@ function setup(options = {}) {
     pipelines: {
       async findByDefaultKey(tenantId, key) {
         assert.equal(tenantId, "tenant-1");
-        assert.equal(key, "marketplace_acquisition");
+        assert.equal(key, MARKETPLACE_ACQUISITION_PIPELINE_KEY);
         return { id: "pipe-1", tenantId, stages: [{ id: "stage-converted", name: "Converted" }] };
       },
     },

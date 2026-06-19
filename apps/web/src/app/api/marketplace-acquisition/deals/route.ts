@@ -3,8 +3,7 @@ import { NextResponse } from "next/server";
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { PrismaDealsRepository, PrismaPipelineRepository } from "@whisperm/repositories";
-
-const MARKETPLACE_ACQUISITION_PIPELINE_KEY = "marketplace_acquisition";
+import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 
 export async function GET() {
   const tenant = await getTenantForCurrentUser();

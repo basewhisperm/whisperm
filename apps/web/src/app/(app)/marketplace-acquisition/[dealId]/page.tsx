@@ -4,11 +4,12 @@ import { notFound } from "next/navigation";
 import { IconClock, IconNote } from "@tabler/icons-react";
 import { SellerAcquisitionInvitePanel } from "@/components/seller-acquisition/invite-panel";
 import { PrismaDealsRepository, type ActivityRecord, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 
-const marketplacePipelineKey = "marketplace_acquisition";
+const marketplacePipelineKey = MARKETPLACE_ACQUISITION_PIPELINE_KEY;
 
 type PageProps = {
   params: { dealId: string };

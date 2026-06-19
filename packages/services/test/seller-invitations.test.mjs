@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { SellerInvitationService, ServiceError } from "../dist/index.js";
+import { SellerInvitationService, ServiceError, hashClaimToken } from "../dist/index.js";
 
 const now = "2026-06-14T00:00:00.000Z";
 const context = { tenantId: "tenant-a", actorId: "actor-1", correlation: { correlationId: "corr-invite" } };
@@ -57,7 +56,7 @@ test("successful invitation creates a resolvable claim token and /claim invite U
   const rawToken = new URL(r.result.inviteUrl).pathname.split("/").at(-1);
   assert.ok(rawToken);
   assert.equal(new URL(r.result.inviteUrl).pathname.startsWith("/claim/"), true);
-  assert.equal(r.store.claimTokens[0].tokenHash, createHash("sha256").update(rawToken, "utf8").digest("hex"));
+  assert.equal(r.store.claimTokens[0].tokenHash, hashClaimToken(rawToken));
   assert.equal(r.store.invitations[0].metadata.claimTokenId, r.store.claimTokens[0].id);
 
   const expiresAt = Date.parse(r.store.claimTokens[0].expiresAt);

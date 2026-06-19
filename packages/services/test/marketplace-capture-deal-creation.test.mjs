@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createWhispeRMServices, ServiceError } from "../dist/index.js";
+import { createWhispeRMServices, MARKETPLACE_ACQUISITION_PIPELINE_KEY, ServiceError } from "../dist/index.js";
 
 const now = "2026-06-11T00:00:00.000Z";
 const context = { tenantId: "tenant-a", actorId: "user-a", correlation: { correlationId: "corr-marketplace" } };
@@ -29,7 +29,7 @@ const createRepositories = (overrides = {}) => {
       async updateStages() { throw new Error("not used"); },
       async findByDefaultKey(workspaceId, defaultKey) {
         push("pipelines", "findByDefaultKey", [workspaceId, defaultKey]);
-        if (workspaceId !== "tenant-a" || defaultKey !== "marketplace_acquisition") return null;
+        if (workspaceId !== "tenant-a" || defaultKey !== MARKETPLACE_ACQUISITION_PIPELINE_KEY) return null;
         return record({ id: "pipeline-market", tenantId: workspaceId, name: "Marketplace Acquisition", isDefault: false, defaultKey, stages: [
           record({ id: "stage-captured", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Captured", position: 1, color: "#64748B" }),
           record({ id: "stage-invited", tenantId: workspaceId, pipelineId: "pipeline-market", name: "Invited", position: 2, color: "#2563EB" }),

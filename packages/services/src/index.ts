@@ -134,6 +134,8 @@ import {
   MARKETPLACE_ACQUISITION_PIPELINE_KEY,
 } from "@whisperm/types";
 import { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
+export { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
+export { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 
 const metadataSchema = z.record(z.string(), z.unknown());
 const idSchema = z.string().min(1);
