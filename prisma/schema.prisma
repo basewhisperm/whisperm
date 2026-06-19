@@ -1140,6 +1140,7 @@ model MarketplaceCapture {
 
   @@unique([tenantId, id])
   @@unique([tenantId, marketplaceSourceId, externalId])
+  @@unique([tenantId, listingUrl])
   @@index([tenantId])
   @@index([tenantId, marketplaceSourceId])
   @@index([tenantId, contactId])

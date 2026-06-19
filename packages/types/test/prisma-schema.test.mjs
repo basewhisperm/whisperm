@@ -54,3 +54,12 @@ test("Prisma schema includes future-compatible execution and messaging primitive
   assert.match(getModelBlock(schema, "QueueJob"), /@@unique\(\[tenantId, queueName, jobKey\]\)/);
   assert.match(getModelBlock(schema, "ScheduledJob"), /cron\s+String\?/);
 });
+
+test("MarketplaceCapture enforces tenant-scoped listing URL uniqueness", async () => {
+  const schema = await readFile(schemaPath, "utf8");
+  const block = getModelBlock(schema, "MarketplaceCapture");
+
+  assert.match(block, /@@unique\(\[tenantId, id\]\)/);
+  assert.match(block, /@@unique\(\[tenantId, marketplaceSourceId, externalId\]\)/);
+  assert.match(block, /@@unique\(\[tenantId, listingUrl\]\)/);
+});
