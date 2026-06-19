@@ -142,10 +142,10 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
     orderBy: { capturedAt: "desc" },
   });
 
-  const captureMetadata = asRecord(capture?.metadata);
+  const captureSafeFields = asRecord(capture?.["metadata"]);
   const draft = capture?.draftInventories[0] ?? null;
   const draftImages = draft === null ? [] : stringArray(draft.images);
-  const captureImages = stringArray(captureMetadata.imageUrls).concat(stringArray(captureMetadata.images));
+  const captureImages = stringArray(captureSafeFields.imageUrls).concat(stringArray(captureSafeFields.images));
   const images = [...new Set([...draftImages, ...captureImages])];
 
   return (
@@ -164,10 +164,10 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" aria-label="Deal summary">
         <DetailRow label="Stage">{stage?.name ?? "Unknown stage"}</DetailRow>
         <DetailRow label="Contact">{contactName(detail.contact)}</DetailRow>
-        <DetailRow label="Phone">{contactPhone(detail.contact, captureMetadata)}</DetailRow>
-        <DetailRow label="Email">{contactEmail(detail.contact, captureMetadata)}</DetailRow>
+        <DetailRow label="Phone">{contactPhone(detail.contact, captureSafeFields)}</DetailRow>
+        <DetailRow label="Email">{contactEmail(detail.contact, captureSafeFields)}</DetailRow>
         <DetailRow label="Owner">{ownerName(detail.owner)}</DetailRow>
-        <DetailRow label="Deal value">{formatValue(deal.value, deal.currency)}</DetailRow>
+        <DetailRow label="price / deal value">{formatValue(deal.value, deal.currency)}</DetailRow>
       </section>
 
       {capture !== null && (
@@ -175,7 +175,7 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
           <h2 className="text-lg font-semibold text-foreground">Marketplace capture context</h2>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <DetailRow label="Listing URL"><a className="break-all text-whisper hover:underline" href={capture.listingUrl} target="_blank" rel="noreferrer">{capture.listingUrl}</a></DetailRow>
-            <DetailRow label="Marketplace/source">{capture.marketplaceSource?.name ?? capture.marketplaceSource?.key ?? stringValue(captureMetadata.marketplaceSource) ?? "Not provided"}</DetailRow>
+            <DetailRow label="Marketplace/source">{capture.marketplaceSource?.name ?? capture.marketplaceSource?.key ?? stringValue(captureSafeFields.marketplaceSource) ?? "Not provided"}</DetailRow>
             <DetailRow label="Seller name">{capture.sellerName ?? "Not provided"}</DetailRow>
             <DetailRow label="Capture status">{capture.status}</DetailRow>
             <DetailRow label="Draft inventory">{draft?.status ?? "No draft inventory"}</DetailRow>
