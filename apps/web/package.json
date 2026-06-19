@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && next build",
+    "build": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build && next build",
     "lint": "next lint",
     "typecheck": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && prisma generate --schema=../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.js",
