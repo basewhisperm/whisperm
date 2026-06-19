@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { IconClock, IconNote } from "@tabler/icons-react";
 import { SellerAcquisitionInvitePanel } from "@/components/seller-acquisition/invite-panel";
-import { PrismaDealsRepository, type ActivityRecord, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { PrismaDealsRepository, PrismaMarketplaceCaptureRepository, PrismaPipelineRepository, type ActivityRecord, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
@@ -65,6 +66,40 @@ function contactEmail(contact: unknown, metadata: Record<string, unknown>) {
 
 function ownerName(owner: { displayName?: string | null | undefined; email?: string | null | undefined } | null | undefined) {
   return owner?.displayName || owner?.email || "Unassigned";
+}
+
+
+async function archiveAcquisition(formData: FormData) {
+  "use server";
+
+  const dealId = stringValue(formData.get("dealId"));
+  const tenant = await getTenantForCurrentUser();
+
+  if (tenant === null || tenant === undefined || dealId === undefined) return;
+
+  const client = prisma as unknown as PrismaPersistenceClient;
+  const dealsRepo = new PrismaDealsRepository(client);
+  const pipelineRepo = new PrismaPipelineRepository(client);
+  const captureRepo = new PrismaMarketplaceCaptureRepository(client);
+
+  const [pipeline, deal] = await Promise.all([
+    pipelineRepo.findByDefaultKey(tenant.id, marketplacePipelineKey),
+    dealsRepo.findById(tenant.id, dealId),
+  ]);
+
+  if (pipeline === null || deal === null || deal.pipelineId !== pipeline.id) return;
+
+  const expiredStage = pipeline.stages.find((stage) => stage.name === "Expired");
+  if (expiredStage === undefined) return;
+
+  const capture = await captureRepo.findByDealId({ tenantId: tenant.id }, deal.id);
+  if (capture === null) return;
+
+  await dealsRepo.updateStage(tenant.id, deal.id, expiredStage.id);
+  await captureRepo.update({ tenantId: tenant.id }, capture.id, { status: "EXPIRED" });
+
+  revalidatePath(`/marketplace-acquisition/${deal.id}`);
+  revalidatePath("/marketplace-acquisition");
 }
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
@@ -157,7 +192,17 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">Acquisition Deal</p>
             <h1 className="mt-2 text-2xl font-semibold text-foreground">{deal.title ?? "Untitled acquisition opportunity"}</h1>
           </div>
-          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium text-muted-foreground">{stage?.name ?? "Unknown stage"}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium text-muted-foreground">{stage?.name ?? "Unknown stage"}</span>
+            {stage?.name !== "Expired" && stage?.name !== "Converted" && (
+              <form action={archiveAcquisition}>
+                <input name="dealId" type="hidden" value={deal.id} />
+                <button className="rounded-full border border-border px-3 py-1 text-sm font-semibold text-muted-foreground hover:text-foreground" type="submit">
+                  Archive
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </div>
 
