@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { PersistenceError } from "@whisperm/types";
+
 import { MarketplaceCaptureService } from "../dist/index.js";
 
 const now = "2026-06-11T00:00:00.000Z";
@@ -142,6 +144,91 @@ test("second capture with same external ID returns existing MarketplaceCapture i
   assert.equal(second.capture.id, first.capture.id);
   assert.equal(store.captures.length, 1);
 });
+
+
+test("listing URL create conflict refetch returns duplicate without audit", async () => {
+  const store = createStore();
+  const winner = {
+    id: "capture-winner",
+    tenantId: "tenant-a",
+    marketplaceSourceId: null,
+    externalId: null,
+    listingUrl: "https://market.example/listings/123",
+    title: "Winning capture",
+    description: null,
+    price: null,
+    currency: null,
+    sellerProfileUrl: null,
+    metadata: {},
+    status: "CAPTURED",
+    capturedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  let listingUrlLookups = 0;
+  const dependencies = createDependencies(store);
+  const service = new MarketplaceCaptureService({
+    ...dependencies,
+    marketplaceAcquisition: {
+      ...dependencies.marketplaceAcquisition,
+      async findMarketplaceCaptureByListingUrl(scope, listingUrl) {
+        listingUrlLookups += 1;
+        return listingUrlLookups === 1 ? null : (scope.tenantId === winner.tenantId && listingUrl === winner.listingUrl ? winner : null);
+      },
+      async createMarketplaceCapture() {
+        throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Marketplace capture already exists", status: 409 });
+      },
+    },
+  });
+
+  const result = await service.createCapture(context, baseCaptureInput({ priceText: "call for price" }));
+
+  assert.equal(result.isNew, false);
+  assert.equal(result.duplicate, true);
+  assert.equal(result.capture.id, "capture-winner");
+  assert.equal(result.capture.duplicate, true);
+  assert.deepEqual(result.normalizationWarnings, ["PRICE_UNPARSED"]);
+  assert.deepEqual(result.capture.normalizationWarnings, ["PRICE_UNPARSED"]);
+  assert.equal(store.audits.length, 0);
+  assert.equal(listingUrlLookups, 2);
+});
+
+test("listing URL create conflict with missing refetch rethrows original conflict", async () => {
+  const store = createStore();
+  const dependencies = createDependencies(store);
+  const conflict = new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Marketplace capture already exists", status: 409 });
+  const service = new MarketplaceCaptureService({
+    ...dependencies,
+    marketplaceAcquisition: {
+      ...dependencies.marketplaceAcquisition,
+      async createMarketplaceCapture() {
+        throw conflict;
+      },
+    },
+  });
+
+  await assert.rejects(service.createCapture(context, baseCaptureInput()), (error) => error === conflict);
+  assert.equal(store.audits.length, 0);
+});
+
+test("non-conflict create errors are not swallowed", async () => {
+  const store = createStore();
+  const dependencies = createDependencies(store);
+  const transient = new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "database unavailable", status: 503 });
+  const service = new MarketplaceCaptureService({
+    ...dependencies,
+    marketplaceAcquisition: {
+      ...dependencies.marketplaceAcquisition,
+      async createMarketplaceCapture() {
+        throw transient;
+      },
+    },
+  });
+
+  await assert.rejects(service.createCapture(context, baseCaptureInput()), (error) => error === transient);
+  assert.equal(store.audits.length, 0);
+});
+
 
 test("raw listing data remains in MarketplaceCapture metadata", async () => {
   const store = createStore();
