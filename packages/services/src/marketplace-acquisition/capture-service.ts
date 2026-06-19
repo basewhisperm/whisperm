@@ -8,6 +8,7 @@ import {
   PersistenceError,
   marketplaceCaptureCreateRequestSchema,
   marketplaceCaptureResponseSchema,
+  PersistenceError,
   type MarketplaceCaptureCreateRequest,
   type MarketplaceCaptureResponse,
   type PersistenceCorrelationMetadata,
