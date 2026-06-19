@@ -1414,7 +1414,7 @@ export class MarketplaceAcquisitionCaptureService {
         dealId: dealResult.deal.id,
         title: finalCapture.title,
         description: finalCapture.description,
-        price: finalCapture.price,
+        price: marketplacePriceForDecimal(data),
         currency: finalCapture.currency,
         category: marketplaceCategoryForDraft(data),
         images: marketplaceImagesForDraft(data),
