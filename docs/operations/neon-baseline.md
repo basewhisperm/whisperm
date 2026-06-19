@@ -50,3 +50,20 @@ A production migration or baseline requires a recent restorable backup, a rollba
 New Prisma migrations must use a unique timestamp prefix followed by a short descriptive snake_case name, for example `20260618123000_add_marketplace_capture_indexes`. Never reuse a timestamp prefix for a new migration.
 
 The duplicate historical timestamp prefix `20260614000000` is a known hygiene issue with no current production impact. Do not rename those existing migrations; treat the names as immutable production history.
+
+## Seller Acquisition Neon baseline performed
+
+The Seller Acquisition Neon migration baseline that has been recorded for future operators is:
+
+1. The first two migrations were marked applied.
+2. The remaining Seller Acquisition migrations were deployed.
+3. The final migrate status was `Database schema is up to date`.
+
+This is an operational baseline record, not permission to skip verification. Before future Seller Acquisition migration work, verify the target Neon project and branch, inspect `_prisma_migrations`, compare the repository migration history, and confirm the expected schema state.
+
+## Production command safety warnings
+
+- Never run `prisma migrate reset` against Neon production or any shared Neon branch.
+- Use `prisma migrate deploy`, not `prisma migrate dev`, for production migration work.
+- Verify `DATABASE_URL` before migration work, including project, branch, database, role, and environment.
+- Do not run migration commands from a shell where `DATABASE_URL` may point at the wrong tenant, branch, preview database, or production database.

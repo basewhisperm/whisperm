@@ -4,9 +4,11 @@ Scope: Seller Acquisition product, API, web route, service, repository, and oper
 
 ## Canonical lifecycle
 
-The canonical lifecycle is Capture → Invite → Claim Started → Ownership Attested / Claimed → Seller Converted → Inventory Converted → Complete. Route-level tests should exercise handlers for each externally visible transition instead of asserting against source text.
+The canonical lifecycle is Capture → Contact → Deal → Draft Inventory → Invite → Claim → Ownership Attestation → Seller Conversion → Inventory Conversion → Complete. Route-level tests should exercise handlers for each externally visible transition instead of asserting against source text. `docs/product/SOT_Seller_Acquisition_Remaining_Work_v1.0.md` is the canonical drift-prevention SOT for remaining work.
 
 ## Claim and attestation path
+
+TrustLayer is not required for this workflow. Ownership Attestation is the canonical claim proof.
 
 The canonical claim URL is `/claim/[token]`, backed by `/api/marketplace-acquisition/claims/[token]` for preview and `/api/marketplace-acquisition/claims/[token]/accept` for acceptance. The token is opaque to the seller and must be resolved by hash only.
 
@@ -14,7 +16,7 @@ The canonical claim URL is `/claim/[token]`, backed by `/api/marketplace-acquisi
 
 `OwnershipAttestationService` is retired for this lifecycle. Do not add new route, retry, or worker dependencies on it. Use the claim portal acceptance flow instead.
 
-`MarketplaceSellerVerification` is retired from the retry flow. Conversion retry/recovery should operate on `RenderConversion` state and the canonical ownership attestation records, not legacy marketplace seller verification rows.
+`MarketplaceSellerVerification` is legacy/non-canonical unless current code proves otherwise. Conversion retry/recovery should operate on `RenderConversion` state and the canonical ownership attestation records, not legacy marketplace seller verification rows. Treat remaining references as verify-needed compatibility or migration concerns until proven otherwise.
 
 ## Conversion architecture
 
@@ -30,7 +32,7 @@ The Seller Acquisition pipeline key is `marketplace_acquisition`. Use the export
 
 ## Deployment responsibilities
 
-`apps/api` owns platform API handlers and route-level integration coverage that can run without a Next.js runtime. `apps/web` owns Next.js pages and app-router API handlers that depend on Clerk/session helpers, Prisma wiring, and Render connector environment variables.
+`apps/web` routes are production-facing for Seller Acquisition user and app-router flows. `apps/api` routes may exist for platform API handlers, service coverage, or historical compatibility, but they are not the only source of truth. Verify current route ownership before deleting, replacing, or moving endpoints.
 
 Keep business behavior in services and repositories so both API and web entry points can stay thin. Route handlers should validate/authenticate, construct tenant-scoped context, call the service, and format HTTP responses.
 
