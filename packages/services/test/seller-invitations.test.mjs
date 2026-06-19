@@ -40,16 +40,20 @@ test("phone only chooses SMS when WhatsApp is disabled", async () => { const sto
 test("email only chooses EMAIL", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), { email: p.email }); assert.equal(r.result.channel, "EMAIL"); });
 test("phone + email chooses cellphone channel first", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { whatsappEnabled: false, sms: p.sms, email: p.email }); assert.equal(r.result.channel, "SMS"); });
 test("missing phone and email fails clearly", async () => { await assert.rejects(run(baseCapture(), {}, {}), (e) => e instanceof ServiceError && e.message === "Seller has no reachable invitation channel."); });
-test("missing delivery providers fails before claim token or invitation side effects", async () => {
+test("missing delivery providers persists failed invitation and claim token for operator visibility", async () => {
   const store = createStore();
   const capture = baseCapture({ metadata: { sellerPhone: "+233501234567" } });
   store.captures.set(`${capture.tenantId}:${capture.id}`, capture);
   const service = new SellerInvitationService(deps(store, {}));
 
-  await assert.rejects(service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id }), (e) => e instanceof ServiceError && e.code === "SERVICE_PROVIDER_UNAVAILABLE");
-  assert.equal(store.claimTokens.length, 0);
-  assert.equal(store.invitations.length, 0);
-  assert.equal(store.audits.length, 0);
+  const result = await service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id });
+
+  assert.equal(result.status, "FAILED");
+  assert.equal(result.channel, "WHATSAPP");
+  assert.equal(store.claimTokens.length, 1);
+  assert.equal(store.invitations.length, 1);
+  assert.equal(store.invitations[0].status, "FAILED");
+  assert.equal(store.audits.some((audit) => audit.action === "INVITATION_FAILED"), true);
 });
 test("preferredChannel EMAIL works when email exists", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email }, { preferredChannel: "EMAIL" }); assert.equal(r.result.channel, "EMAIL"); });
 test("preferredChannel WHATSAPP fails when phone missing", async () => { await assert.rejects(run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {}, { preferredChannel: "WHATSAPP" }), (e) => e instanceof ServiceError && e.message.includes("Seller phone")); });

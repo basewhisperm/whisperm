@@ -1326,7 +1326,6 @@ export class SellerInvitationService {
     const contact = contactFromCapture(capture);
     const notifications = this.deps.notifications;
     const initialChannel = resolveInviteChannel(contact, data.preferredChannel, notifications?.whatsappEnabled !== false);
-    assertInvitationProviderConfigured(initialChannel, contact, notifications, context.correlation);
     const now = notifications?.now?.() ?? new Date();
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const base = notifications?.inviteBaseUrl ?? "https://app.whisperm.ai/claim";
