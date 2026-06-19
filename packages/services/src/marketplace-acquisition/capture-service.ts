@@ -5,6 +5,7 @@ import type {
   MarketplaceCaptureRecord,
 } from "@whisperm/repositories";
 import {
+  PersistenceError,
   marketplaceCaptureCreateRequestSchema,
   marketplaceCaptureResponseSchema,
   type MarketplaceCaptureCreateRequest,
@@ -152,6 +153,9 @@ const metadataFor = (request: MarketplaceCaptureCreateRequest, sourceKey: string
   ...(warnings.length === 0 ? {} : { normalizationWarnings: warnings }),
 });
 
+const isPersistenceConflict = (error: unknown): error is PersistenceError =>
+  error instanceof PersistenceError && error.code === "PERSISTENCE_CONFLICT";
+
 const toResponse = (record: MarketplaceCaptureRecord, duplicate: boolean, normalizationWarnings: readonly string[]): MarketplaceCaptureResponse => marketplaceCaptureResponseSchema.parse({
   id: record.id,
   tenantId: record.tenantId,
@@ -208,7 +212,18 @@ export class MarketplaceCaptureService {
       status: "CAPTURED",
     };
 
-    const created = await this.dependencies.marketplaceAcquisition.createMarketplaceCapture(scope, input);
+    let created: MarketplaceCaptureRecord;
+    try {
+      created = await this.dependencies.marketplaceAcquisition.createMarketplaceCapture(scope, input);
+    } catch (error) {
+      if (!isPersistenceConflict(error)) throw error;
+
+      const duplicate = await this.dependencies.marketplaceAcquisition.findMarketplaceCaptureByListingUrl(scope, listingUrl);
+      if (duplicate === null) throw error;
+
+      return { capture: toResponse(duplicate, true, warnings), isNew: false, duplicate: true, normalizationWarnings: warnings };
+    }
+
     await this.dependencies.auditLogs?.append?.(scope, {
       tenantId: context.tenantId,
       actorId: context.actorId,
