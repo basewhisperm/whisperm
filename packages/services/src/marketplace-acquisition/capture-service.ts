@@ -7,6 +7,7 @@ import type {
 import {
   marketplaceCaptureCreateRequestSchema,
   marketplaceCaptureResponseSchema,
+  PersistenceError,
   type MarketplaceCaptureCreateRequest,
   type MarketplaceCaptureResponse,
   type PersistenceCorrelationMetadata,
@@ -208,7 +209,19 @@ export class MarketplaceCaptureService {
       status: "CAPTURED",
     };
 
-    const created = await this.dependencies.marketplaceAcquisition.createMarketplaceCapture(scope, input);
+    let created: MarketplaceCaptureRecord;
+    try {
+      created = await this.dependencies.marketplaceAcquisition.createMarketplaceCapture(scope, input);
+    } catch (error) {
+      if (error instanceof PersistenceError && error.code === "PERSISTENCE_CONFLICT") {
+        const winner = await this.dependencies.marketplaceAcquisition.findMarketplaceCaptureByListingUrl(scope, listingUrl);
+        if (winner !== null) {
+          return { capture: toResponse(winner, true, warnings), isNew: false, duplicate: true, normalizationWarnings: warnings };
+        }
+      }
+      throw error;
+    }
+
     await this.dependencies.auditLogs?.append?.(scope, {
       tenantId: context.tenantId,
       actorId: context.actorId,
