@@ -90,7 +90,7 @@ export class MarketplaceCaptureServiceError extends Error {
   }
 }
 
-const parserVersion = "marketplace-capture-normalizer-v1";
+const parserVersion = "marketplace-capture-normalizer-v2";
 const tenantScope = (context: MarketplaceCaptureServiceContext): TenantScoped => ({ tenantId: context.tenantId });
 const truncate = (value: string | undefined, max: number): string | undefined => value === undefined ? undefined : value.trim().slice(0, max);
 
@@ -144,11 +144,76 @@ const parsePriceText = (priceText: string | undefined): { readonly price?: strin
   return { warning: "PRICE_UNPARSED" };
 };
 
-const metadataFor = (request: MarketplaceCaptureCreateRequest, sourceKey: string | undefined, warnings: readonly string[]): Readonly<Record<string, unknown>> => ({
+const stringifyRawValue = (value: unknown): string[] => {
+  if (typeof value === "string") return [value];
+  if (typeof value === "number" && Number.isFinite(value)) return [String(value)];
+  if (Array.isArray(value)) return value.flatMap((item) => stringifyRawValue(item));
+  if (value !== null && typeof value === "object") return Object.values(value as Record<string, unknown>).flatMap((item) => stringifyRawValue(item));
+  return [];
+};
+
+const normalizePhoneCandidate = (candidate: string): string | undefined => {
+  const trimmed = candidate.trim();
+  if (trimmed.length === 0) return undefined;
+
+  const hasInternationalPrefix = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/gu, "");
+
+  if (digits.length < 9 || digits.length > 15) return undefined;
+
+  if (digits.startsWith("233") && digits.length === 12) return `+${digits}`;
+  if (digits.startsWith("0") && digits.length === 10) return `+233${digits.slice(1)}`;
+  if (!hasInternationalPrefix && digits.length === 9) return `+233${digits}`;
+  if (hasInternationalPrefix) return `+${digits}`;
+
+  return undefined;
+};
+
+const extractPhoneNumbers = (request: MarketplaceCaptureCreateRequest): readonly string[] => {
+  const rawText = stringifyRawValue(request.rawExtract);
+  const searchableText = [
+    request.title,
+    request.description,
+    request.sellerProfileUrl,
+    ...rawText,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join("\n");
+
+  const candidates = searchableText.match(/(?:\+?\d[\d\s().-]{7,}\d)/gu) ?? [];
+  const normalized = candidates
+    .map((candidate) => normalizePhoneCandidate(candidate))
+    .filter((value): value is string => value !== undefined);
+
+  return [...new Set(normalized)];
+};
+
+const normalizeImageUrls = (imageUrls: readonly string[]): readonly string[] => {
+  const normalized: string[] = [];
+
+  for (const imageUrl of imageUrls) {
+    try {
+      normalized.push(normalizeUrl(imageUrl, { removeTrailingSlash: false }));
+    } catch {
+      normalized.push(imageUrl.trim());
+    }
+  }
+
+  return [...new Set(normalized.filter((imageUrl) => imageUrl.length > 0))];
+};
+
+const metadataFor = (
+  request: MarketplaceCaptureCreateRequest,
+  sourceKey: string | undefined,
+  warnings: readonly string[],
+  phoneNumbers: readonly string[],
+  imageUrls: readonly string[],
+): Readonly<Record<string, unknown>> => ({
   parserVersion,
   ...(sourceKey === undefined ? {} : { detectedSourceKey: sourceKey }),
   ...(request.priceText === undefined ? {} : { originalPriceText: request.priceText }),
-  ...(request.imageUrls.length === 0 ? {} : { imageUrls: request.imageUrls }),
+  ...(phoneNumbers.length === 0 ? {} : { phoneNumbers, primaryPhoneNumber: phoneNumbers[0] }),
+  ...(imageUrls.length === 0 ? {} : { imageUrls, primaryImageUrl: imageUrls[0] }),
   ...(Object.keys(request.rawExtract).length === 0 ? {} : { rawExtract: request.rawExtract }),
   ...(warnings.length === 0 ? {} : { normalizationWarnings: warnings }),
 });
@@ -198,7 +263,14 @@ export class MarketplaceCaptureService {
 
     const price = parsePriceText(request.priceText);
     if (price.warning !== undefined) warnings.push(price.warning);
+
     const sourceKey = detectedSourceKey(listingUrl);
+    const phoneNumbers = extractPhoneNumbers(request);
+    const imageUrls = normalizeImageUrls(request.imageUrls);
+
+    if (phoneNumbers.length === 0) warnings.push("PHONE_NOT_CAPTURED");
+    if (request.imageUrls.length > 0 && imageUrls.length === 0) warnings.push("IMAGE_URLS_UNPARSED");
+
     const input: CreateMarketplaceCaptureInput = {
       tenantId: context.tenantId,
       listingUrl,
@@ -208,7 +280,7 @@ export class MarketplaceCaptureService {
       price: price.price,
       currency: price.currency,
       sellerProfileUrl,
-      metadata: metadataFor(request, sourceKey, warnings),
+      metadata: metadataFor(request, sourceKey, warnings, phoneNumbers, imageUrls),
       status: "CAPTURED",
     };
 
@@ -232,8 +304,14 @@ export class MarketplaceCaptureService {
       targetId: created.id,
       correlationId: context.correlation.correlationId,
       requestId: context.correlation.requestId,
-      metadata: { sourceHost: new URL(created.listingUrl).host, detectedSourceKey: sourceKey },
+      metadata: {
+        sourceHost: new URL(created.listingUrl).host,
+        detectedSourceKey: sourceKey,
+        phoneCaptured: phoneNumbers.length > 0,
+        imageCount: imageUrls.length,
+      },
     });
+
     return { capture: toResponse(created, false, warnings), isNew: true, duplicate: false, normalizationWarnings: warnings };
   }
 }
