@@ -181,7 +181,8 @@ export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquis
     const attestationRows = rows(attestations);
     const draftRows = rows(drafts);
     const conversionRows = rows(conversions);
-    const sentInvitations = invitationRows.filter((row) => row.status === "SENT" || row.status === "OPENED");
+    const deliveredInvitations = invitationRows.filter((row) => row.status === "SENT" || row.status === "OPENED");
+    const sentInvitations = invitationRows;
     const claimedCount = captures.filter((row) => row.status === "CLAIMED" || row.status === "CONVERTED").length;
     const convertedCount = captures.filter((row) => row.status === "CONVERTED").length;
     const captureById = new Map(captures.map((capture) => [String(capture.id), capture]));
@@ -210,7 +211,7 @@ export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquis
         captures: captures.length,
         capturesPerDay: [...dayCounts.entries()].map(([date, count]) => ({ date, count })),
         invitationsSent: sentInvitations.length,
-        claimRate: sentInvitations.length === 0 ? 0 : claimedCount / sentInvitations.length,
+        claimRate: deliveredInvitations.length === 0 ? 0 : claimedCount / deliveredInvitations.length,
         conversionRate: claimedCount === 0 ? 0 : convertedCount / claimedCount,
         expiredCount: expiredCaptureIds.size,
       },
@@ -221,7 +222,7 @@ export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquis
         listingsExpired: draftRows.filter((row) => row.status === "EXPIRED").length,
       },
       operations: {
-        averageTimeToInviteHours: average(sentInvitations.map((invitation) => hours(captureById.get(String(invitation.marketplaceCaptureId))?.createdAt, invitation.createdAt))),
+        averageTimeToInviteHours: average(deliveredInvitations.map((invitation) => hours(captureById.get(String(invitation.marketplaceCaptureId))?.createdAt, invitation.createdAt))),
         averageTimeToClaimHours: average(attestationRows.map((attestation) => hours(sentByCapture.get(String(attestation.marketplaceCaptureId))?.createdAt ?? captureById.get(String(attestation.marketplaceCaptureId))?.createdAt, attestation.attestedAt))),
         averageTimeToConversionHours: average(conversionRows.filter((row) => row.status === "SUCCESS").map((conversion) => hours(captureById.get(String(conversion.marketplaceCaptureId))?.createdAt, conversion.completedAt ?? conversion.convertedAt))),
       },
