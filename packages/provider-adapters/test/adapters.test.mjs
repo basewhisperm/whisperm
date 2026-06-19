@@ -7,6 +7,8 @@ import {
   OpenAIProviderAdapter,
   OpenAiProviderAdapter,
   ProviderModelExecutionRuntime,
+  HttpSmsProvider,
+  createHttpSmsProviderFromEnv,
 } from '../dist/index.js';
 import { ProviderRuntimeError } from '../../types/dist/index.js';
 
@@ -381,5 +383,39 @@ test('normalized provider error mapping emits typed timeout errors', async () =>
   await assert.rejects(
     () => adapter.generate(request, route),
     assertProviderRuntimeError('PROVIDER_TIMEOUT'),
+  );
+});
+
+test('HTTP SMS provider posts seller invitation payload with environment configuration', async () => {
+  const calls = [];
+  const provider = new HttpSmsProvider({
+    providerName: 'generic-http',
+    apiUrl: 'https://sms.test/send',
+    apiKey: 'secret-key',
+    senderId: 'WhispeRM',
+    async fetchImpl(url, init) {
+      calls.push({ url, init });
+      return new Response('{}', { status: 202 });
+    },
+  });
+
+  await provider.send({ to: '+15555550123', body: 'Invite link' });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://sms.test/send');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer secret-key');
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    provider: 'generic-http',
+    from: 'WhispeRM',
+    to: '+15555550123',
+    body: 'Invite link',
+  });
+});
+
+test('HTTP SMS provider requires complete seller invitation SMS environment', () => {
+  assert.throws(
+    () => createHttpSmsProviderFromEnv({ SELLER_INVITATION_SMS_PROVIDER: 'generic-http', SELLER_INVITATION_SMS_API_URL: 'https://sms.test/send', SELLER_INVITATION_SMS_API_KEY: 'secret-key' }),
+    /SELLER_INVITATION_SMS_SENDER_ID/u,
   );
 });
