@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { PrismaDealsRepository, PrismaMarketplaceCaptureRepository, PrismaPipelineRepository } from "@whisperm/repositories";
+import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 
-const MARKETPLACE_ACQUISITION_PIPELINE_KEY = "marketplace_acquisition";
 const ACQUISITION_STAGE_NAMES = new Set(["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"]);
 const STATUS_BY_STAGE = new Map<string, string>([
   ["Captured", "CAPTURED"],
