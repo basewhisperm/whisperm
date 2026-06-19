@@ -562,12 +562,69 @@ const normalizeSellerPhoneForMatching = (value: string | null | undefined): stri
   const trimmed = value?.trim();
   if (trimmed === undefined || trimmed.length === 0) return undefined;
 
-  const compact = trimmed.replace(/[\s().-]/gu, "");
-  if (/^\+233\d{9}$/u.test(compact)) return compact;
-  if (/^233\d{9}$/u.test(compact)) return `+${compact}`;
-  if (/^0\d{9}$/u.test(compact)) return `+233${compact.slice(1)}`;
+  const digits = trimmed.replace(/\D/gu, "");
+  if (digits.length < 9 || digits.length > 15) return undefined;
 
-  return compact.startsWith("+") ? compact : trimmed;
+  if (digits.startsWith("233") && digits.length === 12) return `+${digits}`;
+  if (digits.startsWith("0") && digits.length === 10) return `+233${digits.slice(1)}`;
+  if (digits.length === 9) return `+233${digits}`;
+  if (trimmed.startsWith("+")) return `+${digits}`;
+
+  return undefined;
+};
+
+
+const normalizeSellerEmailForMatching = (value: string | null | undefined): string | undefined => {
+  const trimmed = value?.trim().toLowerCase();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+};
+
+const extractSellerPhoneFromMetadata = (metadata: Readonly<Record<string, unknown>> | null | undefined): string | undefined => {
+  if (metadata === undefined || metadata === null) return undefined;
+
+  const candidates = [
+    metadata.sellerPhone,
+    metadata.phone,
+    metadata.primaryPhoneNumber,
+    metadata.phoneNumber,
+    metadata.phoneNumbers,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") {
+      const normalized = normalizeSellerPhoneForMatching(candidate);
+      if (normalized !== undefined) return normalized;
+    }
+
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        if (typeof item === "string") {
+          const normalized = normalizeSellerPhoneForMatching(item);
+          if (normalized !== undefined) return normalized;
+        }
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const sellerPhoneForInput = (input: MarketplaceCaptureServiceInput): string | undefined =>
+  normalizeSellerPhoneForMatching(input.sellerPhone ?? input.phone) ?? extractSellerPhoneFromMetadata(input.metadata);
+
+const sellerEmailForInput = (input: MarketplaceCaptureServiceInput): string | undefined =>
+  normalizeSellerEmailForMatching(input.sellerEmail ?? input.email);
+
+const normalizeMarketplaceImageUrls = (value: unknown): readonly string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+
+  const urls = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  const unique = [...new Set(urls)];
+  return unique.length === 0 ? undefined : unique;
 };
 
 const normalizeImportRow = (row: ContactImportRow): ContactImportRow => ({
@@ -1120,7 +1177,7 @@ const marketplaceDealExternalId = (listingUrl: string): string => `marketplace-l
 const normalizeSellerDealIdentity = (value: string): string => value.trim().toLowerCase();
 const marketplaceSellerDealExternalId = (input: MarketplaceCaptureServiceInput, contactId: string): string => {
   const sellerPhone = input.sellerPhone ?? input.phone;
-  const sellerEmail = input.sellerEmail ?? input.email;
+  const sellerEmail = sellerEmailForInput(input);
   const sellerIdentity =
     sellerPhone ??
     input.sellerProfileUrl ??
@@ -1132,7 +1189,20 @@ const marketplaceSellerDealExternalId = (input: MarketplaceCaptureServiceInput, 
   return `marketplace-seller:${normalizeSellerDealIdentity(sellerIdentity)}`;
 };
 
-const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<Record<string, unknown>> => exactInput({ ...(input.metadata ?? {}), sellerEmail: input.sellerEmail ?? input.email ?? undefined, sellerPhone: normalizeSellerPhoneForMatching(input.sellerPhone ?? input.phone), sellerLocation: input.sellerLocation ?? input.location ?? undefined, marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? undefined, marketplaceListingId: input.marketplaceListingId ?? input.externalId ?? undefined, imageUrls: input.imageUrls ?? input.images ?? input.metadata?.imageUrls, category: input.category ?? input.metadata?.category, capturedAt: input.capturedAt ?? undefined, capturedBy: input.capturedBy ?? undefined, pageUrl: input.pageUrl ?? input.sourceUrl ?? input.listingUrl ?? undefined, userAgent: input.userAgent ?? undefined });
+const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<Record<string, unknown>> => exactInput({
+  ...(input.metadata ?? {}),
+  sellerEmail: sellerEmailForInput(input),
+  sellerPhone: sellerPhoneForInput(input),
+  sellerLocation: input.sellerLocation ?? input.location ?? undefined,
+  marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? undefined,
+  marketplaceListingId: input.marketplaceListingId ?? input.externalId ?? undefined,
+  imageUrls: marketplaceImagesForDraft(input),
+  category: input.category ?? input.metadata?.category,
+  capturedAt: input.capturedAt ?? undefined,
+  capturedBy: input.capturedBy ?? undefined,
+  pageUrl: input.pageUrl ?? input.sourceUrl ?? input.listingUrl ?? undefined,
+  userAgent: input.userAgent ?? undefined
+});
 
 const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => input.sellerName?.trim() || input.title.trim();
 
@@ -1168,12 +1238,11 @@ const listingUrlForCapture = (input: MarketplaceCaptureServiceInput): string => 
 const externalIdForCapture = (input: MarketplaceCaptureServiceInput): string | undefined => input.externalId ?? input.marketplaceListingId ?? input.marketplaceIdentifier ?? undefined;
 const marketplaceSourceForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => input.marketplaceSource ?? input.sourceMarketplace ?? input.marketplaceSourceId ?? sourceHost(listingUrlForCapture(input));
 
-const marketplaceImagesForDraft = (input: MarketplaceCaptureServiceInput): unknown | undefined => {
-  if (Array.isArray(input.images)) return input.images;
-  if (Array.isArray(input.imageUrls)) return input.imageUrls;
-  const images = input.metadata?.imageUrls;
-  return Array.isArray(images) ? images : undefined;
-};
+const marketplaceImagesForDraft = (input: MarketplaceCaptureServiceInput): readonly string[] | undefined =>
+  normalizeMarketplaceImageUrls(input.images) ??
+  normalizeMarketplaceImageUrls(input.imageUrls) ??
+  normalizeMarketplaceImageUrls(input.metadata?.imageUrls) ??
+  normalizeMarketplaceImageUrls(input.metadata?.images);
 
 const marketplaceCategoryForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => {
   if (input.category !== undefined && input.category !== null) return input.category;
@@ -1502,12 +1571,12 @@ export class MarketplaceAcquisitionCaptureService {
       }
       return { contact: existingById, strategy: "provided" };
     }
-    const sellerPhone = normalizeSellerPhoneForMatching(input.sellerPhone ?? input.phone);
+    const sellerPhone = sellerPhoneForInput(input);
     if (sellerPhone !== undefined) {
       const existingByPhone = await repositories.contacts.findByPhone(tenantScope, sellerPhone);
       if (existingByPhone !== null) return { contact: existingByPhone, strategy: "phone" };
     }
-    const sellerEmail = input.sellerEmail ?? input.email;
+    const sellerEmail = sellerEmailForInput(input);
     if (sellerEmail !== undefined && sellerEmail !== null) {
       const [existing] = await repositories.contacts.findByEmails(tenantScope, [sellerEmail]);
       if (existing !== undefined) return { contact: existing, strategy: "email" };

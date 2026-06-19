@@ -20,16 +20,16 @@
     "@tabler/icons-react": "^3.35.0",
     "@whisperm/provider-adapters": "workspace:*",
     "@whisperm/repositories": "workspace:^",
+    "@whisperm/services": "workspace:*",
     "@whisperm/types": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "swr": "^2.3.6",
+    "swr": "^2.4.1",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss-animate": "^1.0.7",
-    "@whisperm/services": "workspace:*"
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
