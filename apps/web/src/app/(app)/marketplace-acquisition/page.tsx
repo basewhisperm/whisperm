@@ -245,6 +245,7 @@ export default function MarketplaceAcquisitionPage() {
                           <h3 className="truncate text-sm font-semibold text-foreground">{deal.title ?? "Untitled acquisition deal"}</h3>
                           <p className="mt-2 text-xs text-muted-foreground">{formatValue(deal.value, deal.currency)}</p>
                           <p className="mt-2 text-xs text-muted-foreground">Updated {formatUpdatedAt(deal.updatedAt)}</p>
+                          <p className="mt-3 text-xs font-semibold text-whisper">Open to invite, convert, or archive →</p>
                         </Link>
                       ))
                     )}
