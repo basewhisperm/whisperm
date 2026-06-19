@@ -132,6 +132,55 @@ test("second capture with same listing URL returns existing MarketplaceCapture i
   assert.equal(store.captures.length, 1);
 });
 
+test("createCapture resolves a PERSISTENCE_CONFLICT from a concurrent insert as a duplicate", async () => {
+  const store = createStore();
+  const dependencies = createDependencies(store);
+  const originalCreate = dependencies.marketplaceAcquisition.createMarketplaceCapture;
+  let createAttempts = 0;
+
+  dependencies.marketplaceAcquisition.createMarketplaceCapture = async (scope, input) => {
+    createAttempts += 1;
+
+    if (createAttempts === 1) {
+      store.captures.push({
+        id: "capture-racer",
+        tenantId: scope.tenantId,
+        marketplaceSourceId: input.marketplaceSourceId ?? null,
+        externalId: input.externalId ?? null,
+        listingUrl: input.listingUrl,
+        title: input.title,
+        description: input.description ?? null,
+        price: input.price ?? null,
+        currency: input.currency ?? null,
+        sellerProfileUrl: input.sellerProfileUrl ?? null,
+        metadata: input.metadata ?? {},
+        status: input.status,
+        capturedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      throw new PersistenceError({
+        code: "PERSISTENCE_CONFLICT",
+        message: "duplicate",
+        status: 409,
+      });
+    }
+
+    return originalCreate(scope, input);
+  };
+
+  const service = new MarketplaceCaptureService(dependencies);
+  const result = await service.createCapture(context, baseCaptureInput());
+
+  assert.equal(result.duplicate, true);
+  assert.equal(result.isNew, false);
+  assert.equal(result.capture.id, "capture-racer");
+  assert.equal(createAttempts, 1);
+  assert.equal(store.captures.length, 1);
+  assert.equal(store.audits.length, 0);
+});
+
 test("second capture with same external ID returns existing MarketplaceCapture idempotently", async () => {
   const store = createStore();
   const service = new MarketplaceCaptureService(createDependencies(store));

@@ -60,6 +60,22 @@ test("deals API preserves default behavior and supports marketplace acquisition 
     route,
     /dealsRepo\.list\(workspaceId, \{ pipelineId: pipeline\.id \}\)/u,
   );
+  assert.match(route, /where: \{ tenantId: workspaceId, dealId: \{ in: deals\.map\(\(deal\) => deal\.id\) \} \}/u);
+  assert.match(route, /select: \{ id: true, dealId: true \}/u);
+  assert.match(route, /captureId: captureIdByDealId\.get\(deal\.id\) \?\? null/u);
+  assert.match(route, /contact: deal\.contactId === undefined \|\| deal\.contactId === null/u);
+});
+
+test("seller acquisition board store exposes a minimal SWR-backed data API", () => {
+  const source = read("lib/marketplace-acquisition/board-store.ts");
+
+  assert.match(source, /import useSWR, \{ type KeyedMutator \} from "swr"/u);
+  assert.match(source, /marketplaceAcquisitionDealsPath = "\/api\/deals\?pipelineDefaultKey=marketplace_acquisition"/u);
+  assert.match(source, /export function useMarketplaceAcquisitionBoardStore\(\)/u);
+  assert.match(source, /readonly refresh: KeyedMutator<MarketplaceAcquisitionBoardResponse>/u);
+  assert.match(source, /captureId\?: string \| null/u);
+  assert.match(source, /pipeline: data\?\.pipeline \?\? null/u);
+  assert.match(source, /deals: data\?\.deals \?\? \[\]/u);
 });
 
 test("seller acquisition page filters client-side without backend query changes", () => {
