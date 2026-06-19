@@ -36,6 +36,8 @@ test('claimed acquisition with attestation converts seller and stores render sel
   assert.equal(result.renderSellerId, 'render-seller-1');
   assert.equal(setup.state.conversions.at(-1).status, 'SUCCESS');
   assert.equal(setup.state.conversions.at(-1).renderSellerId, 'render-seller-1');
+  assert.equal(setup.state.conversions[0].sellerVerificationId, null);
+  assert.equal(setup.state.conversions[0].metadata.attestationId, 'att-1');
   assert.equal(setup.state.activities.length, 1);
   assert.equal(setup.state.activities[0].metadata.eventType, 'RENDER_SELLER_CONVERSION_SUCCEEDED');
 });
