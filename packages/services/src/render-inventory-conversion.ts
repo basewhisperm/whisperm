@@ -114,6 +114,15 @@ export class RenderInventoryConversionService {
 
     const scope = { tenantId: context.tenantId };
     const capture = await this.requireCapture(scope, input.marketplaceCaptureId, context.correlation);
+    if (capture.contactId === undefined || capture.contactId === null) {
+      throw this.error(
+        context.correlation,
+        "SERVICE_INVALID_STATE_TRANSITION",
+        "Seller phone-qualified contact is required before inventory conversion",
+        422,
+        { missingRequirements: ["PHONE_REQUIRED"] },
+      );
+    }
 
     if (!eligibleCaptureStatuses.has(capture.status)) {
       throw this.error(
