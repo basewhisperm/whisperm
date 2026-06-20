@@ -431,19 +431,30 @@ test("marketplace acquisition stage transition preserves tenant isolation", asyn
 });
 
 
-test("capture preserves phone/email and works when optional channels are missing", async () => {
+test("canonical phone qualifies when optional sellerPhone and sellerEmail channels are missing", async () => {
   const repositories = createRepositories();
   const services = createWhispeRMServices(repositories);
-  const withPhone = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/phone", externalId: "listing-phone", sellerPhone: "+15555550123", sellerEmail: "phone@example.com" });
+  const withPhone = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/phone", externalId: "listing-phone", sellerPhone: undefined, sellerEmail: undefined, phone: "+15555550123", email: undefined });
   assert.equal(withPhone.draftInventoryId, "draft-1");
   assert.equal(repositories.contactsById.get("contact-1").phone, "+15555550123");
   const capture = [...repositories.capturesByUrl.values()].find((item) => item.id === withPhone.captureId);
   assert.equal(capture.metadata.sellerPhone, "+15555550123");
-  assert.equal(capture.metadata.sellerEmail, "phone@example.com");
+  assert.equal(capture.metadata.sellerEmail, undefined);
+});
 
-  const withoutChannels = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/no-channel", externalId: "listing-no-channel", sellerEmail: undefined, sellerPhone: undefined });
-  assert.equal(withoutChannels.status, "CAPTURED");
-  assert.ok(withoutChannels.contactId);
+test("truly no sellerPhone and no canonical phone remains unqualified without contact or deal", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  const result = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/no-phone", externalId: "listing-no-phone", sellerEmail: undefined, sellerPhone: undefined, email: undefined, phone: undefined });
+  assert.equal(result.status, "CAPTURED");
+  assert.equal(result.contactId, undefined);
+  assert.equal(result.dealId, undefined);
+  assert.equal(result.contactMatchStrategy, "unqualified");
+  assert.equal(repositories.contactsById.size, 0);
+  assert.equal(repositories.dealsByExternalId.size, 0);
+  const capture = [...repositories.capturesByUrl.values()].find((item) => item.id === result.captureId);
+  assert.equal(capture.metadata.acquisitionReadiness, "BLOCKED");
+  assert.equal(capture.metadata.mobileRequiredForQualification, true);
 });
 
 test("duplicate marketplace listing id is scoped to tenant and reuses capture inventory", async () => {

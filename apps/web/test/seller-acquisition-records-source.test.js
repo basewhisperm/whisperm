@@ -15,9 +15,7 @@ test('records routes use existing SELLER_ACQUISITION feature gate', () => {
   for (const path of ['src/app/api/marketplace-acquisition/records/route.ts', 'src/app/api/marketplace-acquisition/records/[captureId]/route.ts']) {
     const text = source(path);
     assert.match(text, /getTenantContextForCurrentUser/);
-    assert.match(text, /SELLER_ACQUISITION_FEATURE/);
-    assert.match(text, /isTenantFeatureEnabled/);
-    assert.match(text, /featureNotEnabledResponse/);
+    assert.match(text, /requireSellerAcquisitionFeatureForApi/);
   }
 });
 

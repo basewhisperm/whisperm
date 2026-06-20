@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
-import { featureNotEnabledResponse, isTenantFeatureEnabled, SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-features";
+import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { createWhispeRMServices, ServiceError } from "@whisperm/services";
 
@@ -23,8 +23,8 @@ export async function POST(request: NextRequest) {
   const tenantContext = await getTenantContextForCurrentUser();
   if (!tenantContext) return NextResponse.json({ ok: false, error: { message: "Unauthorized" } }, { status: 401 });
   const { tenant, tenantUserId } = tenantContext;
-  const featureEnabled = await isTenantFeatureEnabled(tenant.id, SELLER_ACQUISITION_FEATURE);
-  if (!featureEnabled) return featureNotEnabledResponse();
+  const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
+  if (featureDenied) return featureDenied;
 
   const contentType = request.headers.get("content-type") ?? "";
   const parsed =
@@ -77,7 +77,16 @@ export async function POST(request: NextRequest) {
       { tenantId: tenant.id, ...captureInput, images: [...captureInput.images], imageUrls: [...captureInput.imageUrls] },
     );
 
-    return NextResponse.json({ ok: true, data: result, extracted: captureInput });
+    const missingRequirements = result.contactId === undefined ? ["PHONE_REQUIRED"] : [];
+    return NextResponse.json({
+      ok: true,
+      data: result,
+      extracted: captureInput,
+      qualified: missingRequirements.length === 0,
+      blocked: missingRequirements.length > 0,
+      missingRequirements,
+      nextAction: missingRequirements.includes("PHONE_REQUIRED") ? "REVEAL_PHONE" : undefined,
+    });
   } catch (error) {
     if (error instanceof ServiceError) {
       return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });

@@ -71,7 +71,7 @@ test("seller acquisition app pages are gated by tenant entitlement", () => {
 
   assert.match(layout, /getTenantForCurrentUser/u);
   assert.match(layout, /SELLER_ACQUISITION_FEATURE/u);
-  assert.match(layout, /isTenantFeatureEnabled\(tenant\.id, SELLER_ACQUISITION_FEATURE\)/u);
+  assert.match(layout, /isProtectedTenantFeatureEnabled\(tenant\.id, SELLER_ACQUISITION_FEATURE\)/u);
   assert.match(layout, /notFound\(\)/u);
 });
 
@@ -100,12 +100,14 @@ test("seller acquisition API gating excludes public claim routes", () => {
   ];
   for (const routePath of authenticatedRoutes) {
     const route = read(routePath);
-    assert.match(route, /SELLER_ACQUISITION_FEATURE/u);
-    assert.match(route, /isTenantFeatureEnabled/u);
-    assert.match(route, /featureNotEnabledResponse\(\)/u);
+    assert.match(route, /requireSellerAcquisitionFeatureForApi/u);
+    assert.doesNotMatch(route, /isTenantFeatureEnabled\(tenant\.id/u);
   }
 
   const helper = read("lib/tenant-features.ts");
+  assert.match(helper, /isProtectedTenantFeatureEnabled/u);
+  assert.match(helper, /protected_tenant_feature_lookup_failed/u);
+  assert.match(helper, /requireSellerAcquisitionFeatureForApi/u);
   assert.match(helper, /FEATURE_NOT_ENABLED/u);
   assert.match(helper, /Seller Acquisition add-on is not enabled for this workspace\./u);
   assert.match(helper, /\{ status: 403 \}/u);
@@ -184,6 +186,11 @@ test("marketplace sellers page renders workbench actions and record inventory pr
   assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/invite/u);
   assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/convert\/render-seller/u);
   assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/convert\/render-inventory/u);
+  assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/complete/u);
+  assert.match(source, /COMPLETE_ACQUISITION: `\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/complete`/u);
+  assert.match(source, /if \(!response\.ok\) throw new Error/u);
+  assert.match(source, /await onRefresh\(\)/u);
+  assert.match(source, /role="alert"/u);
 });
 
 test("seller acquisition detail renders invitation UX with WhatsApp first, SMS fallback, and email optional", () => {
@@ -216,4 +223,13 @@ test("capture intake and bookmarklet support mobile-required WhatsApp-first bulk
   for (const token of ["portfolioListings", "rawSellerText", "sellerProfileUrl", "marketplaceListingId", "phone", "sellerPhone"]) {
     assert.match(bookmarklet + payload, new RegExp(token, "u"));
   }
+});
+
+
+test("URL capture no-phone response exposes blocked metadata", () => {
+  const route = read("app/api/marketplace-acquisition/captures/from-url/route.ts");
+  assert.match(route, /missingRequirements = result\.contactId === undefined \? \["PHONE_REQUIRED"\] : \[\]/u);
+  assert.match(route, /qualified: missingRequirements\.length === 0/u);
+  assert.match(route, /blocked: missingRequirements\.length > 0/u);
+  assert.match(route, /nextAction: missingRequirements\.includes\("PHONE_REQUIRED"\) \? "REVEAL_PHONE" : undefined/u);
 });

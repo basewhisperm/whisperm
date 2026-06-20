@@ -113,7 +113,7 @@ export class SellerAcquisitionRecordService {
     const [deal, sellerConversion, inventoryConversion] = await Promise.all([
       capture.dealId == null ? Promise.resolve(null) : this.deps.deals.findDetailById(context.tenantId, capture.dealId),
       this.deps.renderConversions?.findSuccessfulSellerConversion(context, capture.id, capture.contactId ?? null) ?? Promise.resolve(null),
-      this.deps.renderConversions?.findSuccessfulInventoryConversion(context, capture.id, capture.externalId ?? null) ?? Promise.resolve(null),
+      this.deps.renderConversions?.findSuccessfulInventoryConversion(context, capture.id, draftInventory?.id ?? null) ?? Promise.resolve(null),
     ]);
     const latestInvitation = invitationHistory[0] ?? null;
     const claimTokenStatus = claimTokens[0] ?? null;
