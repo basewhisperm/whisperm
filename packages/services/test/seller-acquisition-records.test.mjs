@@ -1,0 +1,92 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { SellerAcquisitionRecordService } from '@whisperm/services';
+
+const now = '2026-06-15T00:00:00.000Z';
+const tenantId = 'tenant-1';
+const otherTenantId = 'tenant-2';
+const ctx = { tenantId };
+
+const capture = (overrides = {}) => ({ id: 'capture-1', tenantId, contactId: 'contact-1', dealId: null, externalId: 'listing-1', listingUrl: 'https://market.test/1', title: 'Bike', description: 'Fast', price: '100', currency: 'USD', sellerName: 'Sam', sellerProfileUrl: null, status: 'CAPTURED', capturedAt: now, createdAt: now, updatedAt: now, metadata: {}, ...overrides });
+const contact = (overrides = {}) => ({ id: 'contact-1', tenantId, email: 'sam@example.com', phone: '+2348012345678', firstName: 'Sam', lastName: 'Seller', stage: 'PROSPECT', createdAt: now, updatedAt: now, ...overrides });
+const draft = (overrides = {}) => ({ id: 'draft-1', tenantId, marketplaceCaptureId: 'capture-1', contactId: 'contact-1', dealId: null, title: 'Bike', description: 'Fast', price: '100', currency: 'USD', category: 'Bikes', images: ['https://cdn.test/draft.jpg'], listingUrl: 'https://market.test/1', marketplaceSource: 'MARKET', marketplaceListingId: 'listing-1', status: 'DRAFT', createdAt: now, updatedAt: now, ...overrides });
+const invitation = (overrides = {}) => ({ id: 'invite-1', tenantId, marketplaceCaptureId: 'capture-1', channel: 'WHATSAPP', status: 'SENT', inviteUrl: 'https://claim.test/t', recipient: '+2348012345678', expiresAt: '2026-07-01T00:00:00.000Z', metadata: {}, createdAt: now, updatedAt: now, ...overrides });
+const token = (overrides = {}) => ({ id: 'token-1', tenantId, marketplaceCaptureId: 'capture-1', tokenHash: 'hash', status: 'SENT', sentAt: now, expiresAt: '2026-07-01T00:00:00.000Z', metadata: {}, createdAt: now, updatedAt: now, ...overrides });
+const attestation = () => ({ id: 'att-1', tenantId, marketplaceCaptureId: 'capture-1', draftInventoryId: 'draft-1', contactId: 'contact-1', claimantName: 'Sam', claimantPhone: '+2348012345678', claimantEmail: null, marketplaceIdentity: null, attestationStatement: 'I own this', acceptedTerms: true, attestedAt: now, evidence: {}, metadata: {}, createdAt: now, updatedAt: now });
+const conversion = (kind) => ({ id: `conv-${kind}`, tenantId, marketplaceCaptureId: 'capture-1', contactId: 'contact-1', dealId: null, externalId: 'listing-1', renderSellerId: kind === 'SELLER' ? 'seller-1' : null, conversionKind: kind, status: 'SUCCESS', attemptCount: 1, maxAttempts: 3, completedAt: now, convertedAt: now, metadata: {}, createdAt: now, updatedAt: now });
+
+const service = (state) => new SellerAcquisitionRecordService({
+  marketplaceCaptures: {
+    async findById(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.capture.id ? state.capture : null; },
+    async list(scope, page) { assert.equal(scope.tenantId, tenantId); assert.equal(page.limit, 100); return { items: [state.capture, ...(state.otherCaptures ?? [])] }; },
+  },
+  contacts: { async findById(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.contact?.id ? state.contact : null; } },
+  deals: { async findDetailById() { return null; } },
+  draftInventories: { async findByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return state.draft?.marketplaceCaptureId === id ? state.draft : null; } },
+  sellerInvitations: { async listSellerInvitationsByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return (state.invitations ?? []).filter((row) => row.marketplaceCaptureId === id); } },
+  marketplaceClaimTokens: { async listClaimTokensByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return (state.tokens ?? []).filter((row) => row.marketplaceCaptureId === id); } },
+  ownershipAttestations: { async findByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return state.attestation?.marketplaceCaptureId === id ? state.attestation : null; } },
+  renderConversions: {
+    async findSuccessfulSellerConversion(scope, id) { assert.equal(scope.tenantId, tenantId); return (state.conversions ?? []).find((row) => row.marketplaceCaptureId === id && row.conversionKind === 'SELLER' && row.status === 'SUCCESS') ?? null; },
+    async findSuccessfulInventoryConversion(scope, id) { assert.equal(scope.tenantId, tenantId); return (state.conversions ?? []).find((row) => row.marketplaceCaptureId === id && row.conversionKind === 'INVENTORY' && row.status === 'SUCCESS') ?? null; },
+  },
+});
+
+const record = (state) => service(state).findByCaptureId(ctx, 'capture-1');
+
+test('missing phone blocks seller acquisition qualification', async () => {
+  const result = await record({ capture: capture({ metadata: {} }), contact: contact({ phone: null }), draft: draft() });
+  assert.equal(result.isQualifiedSellerLead, false);
+  assert.deepEqual(result.missingRequirements.includes('PHONE_REQUIRED'), true);
+  assert.equal(result.healthStatus, 'BLOCKED');
+  assert.equal(result.nextAction, 'REVEAL_PHONE');
+});
+
+test('phone plus draft and no invitation is ready to send invitation', async () => {
+  const result = await record({ capture: capture(), contact: contact(), draft: draft() });
+  assert.equal(result.healthStatus, 'READY');
+  assert.equal(result.nextAction, 'SEND_INVITATION');
+});
+
+test('failed latest invitation requires retry', async () => {
+  const result = await record({ capture: capture(), contact: contact(), draft: draft(), invitations: [invitation({ status: 'FAILED' })] });
+  assert.equal(result.healthStatus, 'ACTION_REQUIRED');
+  assert.equal(result.nextAction, 'RETRY_INVITATION');
+});
+
+test('claimed lead without seller conversion converts seller next', async () => {
+  const result = await record({ capture: capture({ status: 'CLAIMED' }), contact: contact(), draft: draft(), invitations: [invitation()], tokens: [token()], attestation: attestation() });
+  assert.equal(result.nextAction, 'CONVERT_SELLER');
+});
+
+test('seller converted but inventory not converted converts inventory next', async () => {
+  const result = await record({ capture: capture({ status: 'CLAIMED' }), contact: contact(), draft: draft(), invitations: [invitation()], attestation: attestation(), conversions: [conversion('SELLER')] });
+  assert.equal(result.nextAction, 'CONVERT_INVENTORY');
+});
+
+test('seller and inventory converted but capture not completed completes acquisition next', async () => {
+  const result = await record({ capture: capture({ status: 'CLAIMED' }), contact: contact(), draft: draft(), invitations: [invitation()], attestation: attestation(), conversions: [conversion('SELLER'), conversion('INVENTORY')] });
+  assert.equal(result.nextAction, 'COMPLETE_ACQUISITION');
+});
+
+test('fully completed and converted is completed with no next action', async () => {
+  const result = await record({ capture: capture({ status: 'CONVERTED' }), contact: contact(), draft: draft(), invitations: [invitation()], attestation: attestation(), conversions: [conversion('SELLER'), conversion('INVENTORY')] });
+  assert.equal(result.healthStatus, 'COMPLETED');
+  assert.equal(result.nextAction, 'NONE');
+});
+
+test('expired capture returns expired with no next action', async () => {
+  const result = await record({ capture: capture({ status: 'EXPIRED' }), contact: contact(), draft: draft(), invitations: [invitation()] });
+  assert.equal(result.healthStatus, 'EXPIRED');
+  assert.equal(result.nextAction, 'NONE');
+});
+
+test('draft inventory images are preferred over capture metadata images', async () => {
+  const result = await record({ capture: capture({ metadata: { images: ['https://cdn.test/capture.jpg'] } }), contact: contact(), draft: draft({ images: ['https://cdn.test/draft.jpg'] }) });
+  assert.deepEqual(result.images, ['https://cdn.test/draft.jpg']);
+});
+
+test('tenant isolation is preserved for list and detail repository calls', async () => {
+  const result = await service({ capture: capture(), contact: contact(), draft: draft(), otherCaptures: [capture({ id: 'other-capture', tenantId: otherTenantId })] }).list(ctx);
+  assert.equal(result[0].capture.tenantId, tenantId);
+});

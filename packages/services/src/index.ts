@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
+import { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
 export { SellerAcquisitionAnalyticsService } from "./acquisition-analytics.js";
+export { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
+export type { SellerAcquisitionHealthStatus, SellerAcquisitionMissingRequirement, SellerAcquisitionNextAction, SellerAcquisitionRecord, SellerAcquisitionRecordDependencies } from "./seller-acquisition-records.js";
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
 export { SellerClaimPortalService, SellerClaimPortalError } from "./seller-claim-portal.js";
@@ -1727,6 +1730,7 @@ export interface WhispeRMServices {
   readonly deals: DealService;
   readonly activities: ActivityService;
   readonly marketplaceAcquisition: MarketplaceAcquisitionCaptureService;
+  readonly sellerAcquisitionRecords: SellerAcquisitionRecordService;
   readonly sellerInvitations: SellerInvitationService;
   readonly scoring: ScoringService;
   readonly campaigns: CampaignService;
@@ -1745,6 +1749,7 @@ export const createWhispeRMServices = (dependencies: ServiceDependencies): Whisp
   deals: new DealService(dependencies),
   activities: new ActivityService(dependencies),
   marketplaceAcquisition: new MarketplaceAcquisitionCaptureService(dependencies),
+  sellerAcquisitionRecords: new SellerAcquisitionRecordService(dependencies),
   sellerInvitations: new SellerInvitationService(dependencies),
   scoring: new ScoringService(dependencies),
   campaigns: new CampaignService(dependencies),
