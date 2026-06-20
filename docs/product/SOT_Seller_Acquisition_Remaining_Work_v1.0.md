@@ -94,3 +94,11 @@ Seller Acquisition contact qualification is phone-gated at the server write boun
 URL capture fallback may preserve listing metadata and DraftInventory records, including title, description, price, category, listing URL/source, and images, but it cannot qualify the seller without an extracted or manually completed phone number.
 
 Seller invitation requires a phone-qualified acquisition contact. Conversion requires the canonical claim/qualification prerequisites; retries must not bypass phone qualification. This enforcement is server-side and is not only a UI affordance.
+
+## Post-4.4 stabilization clarifications
+
+- Marketplace Sellers authenticated app routes and API routes must fail closed when the Seller Acquisition add-on feature lookup fails. Navigation/dashboard feature lookups may hide the add-on on lookup failure, but protected routes must return controlled denial behavior instead of exposing lookup errors.
+- Public claim-token preview and acceptance routes remain seller-facing token flows and are not gated by authenticated add-on checks.
+- URL capture without a phone is explicitly unqualified and blocked. Callers must treat `PHONE_REQUIRED` / `REVEAL_PHONE` responses as requiring phone reveal before qualification, invitation, conversion, or completion.
+- `COMPLETE_ACQUISITION` is a supported Marketplace Sellers command-center action and posts to the capture completion route after seller and inventory conversions are successful.
+- No-phone capture cannot be treated as qualified, even when email or other marketplace identity fields are present.

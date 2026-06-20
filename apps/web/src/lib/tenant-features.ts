@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
+import { SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-feature-keys";
 
 export { SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-feature-keys";
 
@@ -40,6 +41,28 @@ export async function requireTenantFeature(
   featureKey: string,
 ): Promise<boolean> {
   return isTenantFeatureEnabled(tenantId, featureKey);
+}
+
+export async function isProtectedTenantFeatureEnabled(
+  tenantId: string,
+  featureKey: string,
+): Promise<boolean> {
+  try {
+    return await isTenantFeatureEnabled(tenantId, featureKey);
+  } catch (error) {
+    console.error("protected_tenant_feature_lookup_failed", {
+      tenantId,
+      featureKey,
+      error: error instanceof Error ? error.message : "Unknown protected tenant feature lookup error",
+    });
+
+    return false;
+  }
+}
+
+export async function requireSellerAcquisitionFeatureForApi(tenantId: string): Promise<NextResponse | null> {
+  const enabled = await isProtectedTenantFeatureEnabled(tenantId, SELLER_ACQUISITION_FEATURE);
+  return enabled ? null : featureNotEnabledResponse();
 }
 
 export function featureNotEnabledResponse(): NextResponse {

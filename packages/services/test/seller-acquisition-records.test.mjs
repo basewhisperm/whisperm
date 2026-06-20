@@ -13,7 +13,7 @@ const draft = (overrides = {}) => ({ id: 'draft-1', tenantId, marketplaceCapture
 const invitation = (overrides = {}) => ({ id: 'invite-1', tenantId, marketplaceCaptureId: 'capture-1', channel: 'WHATSAPP', status: 'SENT', inviteUrl: 'https://claim.test/t', recipient: '+2348012345678', expiresAt: '2026-07-01T00:00:00.000Z', metadata: {}, createdAt: now, updatedAt: now, ...overrides });
 const token = (overrides = {}) => ({ id: 'token-1', tenantId, marketplaceCaptureId: 'capture-1', tokenHash: 'hash', status: 'SENT', sentAt: now, expiresAt: '2026-07-01T00:00:00.000Z', metadata: {}, createdAt: now, updatedAt: now, ...overrides });
 const attestation = () => ({ id: 'att-1', tenantId, marketplaceCaptureId: 'capture-1', draftInventoryId: 'draft-1', contactId: 'contact-1', claimantName: 'Sam', claimantPhone: '+2348012345678', claimantEmail: null, marketplaceIdentity: null, attestationStatement: 'I own this', acceptedTerms: true, attestedAt: now, evidence: {}, metadata: {}, createdAt: now, updatedAt: now });
-const conversion = (kind) => ({ id: `conv-${kind}`, tenantId, marketplaceCaptureId: 'capture-1', contactId: 'contact-1', dealId: null, externalId: 'listing-1', renderSellerId: kind === 'SELLER' ? 'seller-1' : null, conversionKind: kind, status: 'SUCCESS', attemptCount: 1, maxAttempts: 3, completedAt: now, convertedAt: now, metadata: {}, createdAt: now, updatedAt: now });
+const conversion = (kind, overrides = {}) => ({ id: `conv-${kind}`, tenantId, marketplaceCaptureId: 'capture-1', contactId: 'contact-1', dealId: null, externalId: kind === 'INVENTORY' ? 'draft-1' : 'listing-1', renderSellerId: kind === 'SELLER' ? 'seller-1' : null, conversionKind: kind, status: 'SUCCESS', attemptCount: 1, maxAttempts: 3, completedAt: now, convertedAt: now, metadata: {}, createdAt: now, updatedAt: now, ...overrides });
 
 const service = (state) => new SellerAcquisitionRecordService({
   marketplaceCaptures: {
@@ -28,7 +28,7 @@ const service = (state) => new SellerAcquisitionRecordService({
   ownershipAttestations: { async findByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return state.attestation?.marketplaceCaptureId === id ? state.attestation : null; } },
   renderConversions: {
     async findSuccessfulSellerConversion(scope, id) { assert.equal(scope.tenantId, tenantId); return (state.conversions ?? []).find((row) => row.marketplaceCaptureId === id && row.conversionKind === 'SELLER' && row.status === 'SUCCESS') ?? null; },
-    async findSuccessfulInventoryConversion(scope, id) { assert.equal(scope.tenantId, tenantId); return (state.conversions ?? []).find((row) => row.marketplaceCaptureId === id && row.conversionKind === 'INVENTORY' && row.status === 'SUCCESS') ?? null; },
+    async findSuccessfulInventoryConversion(scope, id, draftInventoryId) { assert.equal(scope.tenantId, tenantId); return (state.conversions ?? []).find((row) => row.marketplaceCaptureId === id && row.conversionKind === 'INVENTORY' && row.status === 'SUCCESS' && row.externalId === draftInventoryId) ?? null; },
   },
 });
 
@@ -89,4 +89,18 @@ test('draft inventory images are preferred over capture metadata images', async 
 test('tenant isolation is preserved for list and detail repository calls', async () => {
   const result = await service({ capture: capture(), contact: contact(), draft: draft(), otherCaptures: [capture({ id: 'other-capture', tenantId: otherTenantId })] }).list(ctx);
   assert.equal(result[0].capture.tenantId, tenantId);
+});
+
+
+test('inventory conversion lookup uses draft inventory id instead of capture external id', async () => {
+  const result = await record({
+    capture: capture({ status: 'CLAIMED', externalId: 'listing-1' }),
+    contact: contact(),
+    draft: draft({ id: 'draft-1' }),
+    invitations: [invitation()],
+    attestation: attestation(),
+    conversions: [conversion('SELLER'), conversion('INVENTORY', { externalId: 'draft-1' })],
+  });
+  assert.notEqual(result.nextAction, 'CONVERT_INVENTORY');
+  assert.equal(result.nextAction, 'COMPLETE_ACQUISITION');
 });

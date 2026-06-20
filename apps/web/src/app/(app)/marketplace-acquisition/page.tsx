@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { IconArrowRight, IconBookmark } from "@tabler/icons-react";
 
 import {
@@ -143,7 +143,24 @@ function badgeTone(value: string): string {
 }
 
 function isActionEnabled(record: SellerAcquisitionRecord): boolean {
-  return ["SEND_INVITATION", "RETRY_INVITATION", "CONVERT_SELLER", "CONVERT_INVENTORY"].includes(record.nextAction) && hasPhone(record);
+  return ["SEND_INVITATION", "RETRY_INVITATION", "CONVERT_SELLER", "CONVERT_INVENTORY", "COMPLETE_ACQUISITION"].includes(record.nextAction) && hasPhone(record);
+}
+
+function errorMessageFromPayload(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const error = (payload as { readonly error?: unknown }).error;
+  if (typeof error === "object" && error !== null && typeof (error as { readonly message?: unknown }).message === "string") {
+    return (error as { readonly message: string }).message;
+  }
+  if (typeof (payload as { readonly message?: unknown }).message === "string") return (payload as { readonly message: string }).message;
+  return null;
+}
+
+async function fetchSellerAcquisitionRecords(): Promise<readonly SellerAcquisitionRecord[]> {
+  const response = await fetch(marketplaceAcquisitionRecordsPath);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Marketplace Sellers records could not be loaded.");
+  return (payload as { readonly data?: { readonly records?: readonly SellerAcquisitionRecord[] } }).data?.records ?? [];
 }
 
 async function runPrimaryAction(record: SellerAcquisitionRecord): Promise<void> {
@@ -152,10 +169,13 @@ async function runPrimaryAction(record: SellerAcquisitionRecord): Promise<void> 
     RETRY_INVITATION: `/api/marketplace-acquisition/captures/${record.capture.id}/invite`,
     CONVERT_SELLER: `/api/marketplace-acquisition/captures/${record.capture.id}/convert/render-seller`,
     CONVERT_INVENTORY: `/api/marketplace-acquisition/captures/${record.capture.id}/convert/render-inventory`,
+    COMPLETE_ACQUISITION: `/api/marketplace-acquisition/captures/${record.capture.id}/complete`,
   };
   const path = paths[record.nextAction];
-  if (!path) return;
-  await fetch(path, { method: "POST" });
+  if (!path) throw new Error("This Marketplace Sellers action is not available.");
+  const response = await fetch(path, { method: "POST" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Marketplace Sellers action failed.");
 }
 
 export default function MarketplaceAcquisitionPage() {
@@ -168,21 +188,29 @@ export default function MarketplaceAcquisitionPage() {
   const [confidenceFilter, setConfidenceFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const refreshRecords = useCallback(async () => {
+    const nextRecords = await fetchSellerAcquisitionRecords();
+    setRecords(nextRecords);
+    setSelectedCaptureId((current) => current ?? nextRecords[0]?.capture.id ?? null);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(marketplaceAcquisitionRecordsPath)
-      .then((response) => response.json())
-      .then((payload: { readonly data?: { readonly records?: readonly SellerAcquisitionRecord[] } }) => {
+    fetchSellerAcquisitionRecords()
+      .then((nextRecords) => {
         if (!cancelled) {
-          const nextRecords = payload.data?.records ?? [];
           setRecords(nextRecords);
           setSelectedCaptureId(nextRecords[0]?.capture.id ?? null);
           setLoading(false);
         }
       })
-      .catch(() => {
-        if (!cancelled) setLoading(false);
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setActionError(error instanceof Error ? error.message : "Marketplace Sellers records could not be loaded.");
+          setLoading(false);
+        }
       });
     return () => { cancelled = true; };
   }, []);
@@ -266,7 +294,7 @@ export default function MarketplaceAcquisitionPage() {
             </div>
           )}
         </div>
-        <Workbench record={selectedRecord} />
+        <Workbench record={selectedRecord} actionError={actionError} onActionError={setActionError} onRefresh={refreshRecords} />
       </section>
     </div>
   );
@@ -315,7 +343,7 @@ function RecordCard({ record, selected, onSelect }: { readonly record: SellerAcq
   );
 }
 
-function Workbench({ record }: { readonly record: SellerAcquisitionRecord | null }) {
+function Workbench({ record, actionError, onActionError, onRefresh }: { readonly record: SellerAcquisitionRecord | null; readonly actionError: string | null; readonly onActionError: (message: string | null) => void; readonly onRefresh: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   if (record === null) return <aside className="rounded-2xl bg-background p-5 text-sm text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>Select a marketplace seller to triage.</aside>;
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
@@ -337,9 +365,22 @@ function Workbench({ record }: { readonly record: SellerAcquisitionRecord | null
         <p><strong className="text-foreground">Next action:</strong> {nextActionLabels[record.nextAction]}</p>
         <p><strong className="text-foreground">SLA:</strong> {slaCopy(record)}</p>
       </div>
-      <button className="h-10 w-full rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!enabled || busy} onClick={async () => { setBusy(true); await runPrimaryAction(record); setBusy(false); }} type="button">
+      <button className="h-10 w-full rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!enabled || busy} onClick={async () => {
+        setBusy(true);
+        onActionError(null);
+        try {
+          await runPrimaryAction(record);
+          await onRefresh();
+          onActionError(null);
+        } catch (error) {
+          onActionError(error instanceof Error ? error.message : "Marketplace Sellers action failed.");
+        } finally {
+          setBusy(false);
+        }
+      }} type="button">
         {busy ? "Working…" : nextActionLabels[record.nextAction]}
       </button>
+      {actionError ? <p className="text-xs font-semibold text-red-700" role="alert">{actionError}</p> : null}
       {!enabled ? <p className="text-xs text-muted-foreground">This action is disabled because it is either waiting-only, not wired safely in this slice, or blocked by missing mobile.</p> : null}
     </aside>
   );

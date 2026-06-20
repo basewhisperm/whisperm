@@ -78,7 +78,9 @@ const createHarness = async (state, options = {}) => {
   writeFileSync(join(tempDir, 'tenant-features.mjs'), [
     'export const SELLER_ACQUISITION_FEATURE = "SELLER_ACQUISITION";',
     `export const isTenantFeatureEnabled = async () => ${options.featureEnabled === false ? 'false' : 'true'};`,
+    `export const isProtectedTenantFeatureEnabled = async () => ${options.featureEnabled === false ? 'false' : 'true'};`,
     'export const featureNotEnabledResponse = () => Response.json({ ok: false, error: { message: "Seller Acquisition add-on is not enabled for this workspace.", code: "FEATURE_NOT_ENABLED" } }, { status: 403 });',
+    'export const requireSellerAcquisitionFeatureForApi = async () => (await isProtectedTenantFeatureEnabled()) ? null : featureNotEnabledResponse();',
     '',
   ].join('\n'));
   writeFileSync(join(tempDir, 'repositories.mjs'), 'export const createPrismaRepositories = () => globalThis.__routeRepositories;\n');
