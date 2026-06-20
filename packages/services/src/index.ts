@@ -1152,7 +1152,21 @@ const marketplaceCaptureInputSchema = z.object({
   userAgent: z.string().min(1).max(1024).nullable().optional(),
   contactId: idSchema.nullable().optional(),
   externalId: z.string().min(1).nullable().optional(),
-  metadata: metadataSchema.nullable().optional()
+  metadata: metadataSchema.nullable().optional(),
+  portfolioListings: z.array(z.object({
+    listingUrl: z.string().url().optional(),
+    marketplaceListingId: z.string().min(1).max(255).nullable().optional(),
+    title: z.string().min(1).max(500),
+    description: z.string().min(1).nullable().optional(),
+    price: z.union([z.number(), z.string()]).nullable().optional(),
+    priceText: z.string().min(1).max(120).nullable().optional(),
+    currency: z.string().min(1).nullable().optional(),
+    category: z.string().min(1).max(255).nullable().optional(),
+    images: z.array(z.string().url()).max(10).nullable().optional(),
+    imageUrls: z.array(z.string().url()).max(10).nullable().optional(),
+    location: z.string().min(1).max(255).nullable().optional(),
+    metadata: metadataSchema.nullable().optional()
+  }).strict()).max(25).nullable().optional()
 }).strict().refine((value) => value.listingUrl !== undefined || value.sourceUrl !== undefined, { message: "Marketplace capture requires listingUrl or sourceUrl", path: ["listingUrl"] });
 
 export type MarketplaceCaptureServiceInput = z.output<typeof marketplaceCaptureInputSchema>;
@@ -1161,10 +1175,18 @@ export interface MarketplaceCaptureServiceResult {
   readonly contactId: string;
   readonly dealId: string;
   readonly draftInventoryId: string;
-  readonly contactMatchStrategy: "provided" | "phone" | "email" | "created";
+  readonly contactMatchStrategy: "provided" | "phone" | "profile" | "capture_identity" | "email" | "created";
+  readonly sellerIdentityStrategy?: "provided" | "phone" | "profile" | "capture_identity" | "email" | "created" | undefined;
   readonly dealCreated: boolean;
   readonly dealMatched: boolean;
   readonly status: string;
+  readonly portfolioCaptureCount?: number | undefined;
+  readonly createdCaptureIds?: readonly string[] | undefined;
+  readonly matchedCaptureIds?: readonly string[] | undefined;
+  readonly draftInventoryIds?: readonly string[] | undefined;
+  readonly sellerNameCleaned?: string | undefined;
+  readonly sellerPortfolioValue?: string | undefined;
+  readonly sellerListingCount?: number | undefined;
 }
 
 const marketplacePipelineDefaultKey = MARKETPLACE_ACQUISITION_PIPELINE_KEY;
@@ -1179,7 +1201,7 @@ const marketplaceDealExternalId = (listingUrl: string): string => `marketplace-l
 
 const normalizeSellerDealIdentity = (value: string): string => value.trim().toLowerCase();
 const marketplaceSellerDealExternalId = (input: MarketplaceCaptureServiceInput, contactId: string): string => {
-  const sellerPhone = input.sellerPhone ?? input.phone;
+  const sellerPhone = sellerPhoneForInput(input);
   const sellerEmail = sellerEmailForInput(input);
   const sellerIdentity =
     sellerPhone ??
@@ -1191,6 +1213,67 @@ const marketplaceSellerDealExternalId = (input: MarketplaceCaptureServiceInput, 
 
   return `marketplace-seller:${normalizeSellerDealIdentity(sellerIdentity)}`;
 };
+
+const cleanSellerIdentity = (raw: string | null | undefined): { readonly cleaned?: string | undefined; readonly metadata: Readonly<Record<string, unknown>> } => {
+  const rawText = raw?.trim();
+  if (rawText === undefined || rawText.length === 0) return { metadata: {} };
+  const badges: string[] = [];
+  const tenure = /\bNew on Jiji\b/iu.exec(rawText)?.[0];
+  const verifiedSeller = /\bVerified ID\b/iu.test(rawText);
+  const lastSeen = /\bLast seen\s+(.+?)(?=\s+Typically replies|\s+Verified ID|\s+New on Jiji|$)/iu.exec(rawText)?.[1]?.trim();
+  const responseTime = /\bTypically replies\s+(.+?)(?=\s+Last seen|\s+Verified ID|\s+New on Jiji|$)/iu.exec(rawText)?.[1]?.trim();
+  if (verifiedSeller) badges.push("Verified ID");
+  if (tenure !== undefined) badges.push(tenure);
+  let cleaned = rawText
+    .replace(/\bVerified ID\b/giu, " ")
+    .replace(/\bNew on Jiji\b/giu, " ")
+    .replace(/\bLast seen\s+.+?(?=\s+Typically replies|\s+Verified ID|\s+New on Jiji|$)/giu, " ")
+    .replace(/\bTypically replies\s+.+?(?=\s+Last seen|\s+Verified ID|\s+New on Jiji|$)/giu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (cleaned.length === 0) cleaned = rawText;
+  return {
+    cleaned,
+    metadata: exactInput({
+      rawSellerText: rawText,
+      marketplaceTenure: tenure,
+      verifiedSeller: verifiedSeller ? true : undefined,
+      lastSeen,
+      responseTime,
+      sellerBadges: badges.length === 0 ? undefined : badges,
+    }),
+  };
+};
+
+const contactMarketplaceMetadata = (input: MarketplaceCaptureServiceInput, sellerCleanup: ReturnType<typeof cleanSellerIdentity>): Readonly<Record<string, unknown>> => exactInput({
+  type: "SELLER",
+  source: "MARKETPLACE",
+  lifecycle: "ACQUISITION_PROSPECT",
+  marketingEligibility: "SELLER_ACQUISITION_ONLY",
+  sellerProfileUrl: input.sellerProfileUrl ?? undefined,
+  marketplaceIdentifier: input.marketplaceIdentifier ?? undefined,
+  marketplaceSellerId: typeof input.metadata?.marketplaceSellerId === "string" ? input.metadata.marketplaceSellerId : undefined,
+  sourceMarketplace: input.marketplaceSource ?? input.sourceMarketplace ?? undefined,
+  sellerLocation: input.sellerLocation ?? input.location ?? undefined,
+  ...sellerCleanup.metadata,
+});
+
+const sellerReadiness = (input: MarketplaceCaptureServiceInput, cleanedName: string | undefined, listingCount: number): "READY" | "REVIEW" | "BLOCKED" => {
+  if (sellerPhoneForInput(input) === undefined) return "BLOCKED";
+  if (cleanedName !== undefined && cleanedName.trim().length > 1 && listingCount > 0) return "READY";
+  return "REVIEW";
+};
+
+const sellerQualityScore = (input: MarketplaceCaptureServiceInput, listingCount: number, verifiedSeller: boolean): number => Math.min(100,
+  (sellerPhoneForInput(input) === undefined ? 0 : 35) +
+  (sellerPhoneForInput(input) === undefined ? 0 : 10) +
+  (verifiedSeller ? 10 : 0) +
+  (listingCount > 1 ? 15 : 0) +
+  (input.sellerProfileUrl === undefined || input.sellerProfileUrl === null ? 0 : 10) +
+  ((input.sellerLocation ?? input.location) === undefined || (input.sellerLocation ?? input.location) === null ? 0 : 5) +
+  (marketplacePriceForDecimal(input) === undefined ? 0 : 5) +
+  (marketplaceImagesForDraft(input)?.length ? 5 : 0)
+);
 
 const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<Record<string, unknown>> => exactInput({
   ...(input.metadata ?? {}),
@@ -1204,10 +1287,14 @@ const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<
   capturedAt: input.capturedAt ?? undefined,
   capturedBy: input.capturedBy ?? undefined,
   pageUrl: input.pageUrl ?? input.sourceUrl ?? input.listingUrl ?? undefined,
-  userAgent: input.userAgent ?? undefined
+  userAgent: input.userAgent ?? undefined,
+  ...cleanSellerIdentity(input.sellerName).metadata,
+  acquisitionReadiness: sellerReadiness(input, cleanSellerIdentity(input.sellerName).cleaned, 1),
+  whatsappCandidate: sellerPhoneForInput(input) !== undefined,
+  mobileRequiredForQualification: true,
 });
 
-const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => input.sellerName?.trim() || input.title.trim();
+const sellerDisplayName = (input: MarketplaceCaptureServiceInput): string => cleanSellerIdentity(input.sellerName).cleaned ?? input.title.trim();
 
 const marketplacePriceForDecimal = (input: MarketplaceCaptureServiceInput): string | undefined => {
   const raw = input.price ?? input.priceText;
@@ -1454,46 +1541,41 @@ export class MarketplaceAcquisitionCaptureService {
 
     return runWrite(this.deps, context, async (repositories) => {
       const contactResult = await this.resolveContact(repositories, context, data);
-      const listingUrl = listingUrlForCapture(data);
-      const externalId = externalIdForCapture(data);
-      const sellerEmail = data.sellerEmail ?? data.email;
-      const existingByListingUrl = await repositories.marketplaceCaptures.findByListingUrl(tenantScope, listingUrl);
-      const existingByExternalId = existingByListingUrl === null && externalId !== undefined && externalId !== null ? await repositories.marketplaceCaptures.findByExternalId(tenantScope, externalId) : null;
-      const existingCapture = existingByListingUrl ?? existingByExternalId;
-      const capture = existingCapture ?? await repositories.marketplaceCaptures.create(tenantScope, {
-        tenantId: context.tenantId,
-        marketplaceSourceId: data.marketplaceSourceId,
-        contactId: contactResult.contact.id,
-        externalId,
-        listingUrl,
-        title: data.title,
-        description: data.description,
-        price: marketplacePriceForDecimal(data),
-        currency: data.currency,
-        sellerName: data.sellerName,
-        sellerProfileUrl: data.sellerProfileUrl,
-        status: "CAPTURED",
-        metadata: mergedCaptureMetadata(data)
-      });
-      const linkedCapture = capture.contactId === contactResult.contact.id ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId: contactResult.contact.id });
-      const dealResult = await this.resolveDeal(repositories, context, data, linkedCapture, contactResult.contact.id, capturedStage.id);
-      const finalCapture = linkedCapture.dealId === dealResult.deal.id ? linkedCapture : await repositories.marketplaceCaptures.update(tenantScope, linkedCapture.id, { dealId: dealResult.deal.id });
-      const draftInventory = await repositories.draftInventories.upsertForCapture(tenantScope, {
-        tenantId: context.tenantId,
-        marketplaceCaptureId: finalCapture.id,
-        contactId: contactResult.contact.id,
-        dealId: dealResult.deal.id,
-        title: finalCapture.title,
-        description: finalCapture.description,
-        price: marketplacePriceForDecimal(data),
-        currency: finalCapture.currency,
-        category: marketplaceCategoryForDraft(data),
-        images: marketplaceImagesForDraft(data),
-        listingUrl: finalCapture.listingUrl,
-        marketplaceSource: marketplaceSourceForDraft(data),
-        marketplaceListingId: finalCapture.externalId ?? undefined,
-        status: "DRAFT",
-      });
+      const listingInputs = this.listingInputs(data);
+      const firstInput = listingInputs[0] ?? data;
+      const firstCapture = await this.createOrMatchCapture(repositories, context, tenantScope, firstInput, contactResult.contact.id);
+      const dealResult = await this.resolveDeal(repositories, context, data, firstCapture.capture, contactResult.contact.id, capturedStage.id, listingInputs.length);
+      const captures: MarketplaceCaptureRecord[] = [];
+      const createdCaptureIds: string[] = [];
+      const matchedCaptureIds: string[] = [];
+      const draftInventoryIds: string[] = [];
+      for (const listingInput of listingInputs) {
+        const captured = listingInput === firstInput ? firstCapture : await this.createOrMatchCapture(repositories, context, tenantScope, listingInput, contactResult.contact.id);
+        if (captured.created) createdCaptureIds.push(captured.capture.id); else matchedCaptureIds.push(captured.capture.id);
+        const finalCapture = captured.capture.dealId === dealResult.deal.id ? captured.capture : await repositories.marketplaceCaptures.update(tenantScope, captured.capture.id, { dealId: dealResult.deal.id });
+        captures.push(finalCapture);
+        const draftInventory = await repositories.draftInventories.upsertForCapture(tenantScope, {
+          tenantId: context.tenantId,
+          marketplaceCaptureId: finalCapture.id,
+          contactId: contactResult.contact.id,
+          dealId: dealResult.deal.id,
+          title: finalCapture.title,
+          description: finalCapture.description,
+          price: marketplacePriceForDecimal(listingInput),
+          currency: finalCapture.currency,
+          category: marketplaceCategoryForDraft(listingInput),
+          images: marketplaceImagesForDraft(listingInput),
+          listingUrl: finalCapture.listingUrl,
+          marketplaceSource: marketplaceSourceForDraft(listingInput),
+          marketplaceListingId: finalCapture.externalId ?? undefined,
+          status: "DRAFT",
+        });
+        draftInventoryIds.push(draftInventory.id);
+      }
+      const finalCapture = captures[0] ?? firstCapture.capture;
+      const draftInventoryId = draftInventoryIds[0] ?? "";
+      const sellerNameCleaned = cleanSellerIdentity(data.sellerName).cleaned;
+      const sellerPortfolioValue = listingInputs.reduce((sum, item) => sum + Number(marketplacePriceForDecimal(item) ?? 0), 0);
       if (context.actorId !== undefined && dealResult.created) {
         await repositories.activities.create({ ...tenantScope, actorId: context.actorId, correlation: context.correlation }, {
           tenantId: context.tenantId,
@@ -1501,8 +1583,8 @@ export class MarketplaceAcquisitionCaptureService {
           dealId: dealResult.deal.id,
           createdById: context.actorId,
           type: "NOTE",
-          note: `Captured marketplace listing from ${sourceHost(listingUrl)}: ${data.title}`,
-          metadata: { eventType: "MARKETPLACE_CAPTURED", marketplaceCaptureId: finalCapture.id, sourceUrl: listingUrl }
+          note: `Captured marketplace listing from ${sourceHost(finalCapture.listingUrl)}: ${data.title}`,
+          metadata: { eventType: "MARKETPLACE_CAPTURED", marketplaceCaptureId: finalCapture.id, sourceUrl: finalCapture.listingUrl, sellerListingCount: listingInputs.length }
         });
       }
       await appendAudit(repositories, context, { action: "MARKETPLACE_CAPTURED", targetType: "MARKETPLACE_CAPTURE", targetId: finalCapture.id, metadata: { contactId: contactResult.contact.id, dealId: dealResult.deal.id } });
@@ -1513,10 +1595,75 @@ export class MarketplaceAcquisitionCaptureService {
         contactMatchStrategy: contactResult.strategy,
         dealCreated: dealResult.created,
         dealMatched: !dealResult.created,
-        draftInventoryId: draftInventory.id,
-        status: finalCapture.status
+        draftInventoryId,
+        status: finalCapture.status,
+        sellerIdentityStrategy: contactResult.strategy,
+        portfolioCaptureCount: listingInputs.length,
+        createdCaptureIds,
+        matchedCaptureIds,
+        draftInventoryIds,
+        sellerNameCleaned,
+        sellerPortfolioValue: sellerPortfolioValue > 0 ? String(sellerPortfolioValue) : undefined,
+        sellerListingCount: listingInputs.length,
       };
     });
+  }
+
+  private listingInputs(input: MarketplaceCaptureServiceInput): readonly MarketplaceCaptureServiceInput[] {
+    const baseUrl = listingUrlForCapture(input);
+    const listings = [{}, ...(input.portfolioListings ?? [])].map((listing) => {
+      const item = listing as Readonly<Record<string, unknown>>;
+      return marketplaceCaptureInputSchema.parse({
+        ...input,
+        portfolioListings: undefined,
+        listingUrl: typeof item.listingUrl === "string" ? item.listingUrl : baseUrl,
+        sourceUrl: typeof item.listingUrl === "string" ? item.listingUrl : input.sourceUrl,
+        title: typeof item.title === "string" ? item.title : input.title,
+        description: item.description ?? input.description,
+        price: item.price ?? input.price,
+        priceText: item.priceText ?? input.priceText,
+        currency: item.currency ?? input.currency,
+        category: item.category ?? input.category,
+        images: item.images ?? input.images,
+        imageUrls: item.imageUrls ?? input.imageUrls,
+        location: item.location ?? input.location,
+        marketplaceListingId: item.marketplaceListingId ?? input.marketplaceListingId,
+        externalId: item.marketplaceListingId ?? input.externalId,
+        metadata: { ...(input.metadata ?? {}), ...((item.metadata as Readonly<Record<string, unknown>> | null | undefined) ?? {}) },
+      });
+    });
+    const seen = new Set<string>();
+    return listings.filter((listing) => {
+      const key = `${listingUrlForCapture(listing)}:${externalIdForCapture(listing) ?? ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return listingUrlForCapture(listing).length > 0;
+    });
+  }
+
+  private async createOrMatchCapture(repositories: ServiceRepositories, context: ServiceContext, tenantScope: TenantScoped, data: MarketplaceCaptureServiceInput, contactId: string): Promise<{ readonly capture: MarketplaceCaptureRecord; readonly created: boolean }> {
+    const listingUrl = listingUrlForCapture(data);
+    const externalId = externalIdForCapture(data);
+    const existingByListingUrl = await repositories.marketplaceCaptures.findByListingUrl(tenantScope, listingUrl);
+    const existingByExternalId = existingByListingUrl === null && externalId !== undefined && externalId !== null ? await repositories.marketplaceCaptures.findByExternalId(tenantScope, externalId) : null;
+    const existingCapture = existingByListingUrl ?? existingByExternalId;
+    const capture = existingCapture ?? await repositories.marketplaceCaptures.create(tenantScope, {
+      tenantId: context.tenantId,
+      marketplaceSourceId: data.marketplaceSourceId,
+      contactId,
+      externalId,
+      listingUrl,
+      title: data.title,
+      description: data.description,
+      price: marketplacePriceForDecimal(data),
+      currency: data.currency,
+      sellerName: cleanSellerIdentity(data.sellerName).cleaned,
+      sellerProfileUrl: data.sellerProfileUrl,
+      status: "CAPTURED",
+      metadata: { ...mergedCaptureMetadata(data), sellerListingCount: 1, sourceMarketplace: data.marketplaceSource ?? data.sourceMarketplace ?? undefined }
+    });
+    const linkedCapture = capture.contactId === contactId ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId });
+    return { capture: linkedCapture, created: existingCapture === null };
   }
 
 
@@ -1578,6 +1725,32 @@ export class MarketplaceAcquisitionCaptureService {
       const existingByPhone = await repositories.contacts.findByPhone(tenantScope, sellerPhone);
       if (existingByPhone !== null) return { contact: existingByPhone, strategy: "phone" };
     }
+    const profileIdentity = this.marketplaceIdentity(input);
+    if (profileIdentity !== undefined) {
+      const contacts = await repositories.contacts.list(tenantScope, { limit: 100 });
+      const existingByProfile = contacts.items.find((contact) => {
+        const metadata = contact.metadata ?? {};
+        const acquisition = typeof metadata.marketplaceAcquisition === "object" && metadata.marketplaceAcquisition !== null ? metadata.marketplaceAcquisition as Readonly<Record<string, unknown>> : {};
+        return [metadata.sellerProfileUrl, metadata.marketplaceIdentifier, metadata.marketplaceSellerId, acquisition.sellerProfileUrl, acquisition.marketplaceIdentifier, acquisition.marketplaceSellerId]
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim().toLowerCase())
+          .includes(profileIdentity);
+      });
+      if (existingByProfile !== undefined) return { contact: existingByProfile, strategy: "profile" };
+
+      const captures = await repositories.marketplaceCaptures.list(tenantScope, { limit: 100 });
+      const existingCapture = captures.items.find((capture) => {
+        const metadata = capture.metadata ?? {};
+        return [capture.sellerProfileUrl, metadata.sellerProfileUrl, metadata.marketplaceIdentifier, metadata.marketplaceSellerId]
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim().toLowerCase())
+          .includes(profileIdentity);
+      });
+      if (existingCapture?.contactId !== undefined && existingCapture.contactId !== null) {
+        const contact = await repositories.contacts.findById(tenantScope, existingCapture.contactId);
+        if (contact !== null) return { contact, strategy: "capture_identity" };
+      }
+    }
     const sellerEmail = sellerEmailForInput(input);
     if (sellerEmail !== undefined && sellerEmail !== null) {
       const [existing] = await repositories.contacts.findByEmails(tenantScope, [sellerEmail]);
@@ -1587,13 +1760,22 @@ export class MarketplaceAcquisitionCaptureService {
       tenantId: context.tenantId,
       email: sellerEmail ?? undefined,
       phone: sellerPhone,
-      firstName: input.sellerName ?? undefined,
-      metadata: { marketplaceAcquisition: true, sellerProfileUrl: input.sellerProfileUrl ?? null, sellerLocation: input.sellerLocation ?? input.location ?? null, marketplaceIdentifier: input.marketplaceIdentifier ?? null }
+      firstName: cleanSellerIdentity(input.sellerName).cleaned ?? undefined,
+      metadata: { marketplaceAcquisition: contactMarketplaceMetadata(input, cleanSellerIdentity(input.sellerName)) }
     }));
     return { contact, strategy: "created" };
   }
 
-  private async resolveDeal(repositories: ServiceRepositories, context: ServiceContext, input: MarketplaceCaptureServiceInput, capture: MarketplaceCaptureRecord, contactId: string, capturedStageId: string): Promise<{ readonly deal: DealRecord; readonly created: boolean }> {
+  private marketplaceIdentity(input: MarketplaceCaptureServiceInput): string | undefined {
+    const metadata = input.metadata ?? {};
+    const candidate = input.sellerProfileUrl ?? input.marketplaceIdentifier ??
+      (typeof metadata.marketplaceSellerId === "string" ? metadata.marketplaceSellerId : undefined) ??
+      (typeof metadata.sellerProfileUrl === "string" ? metadata.sellerProfileUrl : undefined);
+    const trimmed = candidate?.trim().toLowerCase();
+    return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+  }
+
+  private async resolveDeal(repositories: ServiceRepositories, context: ServiceContext, input: MarketplaceCaptureServiceInput, capture: MarketplaceCaptureRecord, contactId: string, capturedStageId: string, listingCount = 1): Promise<{ readonly deal: DealRecord; readonly created: boolean }> {
     if (capture.dealId !== undefined && capture.dealId !== null) {
       const existingByCapture = await repositories.deals.findById(context.tenantId, capture.dealId);
       if (existingByCapture !== null) return { deal: existingByCapture, created: false };
@@ -1610,7 +1792,22 @@ export class MarketplaceAcquisitionCaptureService {
       pipelineStageId: capturedStageId,
       value: marketplacePriceForDecimal(input),
       currency: input.currency ?? "USD",
-      metadata: { marketplaceCaptureId: capture.id, sourceUrl: listingUrlForCapture(input), marketplaceSourceId: input.marketplaceSourceId ?? null, marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? null }
+      metadata: {
+        marketplaceCaptureId: capture.id,
+        sourceUrl: listingUrlForCapture(input),
+        marketplaceSourceId: input.marketplaceSourceId ?? null,
+        marketplaceSource: input.marketplaceSource ?? input.sourceMarketplace ?? null,
+        sellerListingCount: listingCount,
+        sellerPortfolioValue: marketplacePriceForDecimal(input) ?? null,
+        firstCapturedAt: capture.capturedAt,
+        lastCapturedAt: new Date().toISOString(),
+        sourceMarketplace: input.marketplaceSource ?? input.sourceMarketplace ?? null,
+        sellerProfileUrl: input.sellerProfileUrl ?? null,
+        sellerQualityScore: sellerQualityScore(input, listingCount, cleanSellerIdentity(input.sellerName).metadata.verifiedSeller === true),
+        acquisitionReadiness: sellerReadiness(input, cleanSellerIdentity(input.sellerName).cleaned, listingCount),
+        whatsappCandidate: sellerPhoneForInput(input) !== undefined,
+        mobileRequiredForQualification: true,
+      }
     }));
     return { deal, created: true };
   }

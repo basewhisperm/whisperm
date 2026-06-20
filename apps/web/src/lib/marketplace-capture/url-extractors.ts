@@ -22,6 +22,8 @@ export interface UrlCaptureExtraction {
   readonly rawExtract: {
     readonly strategy: "url-fetch";
     readonly adapter: "jiji" | "tonaton" | "fallback";
+    readonly rawSellerText?: string | undefined;
+    readonly extractionWarnings?: readonly string[] | undefined;
   };
 }
 
@@ -169,6 +171,19 @@ const sellerNameFromText = (bodyText: string): string | undefined => {
   return match?.[1] ? text(match[1], 120) : undefined;
 };
 
+const cleanSellerName = (value: string | undefined): string | undefined => {
+  const raw = text(value, 255);
+  if (!raw) return undefined;
+  const cleaned = raw
+    .replace(/\bVerified ID\b/giu, " ")
+    .replace(/\bNew on Jiji\b/giu, " ")
+    .replace(/\bLast seen\s+.+?(?=\s+Typically replies|\s+Verified ID|\s+New on Jiji|$)/giu, " ")
+    .replace(/\bTypically replies\s+.+?(?=\s+Last seen|\s+Verified ID|\s+New on Jiji|$)/giu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return cleaned || raw;
+};
+
 const adapterFor = (url: string): UrlCaptureExtraction["rawExtract"]["adapter"] => {
   const host = new URL(url).hostname.toLowerCase().replace(/^www\./u, "");
   if (host.endsWith("jiji.com.gh")) return "jiji";
@@ -197,7 +212,8 @@ export const extractMarketplaceUrlCapture = (url: string, html: string, now: Dat
 
   const sellerProfileUrl = sellerProfileFromHtml(html, url);
   const phone = phoneFromHtml(html, bodyText);
-  const sellerName = sellerNameFromText(bodyText);
+  const rawSellerName = sellerNameFromText(bodyText);
+  const sellerName = cleanSellerName(rawSellerName);
   const location = locationFromText(bodyText);
   const images = imagesFromHtml(html, url);
 
@@ -222,6 +238,6 @@ export const extractMarketplaceUrlCapture = (url: string, html: string, now: Dat
     location,
     pageUrl: url,
     capturedAt: now.toISOString(),
-    rawExtract: { strategy: "url-fetch", adapter },
+    rawExtract: { strategy: "url-fetch", adapter, rawSellerText: rawSellerName, extractionWarnings: phone === undefined ? ["PHONE_NOT_VISIBLE_URL_CAPTURE_BLOCKED_FOR_QUALIFICATION"] : [] },
   };
 };

@@ -21,13 +21,15 @@ export default function MarketplaceCapturePage() {
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Marketplace acquisition</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Capture Seller inside Marketplace Sellers</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Capture is an action inside Marketplace Sellers. Mobile number is required for qualification: WhatsApp is attempted first, SMS is fallback, and email is optional for non-cellphone-first markets.
+          Drag this bookmarklet to your browser bookmarks bar or copy the link. While viewing a single public marketplace listing,
+          click it to capture lightweight public metadata into WhispeRM. Reveal the seller phone/mobile number before capture:
+          Mobile number is required for qualification, and WhatsApp will be attempted first.
         </p>
 
         <div className="mt-5 grid gap-4">
           <form action="/api/marketplace-acquisition/captures/from-url" className="rounded-2xl bg-secondary p-4" method="post" style={{ border: "0.5px solid hsl(var(--border))" }}>
             <p className="text-sm font-medium text-foreground">Mobile URL capture</p>
-            <p className="mt-1 text-xs text-muted-foreground">Paste a public listing URL. URL-only capture may create a blocked or unqualified Marketplace Sellers record if the seller phone/mobile number cannot be found.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Paste a public listing URL. Phone-missing URL captures are blocked from qualification until a mobile number is visible.</p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <input className="min-h-11 flex-1 rounded-xl bg-background px-3 py-2 text-sm text-foreground" name="url" placeholder="https://jiji.com.gh/... or https://tonaton.com/..." type="url" required />
               <button className="min-h-11 rounded-xl bg-whisper px-4 text-sm font-semibold text-white" type="submit">Capture URL</button>
@@ -55,11 +57,11 @@ export default function MarketplaceCapturePage() {
         <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <h2 className="text-sm font-semibold text-foreground">Operator instructions</h2>
           <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6 text-muted-foreground">
-            <li>Log into marketplace if needed.</li>
-            <li>Open a single listing.</li>
-            <li>Reveal the seller phone/mobile number on the marketplace page first.</li>
-            <li>Run the bookmarklet after the number is visible.</li>
-            <li>Review and submit.</li>
+            <li>Open one public marketplace listing page in your browser.</li>
+            <li>Reveal the seller phone/mobile number before capture so WhatsApp can be attempted first.</li>
+            <li>Click the “Render Seller Capture” bookmark.</li>
+            <li>Review the captured fields on the authenticated WhispeRM intake page.</li>
+            <li>Bulk seller portfolio capture can include multiple listings visible on the current seller/profile page.</li>
           </ol>
         </div>
 
