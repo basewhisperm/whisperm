@@ -19,7 +19,7 @@ export default function MarketplaceCapturePage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Marketplace acquisition</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">One-touch listing capture</h1>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Capture Seller inside Marketplace Sellers</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
           Drag this bookmarklet to your browser bookmarks bar or copy the link. While viewing a single public marketplace listing,
           click it to capture lightweight public metadata into WhispeRM. Reveal the seller phone/mobile number before capture:
