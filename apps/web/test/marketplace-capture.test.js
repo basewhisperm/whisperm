@@ -57,7 +57,7 @@ test('marketplace acquisition detail route links safe capture fields without raw
   const detailPage = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/[dealId]/page.tsx', import.meta.url), 'utf8');
   const boardPage = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/page.tsx', import.meta.url), 'utf8');
 
-  assert.match(boardPage, /href=\{`\/marketplace-acquisition\/\$\{deal\.id\}`\}/u);
+  assert.match(boardPage, /href=\{`\/marketplace-acquisition\/\$\{record\.deal\.deal\.id\}`\}/u);
   for (const safeField of ['listingUrl', 'marketplaceSource', 'sellerName', 'status', 'price', 'currency']) {
     assert.match(detailPage, new RegExp(safeField, 'u'));
   }
