@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+import { featureNotEnabledResponse, isTenantFeatureEnabled, SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-features";
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { createWhispeRMServices, ServiceError } from "@whisperm/services";
 
@@ -22,6 +23,8 @@ export async function POST(request: NextRequest) {
   const tenantContext = await getTenantContextForCurrentUser();
   if (!tenantContext) return NextResponse.json({ ok: false, error: { message: "Unauthorized" } }, { status: 401 });
   const { tenant, tenantUserId } = tenantContext;
+  const featureEnabled = await isTenantFeatureEnabled(tenant.id, SELLER_ACQUISITION_FEATURE);
+  if (!featureEnabled) return featureNotEnabledResponse();
 
   const contentType = request.headers.get("content-type") ?? "";
   const parsed =

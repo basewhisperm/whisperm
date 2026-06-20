@@ -191,6 +191,7 @@ model Tenant {
   updatedAt  DateTime @updatedAt
 
   users                  TenantUser[]
+  features               TenantFeature[]
   contacts               Contact[]
   contentItems           ContentItem[]
   contentVariants        ContentVariant[]
@@ -233,6 +234,22 @@ model Tenant {
   renderConversions      RenderConversion[]
   providerConnections    ProviderConnection[]
   notificationLogs       NotificationDeliveryLog[]
+}
+
+
+model TenantFeature {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  featureKey String
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, featureKey])
+  @@index([tenantId, enabled])
+  @@index([featureKey, enabled])
 }
 
 model TenantUser {

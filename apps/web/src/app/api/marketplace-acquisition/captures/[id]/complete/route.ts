@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+import { featureNotEnabledResponse, isTenantFeatureEnabled, SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-features";
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import {
   MarketplaceCaptureCompletionError,
@@ -34,6 +35,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
   if (!tenantContext) return errorResponse("Unauthorized", 401, "AUTH_REQUIRED");
   const { tenant, tenantUserId } = tenantContext;
+  const featureEnabled = await isTenantFeatureEnabled(tenant.id, SELLER_ACQUISITION_FEATURE);
+  if (!featureEnabled) return featureNotEnabledResponse();
 
   const marketplaceCaptureId = clean(params.id);
   if (marketplaceCaptureId === undefined) {
