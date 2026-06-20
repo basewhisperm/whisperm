@@ -69,13 +69,18 @@ const transpileRoute = (routePath, tempDir) => {
 
 const makeRequest = (body) => ({ headers: new Headers({ 'x-correlation-id': 'corr-route', 'x-request-id': 'req-route' }), async json() { return body ?? {}; } });
 
-const createHarness = async (state) => {
+const createHarness = async (state, options = {}) => {
   const tempDir = join(tmpdir(), `whisperm-route-activity-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(tempDir);
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\nexport class NextRequest extends Request {}\n');
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__routeState.tenant;\nexport const getTenantContextForCurrentUser = async () => ({ tenant: globalThis.__routeState.tenant, tenantUserId: "tenant-user-1" });\n');
   writeFileSync(join(tempDir, 'prisma.mjs'), 'export const prisma = {};\n');
-  writeFileSync(join(tempDir, 'tenant-features.mjs'), 'export const SELLER_ACQUISITION_FEATURE = \"SELLER_ACQUISITION\";\nexport const isTenantFeatureEnabled = async () => true;\nexport const featureNotEnabledResponse = () => Response.json({ ok: false, error: { message: \"Seller Acquisition add-on is not enabled for this workspace.\", code: \"FEATURE_NOT_ENABLED\" } }, { status: 403 });\n');
+  writeFileSync(join(tempDir, 'tenant-features.mjs'), [
+    'export const SELLER_ACQUISITION_FEATURE = "SELLER_ACQUISITION";',
+    `export const isTenantFeatureEnabled = async () => ${options.featureEnabled === false ? 'false' : 'true'};`,
+    'export const featureNotEnabledResponse = () => Response.json({ ok: false, error: { message: "Seller Acquisition add-on is not enabled for this workspace.", code: "FEATURE_NOT_ENABLED" } }, { status: 403 });',
+    '',
+  ].join('\n'));
   writeFileSync(join(tempDir, 'repositories.mjs'), 'export const createPrismaRepositories = () => globalThis.__routeRepositories;\n');
   writeFileSync(join(tempDir, 'claim-service.mjs'), 'export const createSellerClaimService = () => globalThis.__routeClaimService;\n');
   globalThis.__routeState = state;
@@ -90,6 +95,20 @@ const createHarness = async (state) => {
     complete: await transpileRoute(join(base, 'captures/[id]/complete/route.ts'), tempDir),
   };
 };
+
+test('authenticated seller acquisition route denies disabled tenant before protected work runs', async () => {
+  const state = makeState();
+  const harness = await createHarness(state, { featureEnabled: false });
+  try {
+    const response = await harness.seller.POST(makeRequest(), { params: { id: captureId } });
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { ok: false, error: { message: 'Seller Acquisition add-on is not enabled for this workspace.', code: 'FEATURE_NOT_ENABLED' } });
+    assert.equal(state.conversions.length, 0);
+    assert.equal(state.activities.length, 0);
+  } finally {
+    harness.cleanup();
+  }
+});
 
 test('seller acquisition route handlers create authenticated CRM activities for live conversion-to-completion lifecycle', async () => {
   const state = makeState();
