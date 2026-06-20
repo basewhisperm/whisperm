@@ -31,6 +31,8 @@ export interface RenderSellerConversionResult {
 
 const stringMeta = (metadata: Readonly<Record<string, unknown>> | null | undefined, key: string): string | null => { const value = metadata?.[key]; return typeof value === "string" && value.trim().length > 0 ? value : null; };
 const claimedStatuses = new Set(["CLAIMED"]);
+const hasPhone = (capture: MarketplaceCaptureRecord, contact: { readonly phone?: string | null | undefined }): boolean =>
+  (stringMeta(capture.metadata ?? {}, "sellerPhone") ?? contact.phone ?? null) !== null;
 
 export class RenderSellerConversionService {
   constructor(private readonly deps: RenderSellerConversionDependencies) {}
@@ -52,6 +54,7 @@ export class RenderSellerConversionService {
     if (contactId === null || contactId === undefined) throw this.error(context.correlation, "SERVICE_NOT_FOUND", "Claimed capture must be linked to a contact before seller conversion", 404);
     const contact = await this.deps.contacts.findById(scope, contactId);
     if (contact === null) throw this.error(context.correlation, "SERVICE_NOT_FOUND", "Seller contact was not found for this tenant", 404);
+    if (!hasPhone(capture, contact)) throw this.error(context.correlation, "SERVICE_INVALID_STATE_TRANSITION", "Seller phone is required before seller conversion", 422, { missingRequirements: ["PHONE_REQUIRED"] });
 
     const existing = await this.deps.renderConversions.findSuccessfulSellerConversion(scope, capture.id, contactId);
     if (existing?.renderSellerId != null) return { captureId: capture.id, contactId, attestationId: attestation.id, renderSellerId: existing.renderSellerId, conversionStatus: "SUCCESS", conversionId: existing.id, idempotent: true };

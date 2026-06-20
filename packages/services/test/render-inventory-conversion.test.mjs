@@ -123,6 +123,13 @@ test('missing draft cannot convert inventory', async () => {
   await rejectsWithCode(() => deps({ draft: null }).service.convertClaimedInventoryToRender(context, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' }), 'SERVICE_NOT_FOUND');
 });
 
+test('claimed capture without phone-qualified contact cannot convert inventory or create conversion', async () => {
+  const setup = deps({ capture: capture({ contactId: null }), draft: draft({ contactId: null }) });
+  await rejectsWithCode(() => setup.service.convertClaimedInventoryToRender(context, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' }), 'SERVICE_INVALID_STATE_TRANSITION');
+  assert.equal(setup.state.conversions.length, 0);
+  assert.equal(setup.state.inventoryCalls.length, 0);
+});
+
 test('duplicate inventory conversion returns existing render inventory id without provider call', async () => {
   const setup = deps({ existing: { id: 'conv-old', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', externalId: 'render-existing', status: 'SUCCESS', conversionKind: 'INVENTORY', createdAt: now, updatedAt: now } });
   const result = await setup.service.convertClaimedInventoryToRender(context, { tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1' });

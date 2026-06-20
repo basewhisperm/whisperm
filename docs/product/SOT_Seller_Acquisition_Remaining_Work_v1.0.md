@@ -86,3 +86,11 @@ The following items must be verified against current code or production records 
 - Whether any `apps/api` route remains externally consumed by production clients instead of only service or compatibility coverage.
 - Whether all lifecycle transitions above have route-level and service-level coverage in the current test suite.
 - Whether production `_prisma_migrations` still matches the documented Neon baseline after subsequent deployments.
+
+## Slice 4.4 phone qualification write-boundary rule
+
+Seller Acquisition contact qualification is phone-gated at the server write boundary: no phone means the capture remains unqualified and must not create a qualified Contact, acquisition Deal, seller invitation, claim token, seller conversion, inventory conversion, or completed workflow state.
+
+URL capture fallback may preserve listing metadata and DraftInventory records, including title, description, price, category, listing URL/source, and images, but it cannot qualify the seller without an extracted or manually completed phone number.
+
+Seller invitation requires a phone-qualified acquisition contact. Conversion requires the canonical claim/qualification prerequisites; retries must not bypass phone qualification. This enforcement is server-side and is not only a UI affordance.

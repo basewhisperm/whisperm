@@ -7,7 +7,7 @@ const now = "2026-06-14T00:00:00.000Z";
 const context = { tenantId: "tenant-a", actorId: "actor-1", correlation: { correlationId: "corr-invite" } };
 
 const createStore = () => ({ captures: new Map(), invitations: [], claimTokens: [], audits: [], sent: [], stageUpdates: [], scheduledLifecycle: [] });
-const baseCapture = (overrides = {}) => ({ id: "capture-1", tenantId: "tenant-a", listingUrl: "https://market.example/listing/1", title: "Desk", status: "CAPTURED", dealId: "deal-1", capturedAt: now, createdAt: now, updatedAt: now, metadata: {}, ...overrides });
+const baseCapture = (overrides = {}) => ({ id: "capture-1", tenantId: "tenant-a", listingUrl: "https://market.example/listing/1", title: "Desk", status: "CAPTURED", contactId: "contact-1", dealId: "deal-1", capturedAt: now, createdAt: now, updatedAt: now, metadata: {}, ...overrides });
 
 const deps = (store, options = {}) => ({
   marketplaceCaptures: {
@@ -37,9 +37,9 @@ test("phone + WhatsApp enabled chooses WHATSAPP", async () => { const store = cr
 test("phone without WhatsApp provider falls back to SMS if SMS is available", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567" } }), { sms: p.sms }); assert.equal(r.result.channel, "SMS"); assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FALLBACK_USED"), true); });
 test("preferredChannel WHATSAPP falls back to SMS when WhatsApp provider is missing", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567" } }), { sms: p.sms }, { preferredChannel: "WHATSAPP" }); assert.equal(r.result.channel, "SMS"); assert.equal(r.result.status, "SENT"); assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FALLBACK_USED"), true); });
 test("phone only chooses SMS when WhatsApp is disabled", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567" } }), { whatsappEnabled: false, sms: p.sms }); assert.equal(r.result.channel, "SMS"); });
-test("email only chooses EMAIL", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), { email: p.email }); assert.equal(r.result.channel, "EMAIL"); });
+test("email only is blocked because Seller Acquisition invitation requires phone-qualified contact", async () => { await assert.rejects(run(baseCapture({ contactId: "contact-1", metadata: { sellerEmail: "seller@example.com" } }), {}, {}), (e) => e instanceof ServiceError && e.code === "SERVICE_INVALID_STATE_TRANSITION" && e.details.missingRequirements.includes("PHONE_REQUIRED")); });
 test("phone + email chooses cellphone channel first", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { whatsappEnabled: false, sms: p.sms, email: p.email }); assert.equal(r.result.channel, "SMS"); });
-test("missing phone and email fails clearly", async () => { await assert.rejects(run(baseCapture(), {}, {}), (e) => e instanceof ServiceError && e.message === "Seller has no reachable invitation channel."); });
+test("missing phone fails before invitation or claim token creation", async () => { const store = createStore(); const capture = baseCapture({ contactId: null }); store.captures.set(`${capture.tenantId}:${capture.id}`, capture); const service = new SellerInvitationService(deps(store, {})); await assert.rejects(service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id }), (e) => e instanceof ServiceError && e.code === "SERVICE_INVALID_STATE_TRANSITION"); assert.equal(store.invitations.length, 0); assert.equal(store.claimTokens.length, 0); });
 test("missing delivery providers persists failed invitation and claim token for operator visibility", async () => {
   const store = createStore();
   const capture = baseCapture({ metadata: { sellerPhone: "+233501234567" } });
@@ -55,15 +55,15 @@ test("missing delivery providers persists failed invitation and claim token for 
   assert.equal(store.invitations[0].status, "FAILED");
   assert.equal(store.audits.some((audit) => audit.action === "INVITATION_FAILED"), true);
 });
-test("preferredChannel EMAIL works when email exists", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email }, { preferredChannel: "EMAIL" }); assert.equal(r.result.channel, "EMAIL"); });
+test("preferredChannel EMAIL works when phone-qualified contact also has email", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email }, { preferredChannel: "EMAIL" }); assert.equal(r.result.channel, "EMAIL"); });
 test("preferredChannel WHATSAPP fails when phone missing", async () => { await assert.rejects(run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {}, { preferredChannel: "WHATSAPP" }), (e) => e instanceof ServiceError && e.message.includes("Seller phone")); });
-test("invitation moves capture from Captured to Invited only after successful send", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), { email: p.email }); assert.equal(r.store.captures.get("tenant-a:capture-1").status, "INVITED"); assert.equal(r.store.stageUpdates[0].stageId, "stage-invited"); });
+test("invitation moves capture from Captured to Invited only after successful send", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email }, { preferredChannel: "EMAIL" }); assert.equal(r.store.captures.get("tenant-a:capture-1").status, "INVITED"); assert.equal(r.store.stageUpdates[0].stageId, "stage-invited"); });
 test("tenant isolation preserved", async () => { const store = createStore(); store.captures.set("tenant-b:capture-1", baseCapture({ tenantId: "tenant-b" })); const service = new SellerInvitationService(deps(store, {})); await assert.rejects(service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: "capture-1" }), (e) => e instanceof ServiceError && e.code === "SERVICE_NOT_FOUND"); });
 
 test("successful invitation creates a resolvable claim token and /claim invite URL", async () => {
   const store = createStore();
   const p = providers(store);
-  const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), { email: p.email, inviteBaseUrl: "https://app.example/claim" });
+  const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email, inviteBaseUrl: "https://app.example/claim" }, { preferredChannel: "EMAIL" });
 
   assert.equal(r.store.claimTokens.length, 1);
   assert.equal(r.store.claimTokens[0].marketplaceCaptureId, "capture-1");
@@ -96,9 +96,9 @@ test("WhatsApp provider failure falls back to SMS and records deterministic audi
 
 test("provider delivery failure produces deterministic failure metadata", async () => {
   const store = createStore();
-  const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {
+  const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), {
     email: { async send() { throw new Error("provider down"); } },
-  });
+  }, { preferredChannel: "EMAIL" });
 
   assert.equal(r.result.channel, "EMAIL");
   assert.equal(r.result.status, "FAILED");
@@ -111,7 +111,7 @@ test("provider delivery failure produces deterministic failure metadata", async 
 test("successful invitation schedules claim lifecycle jobs for the claim token", async () => {
   const store = createStore();
   const p = providers(store);
-  const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), { email: p.email });
+  const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email }, { preferredChannel: "EMAIL" });
 
   assert.equal(r.result.status, "SENT");
   assert.equal(r.store.claimTokens.length, 1);
@@ -121,9 +121,9 @@ test("successful invitation schedules claim lifecycle jobs for the claim token",
 });
 
 test("failed invitation does not schedule claim lifecycle jobs", async () => {
-  const r = await run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {
+  const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), {
     email: { async send() { throw new Error("provider down"); } },
-  });
+  }, { preferredChannel: "EMAIL" });
 
   assert.equal(r.result.status, "FAILED");
   assert.equal(r.store.scheduledLifecycle.length, 0);

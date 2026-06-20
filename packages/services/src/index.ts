@@ -1172,11 +1172,11 @@ const marketplaceCaptureInputSchema = z.object({
 export type MarketplaceCaptureServiceInput = z.output<typeof marketplaceCaptureInputSchema>;
 export interface MarketplaceCaptureServiceResult {
   readonly captureId: string;
-  readonly contactId: string;
-  readonly dealId: string;
+  readonly contactId?: string | undefined;
+  readonly dealId?: string | undefined;
   readonly draftInventoryId: string;
-  readonly contactMatchStrategy: "provided" | "phone" | "profile" | "capture_identity" | "email" | "created";
-  readonly sellerIdentityStrategy?: "provided" | "phone" | "profile" | "capture_identity" | "email" | "created" | undefined;
+  readonly contactMatchStrategy: "provided" | "phone" | "profile" | "capture_identity" | "email" | "created" | "unqualified";
+  readonly sellerIdentityStrategy?: "provided" | "phone" | "profile" | "capture_identity" | "email" | "created" | "unqualified" | undefined;
   readonly dealCreated: boolean;
   readonly dealMatched: boolean;
   readonly status: string;
@@ -1355,7 +1355,7 @@ export interface SellerInvitationProviderPorts {
 
 const contactFromCapture = (capture: MarketplaceCaptureRecord): { readonly phone?: string; readonly email?: string } => {
   const metadata = capture.metadata ?? {};
-  const phone = typeof metadata.sellerPhone === "string" && metadata.sellerPhone.trim().length > 0 ? metadata.sellerPhone.trim() : undefined;
+  const phone = typeof metadata.sellerPhone === "string" && metadata.sellerPhone.trim().length > 0 ? normalizeSellerPhoneForMatching(metadata.sellerPhone) : undefined;
   const email = typeof metadata.sellerEmail === "string" && metadata.sellerEmail.trim().length > 0 ? metadata.sellerEmail.trim() : undefined;
   return { ...(phone === undefined ? {} : { phone }), ...(email === undefined ? {} : { email }) };
 };
@@ -1412,6 +1412,15 @@ export class SellerInvitationService {
     const scope = contextToTenantScope(context);
     const capture = await this.deps.marketplaceCaptures.findById(scope, data.captureId);
     if (capture === null) throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation });
+    if (capture.contactId === undefined || capture.contactId === null || contactFromCapture(capture).phone === undefined) {
+      throw new ServiceError({
+        code: "SERVICE_INVALID_STATE_TRANSITION",
+        message: "Seller phone is required before creating a Seller Acquisition invitation.",
+        status: 422,
+        correlation: context.correlation,
+        details: { missingRequirements: ["PHONE_REQUIRED"] },
+      });
+    }
 
     const contact = contactFromCapture(capture);
     const notifications = this.deps.notifications;
@@ -1540,6 +1549,10 @@ export class MarketplaceAcquisitionCaptureService {
     }
 
     return runWrite(this.deps, context, async (repositories) => {
+      if (sellerPhoneForInput(data) === undefined) {
+        return this.captureUnqualifiedListing(repositories, context, tenantScope, data);
+      }
+
       const contactResult = await this.resolveContact(repositories, context, data);
       const listingInputs = this.listingInputs(data);
       const firstInput = listingInputs[0] ?? data;
@@ -1641,7 +1654,58 @@ export class MarketplaceAcquisitionCaptureService {
     });
   }
 
-  private async createOrMatchCapture(repositories: ServiceRepositories, context: ServiceContext, tenantScope: TenantScoped, data: MarketplaceCaptureServiceInput, contactId: string): Promise<{ readonly capture: MarketplaceCaptureRecord; readonly created: boolean }> {
+  private async captureUnqualifiedListing(repositories: ServiceRepositories, context: ServiceContext, tenantScope: TenantScoped, data: MarketplaceCaptureServiceInput): Promise<MarketplaceCaptureServiceResult> {
+    const listingInputs = this.listingInputs(data);
+    const captures: MarketplaceCaptureRecord[] = [];
+    const createdCaptureIds: string[] = [];
+    const matchedCaptureIds: string[] = [];
+    const draftInventoryIds: string[] = [];
+
+    for (const listingInput of listingInputs) {
+      const captured = await this.createOrMatchCapture(repositories, context, tenantScope, listingInput);
+      if (captured.created) createdCaptureIds.push(captured.capture.id); else matchedCaptureIds.push(captured.capture.id);
+      captures.push(captured.capture);
+      const draftInventory = await repositories.draftInventories.upsertForCapture(tenantScope, {
+        tenantId: context.tenantId,
+        marketplaceCaptureId: captured.capture.id,
+        title: captured.capture.title,
+        description: captured.capture.description,
+        price: marketplacePriceForDecimal(listingInput),
+        currency: captured.capture.currency,
+        category: marketplaceCategoryForDraft(listingInput),
+        images: marketplaceImagesForDraft(listingInput),
+        listingUrl: captured.capture.listingUrl,
+        marketplaceSource: marketplaceSourceForDraft(listingInput),
+        marketplaceListingId: captured.capture.externalId ?? undefined,
+        status: "DRAFT",
+      });
+      draftInventoryIds.push(draftInventory.id);
+    }
+
+    const finalCapture = captures[0];
+    if (finalCapture === undefined) {
+      throw new ServiceError({ code: "SERVICE_VALIDATION_FAILED", message: "Marketplace capture requires a valid listing URL.", status: 400, correlation: context.correlation });
+    }
+    await appendAudit(repositories, context, { action: "MARKETPLACE_CAPTURE_BLOCKED_PHONE_REQUIRED", targetType: "MARKETPLACE_CAPTURE", targetId: finalCapture.id, metadata: { missingRequirements: ["PHONE_REQUIRED"] } });
+    return {
+      captureId: finalCapture.id,
+      contactMatchStrategy: "unqualified",
+      dealCreated: false,
+      dealMatched: false,
+      draftInventoryId: draftInventoryIds[0] ?? "",
+      status: finalCapture.status,
+      sellerIdentityStrategy: "unqualified",
+      portfolioCaptureCount: listingInputs.length,
+      createdCaptureIds,
+      matchedCaptureIds,
+      draftInventoryIds,
+      sellerNameCleaned: cleanSellerIdentity(data.sellerName).cleaned,
+      sellerPortfolioValue: listingInputs.reduce((sum, item) => sum + Number(marketplacePriceForDecimal(item) ?? 0), 0) > 0 ? String(listingInputs.reduce((sum, item) => sum + Number(marketplacePriceForDecimal(item) ?? 0), 0)) : undefined,
+      sellerListingCount: listingInputs.length,
+    };
+  }
+
+  private async createOrMatchCapture(repositories: ServiceRepositories, context: ServiceContext, tenantScope: TenantScoped, data: MarketplaceCaptureServiceInput, contactId?: string | undefined): Promise<{ readonly capture: MarketplaceCaptureRecord; readonly created: boolean }> {
     const listingUrl = listingUrlForCapture(data);
     const externalId = externalIdForCapture(data);
     const existingByListingUrl = await repositories.marketplaceCaptures.findByListingUrl(tenantScope, listingUrl);
@@ -1662,7 +1726,7 @@ export class MarketplaceAcquisitionCaptureService {
       status: "CAPTURED",
       metadata: { ...mergedCaptureMetadata(data), sellerListingCount: 1, sourceMarketplace: data.marketplaceSource ?? data.sourceMarketplace ?? undefined }
     });
-    const linkedCapture = capture.contactId === contactId ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId });
+    const linkedCapture = contactId === undefined || capture.contactId === contactId ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId });
     return { capture: linkedCapture, created: existingCapture === null };
   }
 
