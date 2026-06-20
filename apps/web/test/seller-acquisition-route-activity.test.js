@@ -57,6 +57,7 @@ const transpileRoute = (routePath, tempDir) => {
     .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
+    .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
     .replace(/from "@\/lib\/claims\/seller-claim-service"/gu, `from "${join(tempDir, 'claim-service.mjs')}"`)
     .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
     .replaceAll('from "@whisperm/services"', `from "${servicesUrl}"`);
@@ -74,6 +75,7 @@ const createHarness = async (state) => {
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\nexport class NextRequest extends Request {}\n');
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__routeState.tenant;\nexport const getTenantContextForCurrentUser = async () => ({ tenant: globalThis.__routeState.tenant, tenantUserId: "tenant-user-1" });\n');
   writeFileSync(join(tempDir, 'prisma.mjs'), 'export const prisma = {};\n');
+  writeFileSync(join(tempDir, 'tenant-features.mjs'), 'export const SELLER_ACQUISITION_FEATURE = \"SELLER_ACQUISITION\";\nexport const isTenantFeatureEnabled = async () => true;\nexport const featureNotEnabledResponse = () => Response.json({ ok: false, error: { message: \"Seller Acquisition add-on is not enabled for this workspace.\", code: \"FEATURE_NOT_ENABLED\" } }, { status: 403 });\n');
   writeFileSync(join(tempDir, 'repositories.mjs'), 'export const createPrismaRepositories = () => globalThis.__routeRepositories;\n');
   writeFileSync(join(tempDir, 'claim-service.mjs'), 'export const createSellerClaimService = () => globalThis.__routeClaimService;\n');
   globalThis.__routeState = state;

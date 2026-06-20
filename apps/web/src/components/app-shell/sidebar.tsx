@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton, useUser } from "@clerk/nextjs";
 import { t, type TranslationKey } from "@/lib/i18n";
+import { SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-feature-keys";
 import { WorkspaceSelector } from "@/components/ui/workspace-selector";
 import {
   IconLayoutDashboard,
@@ -21,14 +22,22 @@ const navigationItems = [
   { labelKey: "dashboard.title", icon: IconLayoutDashboard, href: "/dashboard" },
   { labelKey: "contacts.title", icon: IconUsers, href: "/contacts" },
   { labelKey: "deals.title", icon: IconBriefcase, href: "/deals" },
-  { labelKey: "marketplaceAcquisition.title", icon: IconBookmark, href: "/marketplace-acquisition" },
   { labelKey: "reports.title", icon: IconChartBar, href: "/reports" },
-  { labelKey: "marketplaceCapture.title", icon: IconBookmark, href: "/marketplace-acquisition/capture" },
   { labelKey: "settings.title", icon: IconSettings, href: "/settings" },
 ] satisfies readonly { readonly labelKey: TranslationKey; readonly icon: typeof IconLayoutDashboard; readonly href: string }[];
 
-function NavigationLinks({ onNavigate }: { readonly onNavigate?: () => void }) {
+const sellerAcquisitionNavigationItem = {
+  labelKey: "marketplaceSellers.title",
+  icon: IconBookmark,
+  href: "/marketplace-acquisition",
+} satisfies { readonly labelKey: TranslationKey; readonly icon: typeof IconLayoutDashboard; readonly href: string };
+
+function NavigationLinks({ enabledFeatures, onNavigate }: { readonly enabledFeatures: readonly string[]; readonly onNavigate?: () => void }) {
   const pathname = usePathname();
+
+  const visibleNavigationItems = enabledFeatures.includes(SELLER_ACQUISITION_FEATURE)
+    ? [...navigationItems.slice(0, 3), sellerAcquisitionNavigationItem, ...navigationItems.slice(3)]
+    : navigationItems;
 
   return (
     <nav aria-label={t("navigation.primary")} className="flex-1 px-3 py-2">
@@ -36,7 +45,7 @@ function NavigationLinks({ onNavigate }: { readonly onNavigate?: () => void }) {
         {t("navigation.section.crm")}
       </p>
       <div className="mt-3 space-y-1">
-        {navigationItems.map((item) => {
+        {visibleNavigationItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href;
 
@@ -84,7 +93,7 @@ function SidebarProfile() {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ enabledFeatures }: { readonly enabledFeatures: readonly string[] }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -122,7 +131,7 @@ export function Sidebar() {
             <div className="px-4 py-4">
               <WorkspaceSelector />
             </div>
-            <NavigationLinks onNavigate={() => setMobileOpen(false)} />
+            <NavigationLinks enabledFeatures={enabledFeatures} onNavigate={() => setMobileOpen(false)} />
             <SidebarProfile />
           </aside>
         </div>
@@ -135,7 +144,7 @@ export function Sidebar() {
         <div className="px-4 py-4">
           <WorkspaceSelector />
         </div>
-        <NavigationLinks />
+        <NavigationLinks enabledFeatures={enabledFeatures} />
         <SidebarProfile />
       </aside>
     </>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+import { featureNotEnabledResponse, isTenantFeatureEnabled, SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-features";
 import {
   PrismaAuditLogRepository,
   PrismaDealsRepository,
@@ -71,6 +72,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
   if (!tenantContext) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { tenant, tenantUserId } = tenantContext;
+  const featureEnabled = await isTenantFeatureEnabled(tenant.id, SELLER_ACQUISITION_FEATURE);
+  if (!featureEnabled) return featureNotEnabledResponse();
 
   const parsed = sellerInvitationCreateRequestSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {

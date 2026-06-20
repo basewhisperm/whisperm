@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Sidebar } from "@/components/app-shell/sidebar";
 import { TopBar } from "@/components/app-shell/top-bar";
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, enabledFeatures }: { readonly children: ReactNode; readonly enabledFeatures?: readonly string[] }) {
   return (
     <div className="flex h-dvh bg-background text-foreground">
       <a
@@ -12,7 +12,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         Skip to main content
       </a>
-      <Sidebar />
+      <Sidebar enabledFeatures={enabledFeatures ?? []} />
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar />
         <div className="min-h-0 flex-1 overflow-y-auto" id="main-content" tabIndex={-1}>
