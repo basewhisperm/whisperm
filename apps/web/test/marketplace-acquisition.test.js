@@ -191,3 +191,22 @@ test("seller acquisition detail renders invitation UX with WhatsApp first, SMS f
   assert.match(invitePanel, /Send Seller Acquisition invite/u);
   assert.match(invitePanel, /role="status"/u);
 });
+
+test("capture intake and bookmarklet support mobile-required WhatsApp-first bulk portfolio copy", () => {
+  const capturePage = read("app/(app)/marketplace-acquisition/capture/page.tsx");
+  const bookmarklet = read("lib/marketplace-capture/bookmarklet.js");
+  const payload = read("lib/marketplace-capture/payload.ts");
+
+  for (const expected of [
+    "Reveal the seller phone/mobile number before capture",
+    "Mobile number is required for qualification",
+    "WhatsApp will be attempted first",
+    "Bulk seller portfolio",
+    "multiple listings",
+  ]) {
+    assert.match(capturePage + bookmarklet + payload, new RegExp(expected, "u"));
+  }
+  for (const token of ["portfolioListings", "rawSellerText", "sellerProfileUrl", "marketplaceListingId", "phone", "sellerPhone"]) {
+    assert.match(bookmarklet + payload, new RegExp(token, "u"));
+  }
+});

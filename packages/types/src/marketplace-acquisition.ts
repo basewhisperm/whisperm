@@ -103,6 +103,20 @@ export const marketplaceCaptureCreateRequestSchema = z.object({
   sellerProfileUrl: z.string().trim().url().max(2048).optional(),
   imageUrls: z.array(z.string().trim().url().max(2048)).max(10).default([]),
   rawExtract: safeRawExtractSchema,
+  portfolioListings: z.array(z.object({
+    listingUrl: z.string().trim().url().max(2048).optional(),
+    marketplaceListingId: optionalTextSchema(255),
+    title: textSchema(500),
+    description: optionalTextSchema(5000),
+    price: optionalTextSchema(120),
+    priceText: optionalTextSchema(120),
+    currency: optionalTextSchema(16),
+    category: optionalTextSchema(255),
+    images: z.array(z.string().trim().url().max(2048)).max(10).default([]),
+    imageUrls: z.array(z.string().trim().url().max(2048)).max(10).default([]),
+    location: optionalTextSchema(255),
+    metadata: z.record(z.string(), z.unknown()).default({}),
+  }).strict()).max(25).optional(),
 }).strict();
 export type MarketplaceCaptureCreateRequest = z.output<typeof marketplaceCaptureCreateRequestSchema>;
 
@@ -120,6 +134,14 @@ export const marketplaceCaptureResponseSchema = z.object({
   status: marketplaceCaptureStatusSchema,
   duplicate: z.boolean().optional(),
   normalizationWarnings: z.array(z.string()).optional(),
+  portfolioCaptureCount: z.number().int().nonnegative().optional(),
+  createdCaptureIds: z.array(idSchema).optional(),
+  matchedCaptureIds: z.array(idSchema).optional(),
+  draftInventoryIds: z.array(idSchema).optional(),
+  sellerIdentityStrategy: z.string().optional(),
+  sellerNameCleaned: z.string().optional(),
+  sellerPortfolioValue: z.string().optional(),
+  sellerListingCount: z.number().int().nonnegative().optional(),
   createdAt: isoDateSchema,
 }).strict();
 export type MarketplaceCaptureResponse = z.output<typeof marketplaceCaptureResponseSchema>;
@@ -284,5 +306,4 @@ export const sellerAcquisitionAssignmentSchema = z.object({
 }).strict();
 
 export type SellerAcquisitionAssignment = z.output<typeof sellerAcquisitionAssignmentSchema>;
-
 

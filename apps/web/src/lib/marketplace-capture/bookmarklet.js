@@ -70,6 +70,16 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
   const images = arr(product?.image).concat([meta('og:image'), meta('twitter:image')], Array.from(doc.querySelectorAll('[itemprop="image"], img')).map((img) => img.getAttribute('content') || img.getAttribute('src'))).map((url) => { try { return new URL(clean(String(url), 2000), href).toString(); } catch { return clean(String(url), 2000); } }).filter(Boolean);
   const sellerName = clean(product?.brand?.name, 255) || selectorText(['[itemprop="seller"]', '[rel="author"]', 'a[href*="seller" i]', 'a[href*="profile" i]', '[class*="seller" i]', '[data-testid*="seller" i]'], 255);
   const sellerProfileUrl = selectorHref(['a[href*="seller" i]', 'a[href*="profile" i]', '[rel="author"]']);
+  const portfolioListings = Array.from(doc.querySelectorAll('a[href*="listing" i],a[href*="ad" i],a[href*="item" i]'))
+    .map((anchor) => {
+      const rawHref = anchor.getAttribute('href') || '';
+      let listingUrl = '';
+      try { listingUrl = new URL(rawHref, href).toString(); } catch { listingUrl = clean(rawHref, 2000); }
+      const title = clean(anchor.textContent || anchor.getAttribute('title') || '', 300);
+      return { listingUrl, marketplaceListingId: deriveMarketplaceListingId(listingUrl), title: title || clean(doc.title, 300), metadata: { source: 'visible-dom-portfolio' } };
+    })
+    .filter((item) => item.listingUrl && item.listingUrl !== href)
+    .slice(0, 10);
   const strategy = product ? 'jsonld' : (meta('og:title') || meta('og:description') ? 'opengraph' : 'fallback');
   return {
     sourceUrl: href,
@@ -87,6 +97,7 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
     imageUrls: Array.from(new Set(images)).slice(0, 6),
     category: clean(product?.category, 255) || meta('product:category') || selectorText(['[itemprop="category"]', '[class*="category" i]'], 255),
     sellerName,
+    rawSellerText: sellerName || undefined,
     sellerProfileUrl,
     marketplaceIdentifier: sellerProfileUrl || sellerName || undefined,
     phone: phone || undefined,
@@ -96,6 +107,7 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
     pageUrl: href,
     userAgent: clean(userAgent, 1024) || undefined,
     rawExtract: { strategy },
+    portfolioListings,
   };
 }
 
@@ -124,7 +136,8 @@ export function createMarketplaceCaptureBookmarklet(options) {
     "const imgs=Array.from(new Set([meta('og:image'),meta('twitter:image'),...Array.from(document.querySelectorAll('[itemprop=\"image\"],img')).map(i=>i.getAttribute('content')||i.getAttribute('src')||'')].map(x=>{try{return new URL(clean(String(x),2000),href).toString()}catch{return clean(String(x),2000)}}).filter(Boolean))).slice(0,6);",
     "const seller=one('[itemprop=\"seller\"]',255)||one('[rel=\"author\"]',255)||one('a[href*=\"seller\" i]',255)||one('a[href*=\"profile\" i]',255)||one('[class*=\"seller\" i]',255)||one('[data-testid*=\"seller\" i]',255);",
     "const loc=one('[itemprop=\"address\"]',255)||one('[class*=\"location\" i]',255)||one('[data-testid*=\"location\" i]',255);",
-    "const payload={sourceUrl:href,sourceHost:host,listingUrl:href,marketplaceSource:detect(href),sourceMarketplace:detect(href),marketplaceListingId:listingId(href),title:meta('og:title')||clean(document.title,300),description:meta('og:description')||meta('description'),priceText:price,price,currency:/GH₵|GHS|₵/iu.test(price)?'GHS':undefined,images:imgs,imageUrls:imgs,sellerName:seller||undefined,marketplaceIdentifier:phone||seller||undefined,phone:phone||undefined,location:loc||undefined,capturedAt:new Date().toISOString(),pageUrl:href,userAgent:clean(navigator.userAgent,1024)||undefined,rawExtract:{strategy:'bookmarklet'}};",
+    "const portfolioListings=Array.from(document.querySelectorAll('a[href*=\"listing\" i],a[href*=\"ad\" i],a[href*=\"item\" i]')).map(a=>{let u='';try{u=new URL(a.getAttribute('href')||'',href).toString()}catch{u=clean(a.getAttribute('href')||'',2000)}return{listingUrl:u,marketplaceListingId:listingId(u),title:clean(a.textContent||a.getAttribute('title')||document.title,300),metadata:{source:'visible-dom-portfolio'}}}).filter(x=>x.listingUrl&&x.listingUrl!==href).slice(0,10);",
+    "const payload={sourceUrl:href,sourceHost:host,listingUrl:href,marketplaceSource:detect(href),sourceMarketplace:detect(href),marketplaceListingId:listingId(href),title:meta('og:title')||clean(document.title,300),description:meta('og:description')||meta('description'),priceText:price,price,currency:/GH₵|GHS|₵/iu.test(price)?'GHS':undefined,images:imgs,imageUrls:imgs,sellerName:seller||undefined,rawSellerText:seller||undefined,marketplaceIdentifier:phone||seller||undefined,phone:phone||undefined,location:loc||undefined,capturedAt:new Date().toISOString(),pageUrl:href,userAgent:clean(navigator.userAgent,1024)||undefined,rawExtract:{strategy:'bookmarklet'},portfolioListings};",
     "const json=JSON.stringify(payload);",
     "if(new TextEncoder().encode(json).length>MAX){alert('WhispeRM capture is too large. Capture a single public listing page and try again.');return}",
     "window.open(INTAKE+'?payload='+encodeURIComponent(json),'_blank','noopener,noreferrer');"

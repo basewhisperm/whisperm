@@ -48,6 +48,27 @@ const safeRecord = (value: unknown): Record<string, unknown> =>
     ? ({ ...value } as Record<string, unknown>)
     : {};
 
+const portfolioListings = (value: unknown) =>
+  Array.isArray(value)
+    ? value.filter((item) => typeof item === "object" && item !== null && !Array.isArray(item)).slice(0, 25).map((item) => {
+        const record = item as Record<string, unknown>;
+        return {
+          listingUrl: validUrl(record.listingUrl),
+          marketplaceListingId: clean(record.marketplaceListingId),
+          title: clean(record.title) ?? "Marketplace listing",
+          description: clean(record.description),
+          price: clean(record.price),
+          priceText: clean(record.priceText) ?? clean(record.price),
+          currency: clean(record.currency),
+          category: clean(record.category),
+          images: urls(record.images),
+          imageUrls: urls(record.imageUrls),
+          location: clean(record.location),
+          metadata: safeRecord(record.metadata),
+        };
+      }).filter((item) => item.listingUrl !== undefined || item.marketplaceListingId !== undefined)
+    : undefined;
+
 const errorResponse = (message: string, status: number, code?: string, details?: unknown) =>
   NextResponse.json(
     {
@@ -117,6 +138,7 @@ export async function POST(request: NextRequest) {
     userAgent: clean(body.userAgent),
     contactId: clean(body.contactId),
     externalId: clean(body.externalId) ?? clean(body.marketplaceListingId),
+    portfolioListings: portfolioListings(body.portfolioListings),
     metadata: {
       sourceHost: sourceHost ?? null,
       pageUrl: pageUrl ?? null,

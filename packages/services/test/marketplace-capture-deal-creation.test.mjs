@@ -41,6 +41,10 @@ const createRepositories = (overrides = {}) => {
       }
     },
     contacts: {
+      async findById(scope, id) {
+        push("contacts", "findById", [scope, id]);
+        return contacts.get(id) ?? null;
+      },
       async findByPhone(scope, phone) {
         push("contacts", "findByPhone", [scope, phone]);
         return [...contacts.values()].find((contact) => contact.tenantId === scope.tenantId && contact.phone === phone) ?? null;
@@ -54,6 +58,10 @@ const createRepositories = (overrides = {}) => {
         const contact = record({ id: `contact-${contacts.size + 1}`, tenantId: input.tenantId, externalId: null, email: input.email ?? null, phone: input.phone ?? null, firstName: input.firstName ?? null, lastName: null, stage: "PROSPECT", metadata: input.metadata ?? {} });
         contacts.set(contact.id, contact);
         return contact;
+      },
+      async list(scope) {
+        push("contacts", "list", [scope]);
+        return { items: [...contacts.values()].filter((contact) => contact.tenantId === scope.tenantId) };
       }
     },
     marketplaceCaptures: {
@@ -64,6 +72,10 @@ const createRepositories = (overrides = {}) => {
       async findByExternalId(scope, externalId) {
         push("marketplaceCaptures", "findByExternalId", [scope, externalId]);
         return [...captures.values()].find((capture) => capture.tenantId === scope.tenantId && capture.externalId === externalId) ?? null;
+      },
+      async list(scope) {
+        push("marketplaceCaptures", "list", [scope]);
+        return { items: [...captures.values()].filter((capture) => capture.tenantId === scope.tenantId) };
       },
       async create(scope, input) {
         push("marketplaceCaptures", "create", [scope, input]);
@@ -390,4 +402,71 @@ test("duplicate marketplace listing id is scoped to tenant and reuses capture in
   assert.equal(duplicate.draftInventoryId, "draft-1");
   assert.equal(repositories.draftInventoriesByCapture.size, 1);
   await assert.rejects(services.marketplaceAcquisition.capture({ ...context, tenantId: "tenant-b" }, captureInput), /tenant/i);
+});
+
+test("dirty marketplace seller name is cleaned and raw badges remain metadata", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  await services.marketplaceAcquisition.capture(context, {
+    ...captureInput,
+    listingUrl: "https://jiji.com.gh/listings/dirty-name",
+    externalId: "dirty-name",
+    sellerName: "Serbeh Don Ernest New on Jiji Verified ID Last seen 5 hours ago",
+    sellerPhone: "0241234567",
+  });
+  const contact = repositories.contactsById.get("contact-1");
+  assert.equal(contact.firstName, "Serbeh Don Ernest");
+  assert.equal(contact.metadata.marketplaceAcquisition.rawSellerText, "Serbeh Don Ernest New on Jiji Verified ID Last seen 5 hours ago");
+  assert.equal(contact.metadata.marketplaceAcquisition.verifiedSeller, true);
+  assert.equal(contact.metadata.marketplaceAcquisition.lastSeen, "5 hours ago");
+  assert.equal(contact.metadata.marketplaceAcquisition.marketplaceTenure, "New on Jiji");
+});
+
+test("same seller profile URL without phone reuses contact", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  const first = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/profile-1", externalId: "profile-1", sellerPhone: undefined, phone: undefined, sellerEmail: undefined, email: undefined, sellerProfileUrl: "https://market.example/sellers/shared" });
+  const second = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/profile-2", externalId: "profile-2", sellerPhone: undefined, phone: undefined, sellerEmail: undefined, email: undefined, sellerProfileUrl: "https://market.example/sellers/shared" });
+  assert.equal(first.contactId, second.contactId);
+  assert.equal(second.sellerIdentityStrategy, "profile");
+  assert.equal(repositories.contactsById.size, 1);
+});
+
+test("bulk portfolio payload creates many captures and drafts but one seller contact and deal", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  const result = await services.marketplaceAcquisition.capture(context, {
+    ...captureInput,
+    listingUrl: "https://market.example/listings/bulk-1",
+    externalId: "bulk-1",
+    sellerPhone: "0241234567",
+    portfolioListings: [
+      { listingUrl: "https://market.example/listings/bulk-2", marketplaceListingId: "bulk-2", title: "Bulk two", price: "200", currency: "USD", images: ["https://market.example/images/two.jpg"] },
+      { listingUrl: "https://market.example/listings/bulk-3", marketplaceListingId: "bulk-3", title: "Bulk three", price: "300", currency: "USD" },
+    ],
+  });
+  assert.equal(result.portfolioCaptureCount, 3);
+  assert.equal(result.draftInventoryIds.length, 3);
+  assert.equal(repositories.contactsById.size, 1);
+  assert.equal(repositories.dealsByExternalId.size, 1);
+  assert.equal(repositories.capturesByUrl.size, 3);
+  assert.equal(repositories.draftInventoriesByCapture.size, 3);
+});
+
+test("phone missing is blocked for qualification and email-only does not qualify", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  const result = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/email-only", externalId: "email-only", sellerPhone: undefined, phone: undefined, sellerEmail: "email-only@example.com" });
+  const capture = [...repositories.capturesByUrl.values()].find((item) => item.id === result.captureId);
+  assert.equal(capture.metadata.acquisitionReadiness, "BLOCKED");
+  assert.equal(capture.metadata.whatsappCandidate, false);
+});
+
+test("same marketplace name does not auto-merge without phone or profile identity", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+  const first = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/name-1", externalId: "name-1", sellerPhone: undefined, phone: undefined, sellerEmail: "one@example.com", sellerProfileUrl: undefined, marketplaceIdentifier: undefined, sellerName: "Same Seller" });
+  const second = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/name-2", externalId: "name-2", sellerPhone: undefined, phone: undefined, sellerEmail: "two@example.com", sellerProfileUrl: undefined, marketplaceIdentifier: undefined, sellerName: "Same Seller" });
+  assert.notEqual(first.contactId, second.contactId);
+  assert.equal(repositories.contactsById.size, 2);
 });
