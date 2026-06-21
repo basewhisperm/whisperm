@@ -1541,9 +1541,27 @@ export class SellerInvitationService {
       const smsSent = await trySend("SMS", smsRecord);
       if (smsSent !== null) return smsSent;
     }
-    const failed = await this.deps.sellerInvitations!.update(scope, invitation.id, { status: "FAILED", metadata: { ...(invitation.metadata ?? {}), providerOutcome: "FAILED", failureReason: "INVITATION_PROVIDER_UNAVAILABLE" } });
-    await appendAudit(repositories, context, { action: "INVITATION_FAILED", targetType: "SELLER_INVITATION", targetId: failed.id, metadata: { captureId: failed.marketplaceCaptureId, channel: failed.channel, reason: "PROVIDER_UNAVAILABLE" } });
-    return failed;
+    const manualPending = await this.deps.sellerInvitations!.update(scope, invitation.id, {
+      status: "PENDING",
+      metadata: {
+        ...(invitation.metadata ?? {}),
+        providerOutcome: "MANUAL_DELIVERY_REQUIRED",
+        failureReason: "INVITATION_PROVIDER_UNAVAILABLE",
+      },
+    });
+
+    await appendAudit(repositories, context, {
+      action: "INVITATION_MANUAL_DELIVERY_REQUIRED",
+      targetType: "SELLER_INVITATION",
+      targetId: manualPending.id,
+      metadata: {
+        captureId: manualPending.marketplaceCaptureId,
+        channel: manualPending.channel,
+        reason: "PROVIDER_UNAVAILABLE",
+      },
+    });
+
+    return manualPending;
   }
 
   private async moveToInvited(context: ServiceContext, repositories: ServiceRepositories, capture: MarketplaceCaptureRecord): Promise<void> {
