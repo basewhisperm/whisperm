@@ -89,7 +89,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     const result = await service.createSellerInvitation({ tenantId: tenant.id, actorId: tenantUserId, correlation: { correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(), requestId: request.headers.get("x-request-id") ?? undefined } }, { tenantId: tenant.id, captureId: params.id, ...parsed.data });
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof ServiceError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
-    return NextResponse.json({ error: "Seller invitation failed" }, { status: 500 });
+    if (error instanceof ServiceError) {
+      return NextResponse.json({ ok: false, error: { message: error.message, code: error.code, details: error.details } }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : "Seller invitation failed";
+    return NextResponse.json({ ok: false, error: { message } }, { status: 500 });
   }
 }
