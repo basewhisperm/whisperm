@@ -1372,10 +1372,14 @@ export interface SellerInvitationProviderPorts {
   readonly now?: (() => Date) | undefined;
 }
 
-const contactFromCapture = (capture: MarketplaceCaptureRecord): { readonly phone?: string; readonly email?: string } => {
+const contactFromCapture = (capture: MarketplaceCaptureRecord, contact?: ContactRecord | null): { readonly phone?: string; readonly email?: string } => {
   const metadata = capture.metadata ?? {};
-  const phone = typeof metadata.sellerPhone === "string" && metadata.sellerPhone.trim().length > 0 ? normalizeSellerPhoneForMatching(metadata.sellerPhone) : undefined;
-  const email = typeof metadata.sellerEmail === "string" && metadata.sellerEmail.trim().length > 0 ? metadata.sellerEmail.trim() : undefined;
+  const metadataPhone = typeof metadata.sellerPhone === "string" && metadata.sellerPhone.trim().length > 0 ? normalizeSellerPhoneForMatching(metadata.sellerPhone) : undefined;
+  const contactPhone = normalizeSellerPhoneForMatching(contact?.phone ?? undefined);
+  const metadataEmail = typeof metadata.sellerEmail === "string" && metadata.sellerEmail.trim().length > 0 ? metadata.sellerEmail.trim() : undefined;
+  const contactEmail = typeof contact?.email === "string" && contact.email.trim().length > 0 ? contact.email.trim() : undefined;
+  const phone = metadataPhone ?? contactPhone;
+  const email = metadataEmail ?? contactEmail;
   return { ...(phone === undefined ? {} : { phone }), ...(email === undefined ? {} : { email }) };
 };
 
@@ -1431,7 +1435,9 @@ export class SellerInvitationService {
     const scope = contextToTenantScope(context);
     const capture = await this.deps.marketplaceCaptures.findById(scope, data.captureId);
     if (capture === null) throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation });
-    if (capture.contactId === undefined || capture.contactId === null || contactFromCapture(capture).phone === undefined) {
+    const linkedContact = capture.contactId === undefined || capture.contactId === null ? null : await this.deps.contacts.findById(scope, capture.contactId);
+    const contact = contactFromCapture(capture, linkedContact);
+    if (capture.contactId === undefined || capture.contactId === null || contact.phone === undefined) {
       throw new ServiceError({
         code: "SERVICE_INVALID_STATE_TRANSITION",
         message: "Seller phone is required before creating a Seller Acquisition invitation.",
@@ -1440,8 +1446,6 @@ export class SellerInvitationService {
         details: { missingRequirements: ["PHONE_REQUIRED"] },
       });
     }
-
-    const contact = contactFromCapture(capture);
     const notifications = this.deps.notifications;
     const initialChannel = resolveInviteChannel(contact, data.preferredChannel, notifications?.whatsappEnabled !== false);
     const now = notifications?.now?.() ?? new Date();
