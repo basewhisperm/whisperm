@@ -14,6 +14,14 @@ const deps = (store, options = {}) => ({
     async findById(scope, id) { return store.captures.get(`${scope.tenantId}:${id}`) ?? null; },
     async update(scope, id, input) { const c = store.captures.get(`${scope.tenantId}:${id}`); assert.ok(c); const u = { ...c, ...input, updatedAt: now }; store.captures.set(`${scope.tenantId}:${id}`, u); return u; },
   },
+  contacts: {
+    async findById(scope, id) {
+      const capture = Array.from(store.captures.values()).find((row) => row.tenantId === scope.tenantId && row.contactId === id);
+      if (!capture) return null;
+      const metadata = capture.metadata ?? {};
+      return { id, tenantId: scope.tenantId, name: metadata.sellerName ?? "Seller", phone: metadata.sellerPhone, email: metadata.sellerEmail, createdAt: now, updatedAt: now, metadata: {} };
+    },
+  },
   marketplaceClaimTokens: {
     async create(scope, input) { const row = { id: `token-${store.claimTokens.length + 1}`, tenantId: scope.tenantId, status: "PENDING", ...input, createdAt: now, updatedAt: now }; store.claimTokens.push(row); return row; },
     async findByTokenHash(scope, tokenHash) { return store.claimTokens.find((row) => row.tenantId === scope.tenantId && row.tokenHash === tokenHash) ?? null; },
@@ -48,12 +56,12 @@ test("missing delivery providers persists failed invitation and claim token for 
 
   const result = await service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id });
 
-  assert.equal(result.status, "FAILED");
+  assert.equal(result.status, "PENDING");
   assert.equal(result.channel, "WHATSAPP");
   assert.equal(store.claimTokens.length, 1);
   assert.equal(store.invitations.length, 1);
-  assert.equal(store.invitations[0].status, "FAILED");
-  assert.equal(store.audits.some((audit) => audit.action === "INVITATION_FAILED"), true);
+  assert.equal(store.invitations[0].status, "PENDING");
+  assert.equal(store.audits.some((audit) => audit.action === "INVITATION_MANUAL_DELIVERY_REQUIRED"), true);
 });
 test("preferredChannel EMAIL works when phone-qualified contact also has email", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email }, { preferredChannel: "EMAIL" }); assert.equal(r.result.channel, "EMAIL"); });
 test("preferredChannel WHATSAPP fails when phone missing", async () => { await assert.rejects(run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {}, { preferredChannel: "WHATSAPP" }), (e) => e instanceof ServiceError && e.message.includes("Seller phone")); });
@@ -101,10 +109,10 @@ test("provider delivery failure produces deterministic failure metadata", async 
   }, { preferredChannel: "EMAIL" });
 
   assert.equal(r.result.channel, "EMAIL");
-  assert.equal(r.result.status, "FAILED");
-  assert.equal(r.store.invitations[0].metadata.providerOutcome, "FAILED");
+  assert.equal(r.result.status, "PENDING");
+  assert.equal(r.store.invitations[0].metadata.providerOutcome, "MANUAL_DELIVERY_REQUIRED");
   assert.equal(r.store.invitations[0].metadata.failureReason, "INVITATION_PROVIDER_UNAVAILABLE");
-  assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FAILED"), true);
+  assert.equal(r.store.audits.some((a) => a.action === "INVITATION_MANUAL_DELIVERY_REQUIRED"), true);
 });
 
 
@@ -125,6 +133,6 @@ test("failed invitation does not schedule claim lifecycle jobs", async () => {
     email: { async send() { throw new Error("provider down"); } },
   }, { preferredChannel: "EMAIL" });
 
-  assert.equal(r.result.status, "FAILED");
+  assert.equal(r.result.status, "PENDING");
   assert.equal(r.store.scheduledLifecycle.length, 0);
 });
