@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import {
   PrismaAuditLogRepository,
+  PrismaContactRepository,
   PrismaDealsRepository,
   PrismaMarketplaceCaptureRepository,
   PrismaMarketplaceClaimTokenRepository,
@@ -19,6 +20,7 @@ import { sellerInvitationCreateRequestSchema } from "@whisperm/types";
 interface RouteContext { readonly params: { readonly id: string } }
 
 const serviceDependencies = () => ({
+  contacts: new PrismaContactRepository(prisma as unknown as PrismaPersistenceClient),
   marketplaceCaptures: new PrismaMarketplaceCaptureRepository(prisma as unknown as PrismaPersistenceClient),
   sellerInvitations: new PrismaSellerInvitationRepository(prisma as unknown as PrismaPersistenceClient),
   marketplaceClaimTokens: new PrismaMarketplaceClaimTokenRepository(prisma as unknown as PrismaPersistenceClient),
@@ -86,13 +88,47 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   } as unknown as ConstructorParameters<typeof SellerInvitationService>[0]);
 
   try {
-    const result = await service.createSellerInvitation({ tenantId: tenant.id, actorId: tenantUserId, correlation: { correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(), requestId: request.headers.get("x-request-id") ?? undefined } }, { tenantId: tenant.id, captureId: params.id, ...parsed.data });
+    const result = await service.createSellerInvitation(
+      {
+        tenantId: tenant.id,
+        actorId: tenantUserId,
+        correlation: {
+          correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(),
+          requestId: request.headers.get("x-request-id") ?? undefined,
+        },
+      },
+      { tenantId: tenant.id, captureId: params.id, ...parsed.data },
+    );
     return NextResponse.json(result);
   } catch (error) {
+    console.error("SELLER_INVITATION_ERROR", error);
+
     if (error instanceof ServiceError) {
-      return NextResponse.json({ ok: false, error: { message: error.message, code: error.code, details: error.details } }, { status: error.status });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+          },
+        },
+        { status: error.status },
+      );
     }
-    const message = error instanceof Error ? error.message : "Seller invitation failed";
-    return NextResponse.json({ ok: false, error: { message } }, { status: 500 });
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          message: error instanceof Error ? error.message : "Seller invitation failed",
+          stack:
+            process.env.NODE_ENV !== "production" && error instanceof Error
+              ? error.stack
+              : undefined,
+        },
+      },
+      { status: 500 },
+    );
   }
 }
