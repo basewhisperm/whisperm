@@ -618,6 +618,25 @@ const sellerPhoneForInput = (input: MarketplaceCaptureServiceInput): string | un
 const sellerEmailForInput = (input: MarketplaceCaptureServiceInput): string | undefined =>
   normalizeSellerEmailForMatching(input.sellerEmail ?? input.email);
 
+const sellerNameFingerprintForInput = (input: MarketplaceCaptureServiceInput): string | undefined => {
+  const cleaned = cleanSellerIdentity(input.sellerName).cleaned;
+  if (cleaned === undefined) return undefined;
+
+  const normalized = cleaned
+    .trim()
+    .toLowerCase()
+    .replace(/\b\d+?\s*(years?|months?)\s+on\s+jiji\b/giu, " ")
+    .replace(/\bsaved\b/giu, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  if (normalized.length < 3 || normalized === "saved") return undefined;
+
+  const source = (input.marketplaceSource ?? input.sourceMarketplace ?? sourceHost(listingUrlForCapture(input))).trim().toLowerCase();
+  return `${source}:${normalized}`;
+};
+
 const normalizeMarketplaceImageUrls = (value: unknown): readonly string[] | undefined => {
   if (!Array.isArray(value)) return undefined;
 
@@ -1820,12 +1839,25 @@ export class MarketplaceAcquisitionCaptureService {
       const [existing] = await repositories.contacts.findByEmails(tenantScope, [sellerEmail]);
       if (existing !== undefined) return { contact: existing, strategy: "email" };
     }
+    const sellerNameFingerprint = sellerNameFingerprintForInput(input);
+    if (sellerNameFingerprint !== undefined) {
+      const contacts = await repositories.contacts.list(tenantScope, { limit: 100 });
+      const existingBySellerName = contacts.items.find((contact) => {
+        const metadata = contact.metadata ?? {};
+        const acquisition = typeof metadata.marketplaceAcquisition === "object" && metadata.marketplaceAcquisition !== null
+          ? metadata.marketplaceAcquisition as Readonly<Record<string, unknown>>
+          : {};
+        return acquisition.sellerNameFingerprint === sellerNameFingerprint;
+      });
+      if (existingBySellerName !== undefined) return { contact: existingBySellerName, strategy: "profile" };
+    }
+
     const contact = contactRecordSchema.parse(await repositories.contacts.create(tenantScope, {
       tenantId: context.tenantId,
       email: sellerEmail ?? undefined,
       phone: sellerPhone,
       firstName: cleanSellerIdentity(input.sellerName).cleaned ?? undefined,
-      metadata: { marketplaceAcquisition: contactMarketplaceMetadata(input, cleanSellerIdentity(input.sellerName)) }
+      metadata: { marketplaceAcquisition: { ...contactMarketplaceMetadata(input, cleanSellerIdentity(input.sellerName)), sellerNameFingerprint: sellerNameFingerprintForInput(input) } }
     }));
     return { contact, strategy: "created" };
   }
