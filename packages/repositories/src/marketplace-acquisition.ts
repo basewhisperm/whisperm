@@ -5,7 +5,10 @@ import type { Page, PageRequest, PrismaPersistenceClient } from "./index.js";
 
 const isoDateSchema = z.string().datetime();
 const metadataSchema = z.record(z.string(), z.unknown()).default({});
-const decimalLikeSchema = z.preprocess((value) => (typeof value === "object" && value !== null && "toString" in value) ? String(value) : value, z.union([z.number(), z.string()]));
+export const decimalLikeSchema = z.preprocess(
+  (value) => (typeof value === "object" && value !== null && typeof (value as { toNumber?: unknown }).toNumber === "function") ? String(value) : value,
+  z.union([z.number(), z.string()]),
+);
 const pageRequestSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().min(1).optional(),
@@ -66,9 +69,12 @@ interface AnalyticsDelegate {
   findMany(args: { readonly where: PrismaWhere; readonly orderBy?: Readonly<Record<string, SortDirection>> }): Promise<readonly unknown[]>;
 }
 
-const normalizeRecord = (value: unknown): unknown => {
+export const normalizeRecord = (value: unknown): unknown => {
   if (value === null || typeof value !== "object") return value;
   if (value instanceof Date) return value.toISOString();
+  if (typeof (value as { toNumber?: unknown }).toNumber === "function") {
+    return (value as { toString(): string }).toString();
+  }
   if (Array.isArray(value)) return value.map(normalizeRecord);
   return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, normalizeRecord(nested)]));
 };

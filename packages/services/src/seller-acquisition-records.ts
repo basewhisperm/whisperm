@@ -22,6 +22,7 @@ import type { TenantScoped } from "@whisperm/types";
 export type SellerAcquisitionHealthStatus = "READY" | "ACTION_REQUIRED" | "BLOCKED" | "EXPIRED" | "COMPLETED";
 export type SellerAcquisitionNextAction = "REVEAL_PHONE" | "SEND_INVITATION" | "RETRY_INVITATION" | "WAIT_FOR_CLAIM" | "CONVERT_SELLER" | "CONVERT_INVENTORY" | "COMPLETE_ACQUISITION" | "NONE";
 export type SellerAcquisitionMissingRequirement = "PHONE_REQUIRED" | "DRAFT_INVENTORY_REQUIRED" | "CLAIM_REQUIRED" | "SELLER_CONVERSION_REQUIRED" | "INVENTORY_CONVERSION_REQUIRED";
+export type CaptureConfidence = "HIGH" | "MEDIUM" | "LOW";
 
 export interface SellerAcquisitionRecord {
   readonly capture: MarketplaceCaptureRecord;
@@ -37,6 +38,8 @@ export interface SellerAcquisitionRecord {
   readonly inventoryConversion: RenderConversionRecord | null;
   readonly activityTimeline: readonly ActivityRecord[];
   readonly currentStage: string;
+  readonly captureConfidence: CaptureConfidence;
+  readonly acquisitionScore: number;
   readonly healthStatus: SellerAcquisitionHealthStatus;
   readonly nextAction: SellerAcquisitionNextAction;
   readonly missingRequirements: readonly SellerAcquisitionMissingRequirement[];
@@ -74,6 +77,34 @@ const resolveImages = (capture: MarketplaceCaptureRecord, draftInventory: DraftI
   const metadata = metadataOf(capture);
   const images = stringArray(metadata.images);
   return images.length > 0 ? images : stringArray(metadata.imageUrls);
+};
+
+const resolveLocation = (capture: MarketplaceCaptureRecord): string | null => {
+  const metadata = metadataOf(capture);
+  return nonEmpty(metadata.location) ?? nonEmpty(metadata.listingLocation);
+};
+
+const priceIsPresent = (capture: MarketplaceCaptureRecord, draft: DraftInventoryRecord | null): boolean => {
+  const price = draft?.price ?? capture.price;
+  return price !== null && price !== undefined && price !== "";
+};
+
+export const computeCaptureConfidence = (input: { readonly phonePresent: boolean; readonly imagePresent: boolean; readonly titlePresent: boolean; readonly pricePresent: boolean; readonly locationPresent: boolean }): CaptureConfidence => {
+  if (!input.phonePresent) return "LOW";
+  if (input.imagePresent && input.titlePresent && input.pricePresent) return "HIGH";
+  if (input.titlePresent && (input.imagePresent || input.pricePresent || input.locationPresent)) return "MEDIUM";
+  return "LOW";
+};
+
+export const computeAcquisitionScore = (input: { readonly phonePresent: boolean; readonly imagePresent: boolean; readonly pricePresent: boolean; readonly titlePresent: boolean; readonly locationPresent: boolean; readonly sourcePresent: boolean }): number => {
+  let score = 0;
+  if (input.phonePresent) score += 35;
+  if (input.imagePresent) score += 20;
+  if (input.pricePresent) score += 15;
+  if (input.titlePresent) score += 15;
+  if (input.locationPresent) score += 10;
+  if (input.sourcePresent) score += 5;
+  return Math.min(100, score);
 };
 
 const isExpired = (capture: MarketplaceCaptureRecord, draft: DraftInventoryRecord | null, token: MarketplaceClaimTokenRecord | null): boolean =>
@@ -125,12 +156,18 @@ export class SellerAcquisitionRecordService {
     if (sellerConversion === null) missingRequirements.push("SELLER_CONVERSION_REQUIRED");
     if (inventoryConversion === null) missingRequirements.push("INVENTORY_CONVERSION_REQUIRED");
     const decision = this.decide(capture, draftInventory, latestInvitation, claimTokenStatus, ownershipAttestation, sellerConversion, inventoryConversion, phone);
+    const images = resolveImages(capture, draftInventory);
+    const titlePresent = nonEmpty(draftInventory?.title ?? capture.title) !== null;
+    const pricePresent = priceIsPresent(capture, draftInventory);
+    const locationPresent = resolveLocation(capture) !== null;
+    const sourcePresent = nonEmpty(draftInventory?.marketplaceSource) !== null || nonEmpty(capture.marketplaceSourceId) !== null;
+    const confidenceInput = { phonePresent: phone !== null, imagePresent: images.length > 0, titlePresent, pricePresent, locationPresent };
     return {
       capture,
       contact,
       deal,
       draftInventory,
-      images: resolveImages(capture, draftInventory),
+      images,
       latestInvitation,
       invitationHistory,
       claimTokenStatus,
@@ -139,6 +176,8 @@ export class SellerAcquisitionRecordService {
       inventoryConversion,
       activityTimeline,
       currentStage: stageFromDeal(deal, capture),
+      captureConfidence: computeCaptureConfidence(confidenceInput),
+      acquisitionScore: computeAcquisitionScore({ ...confidenceInput, sourcePresent }),
       healthStatus: decision.healthStatus,
       nextAction: decision.nextAction,
       missingRequirements,

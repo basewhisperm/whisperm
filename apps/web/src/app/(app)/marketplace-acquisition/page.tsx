@@ -68,10 +68,15 @@ function title(record: SellerAcquisitionRecord): string {
 function price(record: SellerAcquisitionRecord): string {
   const rawPrice = record.draftInventory?.price ?? record.capture.price;
   if (rawPrice === null || rawPrice === undefined || rawPrice === "") return "Price missing";
-  const currency = record.draftInventory?.currency ?? record.capture.currency ?? "USD";
+  if (typeof rawPrice === "string" && rawPrice.includes("[object")) return "Price missing";
+  const currency = record.draftInventory?.currency || record.capture.currency || "USD";
   const numericPrice = typeof rawPrice === "number" ? rawPrice : Number(rawPrice);
   if (!Number.isFinite(numericPrice)) return `${currency} ${String(rawPrice)}`;
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(numericPrice);
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(numericPrice);
+  } catch {
+    return `${currency} ${numericPrice}`;
+  }
 }
 
 function source(record: SellerAcquisitionRecord): string {
