@@ -5,10 +5,13 @@ import type { Page, PageRequest, PrismaPersistenceClient } from "./index.js";
 
 const isoDateSchema = z.string().datetime();
 const metadataSchema = z.record(z.string(), z.unknown()).default({});
-export const decimalLikeSchema = z.preprocess(
-  (value) => (typeof value === "object" && value !== null && typeof (value as { toNumber?: unknown }).toNumber === "function") ? String(value) : value,
-  z.union([z.number(), z.string()]),
-);
+// Defense-in-depth alongside the normalizeRecord fix below: the previous
+// check (`"toString" in value`) is true for ANY object -- Object.prototype
+// provides toString to everything -- so it provided no real protection if
+// this schema were ever parsed against a raw (non-normalized) Prisma row
+// directly. Checking for `.toNumber` specifically targets decimal.js
+// Decimal instances, the same signal normalizeRecord uses below.
+const decimalLikeSchema = z.preprocess((value) => (typeof value === "object" && value !== null && typeof (value as { toNumber?: unknown }).toNumber === "function") ? String(value) : value, z.union([z.number(), z.string()]));
 const pageRequestSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().min(1).optional(),
@@ -37,12 +40,15 @@ export const marketplaceCaptureRecordSchema = z.object({
 }).strict();
 export type MarketplaceCaptureRecord = z.output<typeof marketplaceCaptureRecordSchema>;
 export type CreateMarketplaceCaptureInput = TenantScoped & Pick<MarketplaceCaptureRecord, "listingUrl" | "title" | "status"> & Partial<Pick<MarketplaceCaptureRecord, "marketplaceSourceId" | "contactId" | "dealId" | "externalId" | "description" | "price" | "currency" | "sellerName" | "sellerProfileUrl" | "metadata">>;
+export type UpdateMarketplaceCaptureInput = Partial<Pick<MarketplaceCaptureRecord, "sellerName" | "sellerProfileUrl" | "description" | "price" | "currency" | "metadata">>;
 
 export interface MarketplaceAcquisitionRepository {
   createMarketplaceCapture(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>;
   findMarketplaceCaptureByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>;
   findMarketplaceCaptureByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null>;
   findMarketplaceCaptureByDealId(context: TenantScoped, dealId: string): Promise<MarketplaceCaptureRecord | null>;
+  findMarketplaceCaptureById(context: TenantScoped, id: string): Promise<MarketplaceCaptureRecord | null>;
+  updateMarketplaceCapture(context: TenantScoped, id: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>;
   updateMarketplaceCaptureMetadata(context: TenantScoped, id: string, metadata: Readonly<Record<string, unknown>>): Promise<MarketplaceCaptureRecord>;
   listMarketplaceCaptures(context: TenantScoped, pagination?: PageRequest): Promise<Page<MarketplaceCaptureRecord>>;
   getSellerAcquisitionAnalytics(input: SellerAcquisitionAnalyticsQuery): Promise<SellerAcquisitionAnalyticsResponse>;
@@ -69,9 +75,33 @@ interface AnalyticsDelegate {
   findMany(args: { readonly where: PrismaWhere; readonly orderBy?: Readonly<Record<string, SortDirection>> }): Promise<readonly unknown[]>;
 }
 
-export const normalizeRecord = (value: unknown): unknown => {
+const normalizeRecord = (value: unknown): unknown => {
   if (value === null || typeof value !== "object") return value;
   if (value instanceof Date) return value.toISOString();
+  // CONFIRMED ROOT CAUSE of the production bug where a card's price line
+  // rendered as the currency code followed by a literal object-stringification
+  // artifact (Object.prototype.toString's default output).
+  // Prisma `Decimal` fields (price is `Decimal? @db.Decimal(18,4)`) are
+  // typeof "object" but are NOT plain data objects -- they're decimal.js
+  // instances whose own enumerable properties are internal digit-storage
+  // fields ({ s: sign, e: exponent, d: digits[] }), not the numeric value
+  // itself. Without this check, such a value falls through to the generic
+  // branch below, which does Object.fromEntries(Object.entries(value)) --
+  // this silently converts the Decimal into a PLAIN object holding only
+  // those internal {s, e, d} fields, discarding its prototype (and with it,
+  // its custom toString()). That corrupted plain object then survives
+  // decimalLikeSchema's preprocessor in marketplaceCaptureRecordSchema
+  // (which only checks `"toString" in value` -- true for ANY object, since
+  // it's inherited from Object.prototype) and gets stringified via the
+  // default Object.prototype.toString, producing that object-stringification
+  // artifact as a literal string. That string is valid against
+  // z.union([z.number(), z.string()]), so it passes validation and is
+  // stored as the record's price -- which is exactly what page.tsx's
+  // price() formatter then renders right after the currency code.
+  //
+  // Fix: detect decimal.js instances by their .toNumber() method (a stable,
+  // specific signal no plain object has) and convert to a string BEFORE the
+  // generic object-walk below, so the real numeric value is preserved.
   if (typeof (value as { toNumber?: unknown }).toNumber === "function") {
     return (value as { toString(): string }).toString();
   }
@@ -94,33 +124,33 @@ const pageArgs = (page?: PageRequest): { readonly take: number; readonly cursor?
   return parsed.cursor === undefined ? { take: (parsed.limit ?? 25) + 1 } : { take: (parsed.limit ?? 25) + 1, cursor: parsed.cursor };
 };
 
-const paginate = (items: readonly MarketplaceCaptureRecord[], limit: number): Page<MarketplaceCaptureRecord> => {
-  const pageItems = items.slice(0, limit);
-  const extra = items.length > limit;
-  const last = pageItems[pageItems.length - 1];
-  return extra && last !== undefined ? { items: pageItems, nextCursor: last.id } : { items: pageItems };
+const paginate = <T extends { readonly id: string }>(items: readonly T[], limit: number): Page<T> => {
+  const page = items.slice(0, limit);
+  if (items.length <= limit) return { items: page };
+  const last = page[page.length - 1];
+  return last === undefined ? { items: page } : { items: page, nextCursor: last.id };
 };
 
 const mapPrismaError = (error: unknown): never => {
-  const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : undefined;
+  const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : undefined;
   if (code === "P2002") throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Marketplace capture already exists", status: 409 });
   if (error instanceof PersistenceError) throw error;
-  throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Marketplace acquisition repository operation failed", status: 503 });
+  throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Marketplace capture operation failed", status: 503 });
 };
 
 export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquisitionRepository {
   private readonly captures: MarketplaceCaptureDelegate;
-  private readonly draftInventories: AnalyticsDelegate;
   private readonly invitations: AnalyticsDelegate;
   private readonly claimTokens: AnalyticsDelegate;
+  private readonly draftInventories: AnalyticsDelegate;
   private readonly attestations: AnalyticsDelegate;
   private readonly renderConversions: AnalyticsDelegate;
 
   constructor(prisma: PrismaPersistenceClient) {
-    this.captures = prisma.marketplaceCapture as MarketplaceCaptureDelegate;
-    this.draftInventories = prisma.draftInventory as AnalyticsDelegate;
+    this.captures = prisma.marketplaceCapture as unknown as MarketplaceCaptureDelegate;
     this.invitations = prisma.marketplaceSellerInvitation as AnalyticsDelegate;
     this.claimTokens = prisma.marketplaceClaimToken as AnalyticsDelegate;
+    this.draftInventories = prisma.draftInventory as AnalyticsDelegate;
     this.attestations = prisma.marketplaceOwnershipAttestation as AnalyticsDelegate;
     this.renderConversions = prisma.renderConversion as AnalyticsDelegate;
   }
@@ -152,13 +182,25 @@ export class PrismaMarketplaceAcquisitionRepository implements MarketplaceAcquis
     return result === null ? null : parseRecord(result);
   }
 
-  async updateMarketplaceCaptureMetadata(context: TenantScoped, id: string, metadata: Readonly<Record<string, unknown>>): Promise<MarketplaceCaptureRecord> {
+  async findMarketplaceCaptureById(context: TenantScoped, id: string): Promise<MarketplaceCaptureRecord | null> {
+    ensureContext(context);
+    const result = await this.captures.findFirst({ where: byTenantId(context, id) });
+    return result === null ? null : parseRecord(result);
+  }
+
+  async updateMarketplaceCapture(context: TenantScoped, id: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord> {
     ensureContext(context);
     try {
-      return parseRecord(await this.captures.update({ where: byTenantId(context, id), data: { metadata } }));
+      return parseRecord(await this.captures.update({ where: byTenantId(context, id), data: dataWithDefined(input as Readonly<Record<string, unknown>>) }));
     } catch (error) {
       return mapPrismaError(error);
     }
+  }
+
+  // Backward-compatible wrapper kept so existing callers (claim-lifecycle,
+  // marketplace-capture-completion, etc.) do not need to be updated.
+  async updateMarketplaceCaptureMetadata(context: TenantScoped, id: string, metadata: Readonly<Record<string, unknown>>): Promise<MarketplaceCaptureRecord> {
+    return this.updateMarketplaceCapture(context, id, { metadata });
   }
 
   async listMarketplaceCaptures(context: TenantScoped, pagination?: PageRequest): Promise<Page<MarketplaceCaptureRecord>> {
