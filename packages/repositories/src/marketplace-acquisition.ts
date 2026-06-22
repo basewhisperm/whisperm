@@ -5,13 +5,7 @@ import type { Page, PageRequest, PrismaPersistenceClient } from "./index.js";
 
 const isoDateSchema = z.string().datetime();
 const metadataSchema = z.record(z.string(), z.unknown()).default({});
-// Defense-in-depth alongside the normalizeRecord fix below: the previous
-// check (`"toString" in value`) is true for ANY object -- Object.prototype
-// provides toString to everything -- so it provided no real protection if
-// this schema were ever parsed against a raw (non-normalized) Prisma row
-// directly. Checking for `.toNumber` specifically targets decimal.js
-// Decimal instances, the same signal normalizeRecord uses below.
-const decimalLikeSchema = z.preprocess((value) => (typeof value === "object" && value !== null && typeof (value as { toNumber?: unknown }).toNumber === "function") ? String(value) : value, z.union([z.number(), z.string()]));
+export const decimalLikeSchema = z.preprocess((value) => (typeof value === "object" && value !== null && typeof (value as { toNumber?: unknown }).toNumber === "function") ? String(value) : value, z.union([z.number(), z.string()]));
 const pageRequestSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().min(1).optional(),
