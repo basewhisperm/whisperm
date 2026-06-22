@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { PrismaContactRepository } from "@whisperm/repositories";
 
-const CONTACT_STAGES = new Set(["PROSPECT", "QUALIFIED", "PROPOSAL", "ENGAGEMENT", "RENEWAL", "INACTIVE"]);
+type ContactStage = "PROSPECT" | "QUALIFIED" | "PROPOSAL" | "ENGAGEMENT" | "RENEWAL" | "INACTIVE";
 
 function nullableString(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
@@ -14,13 +14,25 @@ function nullableString(value: unknown): string | null | undefined {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeStage(
-  value: unknown,
-): "PROSPECT" | "QUALIFIED" | "PROPOSAL" | "ENGAGEMENT" | "RENEWAL" | "INACTIVE" | undefined {
+function normalizeStage(value: unknown): ContactStage | undefined {
   if (typeof value !== "string") return undefined;
 
-  const normalized = value.trim().toUpperCase();
-  return CONTACT_STAGES.has(normalized) ? normalized : undefined;
+  switch (value.trim().toUpperCase()) {
+    case "PROSPECT":
+      return "PROSPECT";
+    case "QUALIFIED":
+      return "QUALIFIED";
+    case "PROPOSAL":
+      return "PROPOSAL";
+    case "ENGAGEMENT":
+      return "ENGAGEMENT";
+    case "RENEWAL":
+      return "RENEWAL";
+    case "INACTIVE":
+      return "INACTIVE";
+    default:
+      return undefined;
+  }
 }
 
 export async function GET() {
