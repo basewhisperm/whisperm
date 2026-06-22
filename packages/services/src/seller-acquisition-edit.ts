@@ -1,8 +1,7 @@
 import { z } from "zod";
 
 import type { TenantScoped } from "@whisperm/types";
-import type { MarketplaceAcquisitionRepository } from "./marketplace-acquisition.js";
-import type { DraftInventoryRepository } from "../index.js";
+import type { DraftInventoryRepository, MarketplaceAcquisitionRepository } from "@whisperm/repositories";
 
 export const editExtractInputSchema = z.object({
   title:       z.string().min(1).max(300).optional(),
