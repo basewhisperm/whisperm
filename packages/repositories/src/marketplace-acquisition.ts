@@ -72,30 +72,6 @@ interface AnalyticsDelegate {
 const normalizeRecord = (value: unknown): unknown => {
   if (value === null || typeof value !== "object") return value;
   if (value instanceof Date) return value.toISOString();
-  // CONFIRMED ROOT CAUSE of the production bug where a card's price line
-  // rendered as the currency code followed by a literal object-stringification
-  // artifact (Object.prototype.toString's default output).
-  // Prisma `Decimal` fields (price is `Decimal? @db.Decimal(18,4)`) are
-  // typeof "object" but are NOT plain data objects -- they're decimal.js
-  // instances whose own enumerable properties are internal digit-storage
-  // fields ({ s: sign, e: exponent, d: digits[] }), not the numeric value
-  // itself. Without this check, such a value falls through to the generic
-  // branch below, which does Object.fromEntries(Object.entries(value)) --
-  // this silently converts the Decimal into a PLAIN object holding only
-  // those internal {s, e, d} fields, discarding its prototype (and with it,
-  // its custom toString()). That corrupted plain object then survives
-  // decimalLikeSchema's preprocessor in marketplaceCaptureRecordSchema
-  // (which only checks `"toString" in value` -- true for ANY object, since
-  // it's inherited from Object.prototype) and gets stringified via the
-  // default Object.prototype.toString, producing that object-stringification
-  // artifact as a literal string. That string is valid against
-  // z.union([z.number(), z.string()]), so it passes validation and is
-  // stored as the record's price -- which is exactly what page.tsx's
-  // price() formatter then renders right after the currency code.
-  //
-  // Fix: detect decimal.js instances by their .toNumber() method (a stable,
-  // specific signal no plain object has) and convert to a string BEFORE the
-  // generic object-walk below, so the real numeric value is preserved.
   if (typeof (value as { toNumber?: unknown }).toNumber === "function") {
     return (value as { toString(): string }).toString();
   }
