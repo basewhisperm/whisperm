@@ -1599,34 +1599,31 @@ export class MarketplaceAcquisitionCaptureService {
       const firstInput = listingInputs[0] ?? data;
       const firstCapture = await this.createOrMatchCapture(repositories, context, tenantScope, firstInput, contactResult.contact.id);
       const dealResult = await this.resolveDeal(repositories, context, data, firstCapture.capture, contactResult.contact.id, capturedStage.id, listingInputs.length);
-      const captures: MarketplaceCaptureRecord[] = [];
-      const createdCaptureIds: string[] = [];
-      const matchedCaptureIds: string[] = [];
+      const finalCapture = firstCapture.capture.dealId === dealResult.deal.id
+        ? firstCapture.capture
+        : await repositories.marketplaceCaptures.update(tenantScope, firstCapture.capture.id, { dealId: dealResult.deal.id });
+      const createdCaptureIds = firstCapture.created ? [finalCapture.id] : [];
+      const matchedCaptureIds = firstCapture.created ? [] : [finalCapture.id];
       const draftInventoryIds: string[] = [];
       for (const listingInput of listingInputs) {
-        const captured = listingInput === firstInput ? firstCapture : await this.createOrMatchCapture(repositories, context, tenantScope, listingInput, contactResult.contact.id);
-        if (captured.created) createdCaptureIds.push(captured.capture.id); else matchedCaptureIds.push(captured.capture.id);
-        const finalCapture = captured.capture.dealId === dealResult.deal.id ? captured.capture : await repositories.marketplaceCaptures.update(tenantScope, captured.capture.id, { dealId: dealResult.deal.id });
-        captures.push(finalCapture);
         const draftInventory = await repositories.draftInventories.upsertForCapture(tenantScope, {
           tenantId: context.tenantId,
           marketplaceCaptureId: finalCapture.id,
           contactId: contactResult.contact.id,
           dealId: dealResult.deal.id,
-          title: finalCapture.title,
-          description: finalCapture.description,
+          title: listingInput.title,
+          description: listingInput.description,
           price: marketplacePriceForDecimal(listingInput),
-          currency: finalCapture.currency,
+          currency: listingInput.currency,
           category: marketplaceCategoryForDraft(listingInput),
           images: marketplaceImagesForDraft(listingInput),
-          listingUrl: finalCapture.listingUrl,
+          listingUrl: listingUrlForCapture(listingInput),
           marketplaceSource: marketplaceSourceForDraft(listingInput),
-          marketplaceListingId: finalCapture.externalId ?? undefined,
+          marketplaceListingId: externalIdForCapture(listingInput),
           status: "DRAFT",
         });
         draftInventoryIds.push(draftInventory.id);
       }
-      const finalCapture = captures[0] ?? firstCapture.capture;
       const draftInventoryId = draftInventoryIds[0] ?? "";
       const sellerNameCleaned = cleanSellerIdentity(data.sellerName).cleaned;
       const sellerPortfolioValue = listingInputs.reduce((sum, item) => sum + Number(marketplacePriceForDecimal(item) ?? 0), 0);
