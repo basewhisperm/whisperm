@@ -54,13 +54,19 @@ export async function POST(request: NextRequest) {
   const context = { tenantId: tenant.id };
   const repo = new PrismaContactRepository(prisma as any);
 
+  const firstName = nullableString(body.firstName);
+  const lastName = nullableString(body.lastName);
+  const email = nullableString(body.email);
+  const phone = nullableString(body.phone);
+  const stage = normalizeStage(body.stage);
+
   const contact = await repo.create(context, {
     tenantId: tenant.id,
-    firstName: nullableString(body.firstName) ?? undefined,
-    lastName: nullableString(body.lastName) ?? undefined,
-    email: nullableString(body.email) ?? undefined,
-    phone: nullableString(body.phone) ?? undefined,
-    stage: normalizeStage(body.stage),
+    ...(firstName !== undefined ? { firstName } : {}),
+    ...(lastName !== undefined ? { lastName } : {}),
+    ...(email !== undefined ? { email } : {}),
+    ...(phone !== undefined ? { phone } : {}),
+    ...(stage !== undefined ? { stage } : {}),
   });
 
   return NextResponse.json(contact, { status: 201 });
@@ -90,14 +96,20 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Contact not found" }, { status: 404 });
   }
 
+  const firstName = nullableString(body.firstName);
+  const lastName = nullableString(body.lastName);
+  const email = nullableString(body.email);
+  const phone = nullableString(body.phone);
+  const stage = normalizeStage(body.stage);
+
   try {
     const contact = await repo.update(context, id, {
       expectedUpdatedAt,
-      firstName: nullableString(body.firstName),
-      lastName: nullableString(body.lastName),
-      email: nullableString(body.email),
-      phone: nullableString(body.phone),
-      stage: normalizeStage(body.stage),
+      ...(firstName !== undefined ? { firstName } : {}),
+      ...(lastName !== undefined ? { lastName } : {}),
+      ...(email !== undefined ? { email } : {}),
+      ...(phone !== undefined ? { phone } : {}),
+      ...(stage !== undefined ? { stage } : {}),
     });
 
     return NextResponse.json({ contact });
