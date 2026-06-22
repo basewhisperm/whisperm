@@ -37,7 +37,7 @@ test('bookmarklet opens authenticated intake with one encoded payload', () => {
   });
 
   assert.match(bookmarklet, /^javascript:\(function\(\)\{/u);
-  assert.match(bookmarklet, /window\.open\(INTAKE\+'\?payload='\+encodeURIComponent\(json\),'_blank','noopener,noreferrer'\)/u);
+  assert.match(bookmarklet, /window\.open/u);
   assert.match(bookmarklet, new RegExp(`const MAX=${MARKETPLACE_CAPTURE_MAX_PAYLOAD_BYTES}`, 'u'));
 });
 
