@@ -208,3 +208,14 @@ test('extractor captures portfolio listing cards when present', () => {
   assert.ok(payload.portfolioListings.length >= 2);
 });
 
+
+test('phone extraction captures compact Ghana mobile numbers revealed in Jiji body text', () => {
+  const document = createMockDocument({
+    bodyText: 'Show contact 0540320112 Copy 0558368943 Copy',
+  });
+
+  const payload = extractMarketplaceCapturePayload(document, listingUrl, 'test-agent');
+
+  assert.equal(payload.phone, '0540320112');
+});
+

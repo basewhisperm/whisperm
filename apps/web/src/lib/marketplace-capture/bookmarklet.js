@@ -72,7 +72,7 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
 
   const bodyText = clean(doc.body?.innerText || '', 5000);
   const email = clean((bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu) || [])[0] || '', 320);
-  const phoneRegex = /(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+?\d[\d\s().-]{7,}\d)/u;
+  const phoneRegex = /(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+233|233|0)\d{9}|(?:\+?\d[\d\s().-]{7,}\d)/u;
   const telPhone = clean(doc.querySelector('a[href^="tel:"]')?.getAttribute('href')?.replace(/^tel:/iu, '') || '', 64);
   const contactText = selectorText([
     '[data-testid*="phone" i]',
