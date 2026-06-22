@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { PrismaContactRepository } from "@whisperm/repositories";
 
-const CONTACT_STAGES = new Set(["PROSPECT", "QUALIFIED", "PROPOSAL", "ENGAGEMENT", "RENEWAL"]);
+const CONTACT_STAGES = new Set(["PROSPECT", "QUALIFIED", "PROPOSAL", "ENGAGEMENT", "RENEWAL", "INACTIVE"]);
 
 function nullableString(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
@@ -14,7 +14,9 @@ function nullableString(value: unknown): string | null | undefined {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeStage(value: unknown): string | undefined {
+function normalizeStage(
+  value: unknown,
+): "PROSPECT" | "QUALIFIED" | "PROPOSAL" | "ENGAGEMENT" | "RENEWAL" | "INACTIVE" | undefined {
   if (typeof value !== "string") return undefined;
 
   const normalized = value.trim().toUpperCase();
