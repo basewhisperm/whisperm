@@ -56,7 +56,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     await editService.editExtract({ tenantId: tenant.id }, context.params.captureId, body);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return errorResponse(error.errors[0]?.message ?? "Invalid input", 400);
+      return errorResponse(error.issues[0]?.message ?? "Invalid input", 400);
     }
     const asErr = error as { readonly status?: number; readonly message?: string };
     if (asErr.status === 404) return errorResponse("Marketplace capture not found.", 404);
