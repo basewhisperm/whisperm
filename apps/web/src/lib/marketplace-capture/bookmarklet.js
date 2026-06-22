@@ -72,24 +72,53 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
 
   const bodyText = clean(doc.body?.innerText || '', 5000);
   const email = clean((bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu) || [])[0] || '', 320);
+  const phoneRegex = /(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+?\d[\d\s().-]{7,}\d)/u;
   const telPhone = clean(doc.querySelector('a[href^="tel:"]')?.getAttribute('href')?.replace(/^tel:/iu, '') || '', 64);
+  const contactText = selectorText([
+    '[data-testid*="phone" i]',
+    '[data-testid*="contact" i]',
+    '[class*="phone" i]',
+    '[class*="contact" i]',
+    '.b-seller-block',
+    '.b-seller-block__contacts',
+    '.b-seller-block__phone',
+  ], 2000);
   const sellerBlockText = clean(doc.querySelector('.b-seller-block')?.textContent || '', 2000);
-  const phoneSearchText = /(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+?\d[\d\s().-]{7,}\d)/u.test(sellerBlockText) ? sellerBlockText : bodyText;
-  const phone = telPhone || clean((phoneSearchText.match(/(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}/u) || phoneSearchText.match(/(?:\+?\d[\d\s().-]{7,}\d)/u) || [])[0] || '', 64);
+  const phoneSearchText = phoneRegex.test(contactText) ? contactText : (phoneRegex.test(sellerBlockText) ? sellerBlockText : bodyText);
+  const phone = telPhone || clean((phoneSearchText.match(phoneRegex) || [])[0] || '', 64);
 
   const price = clean((offer?.priceCurrency ? `${offer.priceCurrency} ` : '') + (offer?.price || ''), 120) || meta('product:price:amount') || meta('og:price:amount') || selectorText([
     '.qa-advert-price-view-value',
-    '.qa-advert-price-view',
     '[itemprop="price"]',
-    '[class*="price" i]',
-    '[data-testid*="price" i]'
+    '[data-testid*="price" i]',
+    '.qa-advert-price-view',
+    '[class*="price" i]'
   ], 120);
+  const inferCurrency = (value) => /(?:GH₵|GH¢|GHS|₵)/iu.test(value || '') ? 'GHS' : '';
+  const currency = clean(offer?.priceCurrency || meta('product:price:currency') || inferCurrency(price), 16);
 
   const images = arr(product?.image).concat([meta('og:image'), meta('twitter:image')], Array.from(doc.querySelectorAll('[itemprop="image"], img')).map((img) => img.getAttribute('content') || img.getAttribute('src'))).map((url) => { try { return new URL(clean(String(url), 2000), href).toString(); } catch { return clean(String(url), 2000); } }).filter(Boolean);
   const sellerName = clean(product?.brand?.name, 255) || selectorText(['[itemprop="seller"]', '.b-seller-block__name', '[rel="author"]', 'a[href*="profile" i]', 'a[href*="seller" i]', '[class*="seller" i]'], 255);
   const sellerProfileUrl = selectorHref(['a[href*="seller" i]', 'a[href*="profile" i]', '[rel="author"]']);
 
-  const portfolioListings = [];
+  const portfolioListings = Array.from(doc.querySelectorAll('a[href]')).map((link) => {
+    const listingUrl = selectorHref([link.matches ? '' : '']);
+    const hrefValue = clean(link.getAttribute('href') || '', 2000);
+    let absoluteUrl = '';
+    try { absoluteUrl = new URL(hrefValue, href).toString(); } catch { absoluteUrl = hrefValue; }
+    const title = clean(link.textContent || '', 300);
+    const priceMatch = title.match(/(?:GH₵|GH¢|GHS|₵|USD|\$)\s?[\d,.]+/iu);
+    const priceText = clean((priceMatch || [])[0] || '', 120);
+    return {
+      listingUrl: absoluteUrl || undefined,
+      marketplaceListingId: deriveMarketplaceListingId(absoluteUrl),
+      title,
+      price: priceText || undefined,
+      priceText: priceText || undefined,
+      currency: inferCurrency(priceText) || undefined,
+      metadata: { source: 'bookmarklet-link' },
+    };
+  }).filter((item) => item.title && item.listingUrl && item.listingUrl !== href).slice(0, 25);
 
   const strategy = product ? 'jsonld' : (meta('og:title') || meta('og:description') ? 'opengraph' : 'fallback');
   const productMicrodataCount = doc.querySelectorAll('[itemtype*="schema.org/Product"]').length;
@@ -106,7 +135,7 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
     description: clean(product?.description, 1000) || meta('og:description') || meta('description'),
     priceText: price,
     price,
-    currency: clean(offer?.priceCurrency || meta('product:price:currency'), 16),
+    currency,
     images: Array.from(new Set(images)).slice(0, 6),
     imageUrls: Array.from(new Set(images)).slice(0, 6),
     category: clean(product?.category, 255) || meta('product:category') || selectorText(['[itemprop="category"]', '[class*="category" i]'], 255),
@@ -134,28 +163,54 @@ export function encodeMarketplaceCapturePayload(payload) {
 
 export function createMarketplaceCaptureBookmarklet(options) {
   const intakeUrlLiteral = JSON.stringify(options.intakeUrl);
-
-  const source = [
-    `const INTAKE=${intakeUrlLiteral};`,
-    `const MAX=${marketplaceCaptureMaxPayloadBytes};`,
-    `const clean=${clean.toString()};`,
-    `const compoundSecondLevelHostSuffixes=new Set(${JSON.stringify([...compoundSecondLevelHostSuffixes])});`,
-    detectMarketplaceSource.toString(),
-    deriveMarketplaceListingId.toString(),
-    extractMarketplaceCapturePayload.toString(),
-    "const reveal=()=>{const c=document.querySelector('a.js-show-contact,a.qa-show-contact,a.cy-show-contact');if(c){try{c.scrollIntoView({block:'center'});['mouseover','mousedown','mouseup','click'].forEach(t=>c.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window})))}catch{}}};",
-    "const finish=()=>{",
-    "const payload=extractMarketplaceCapturePayload(document,location,(navigator&&navigator.userAgent)||'');",
-    "const json=JSON.stringify(payload);",
-    "if(new TextEncoder().encode(json).length>MAX){alert('WhispeRM capture is too large. Capture a single public listing page and try again.');return}",
-    "if(payload.looksLikeGridPage&&!confirm('This looks like a search results page, not a single listing. Capture anyway?')){return}",
-    "window.open(INTAKE+'?payload='+encodeURIComponent(json),'_blank','noopener,noreferrer');",
-    "};",
-    "reveal();",
-    "setTimeout(finish,2500);",
-  ].join("");
-
+  const source = String.raw`
+const INTAKE=__INTAKE_URL__;
+const MAX=12000;
+const clean=(value,limit=500)=>typeof value==="string"?value.replace(/\s+/gu," ").trim().slice(0,limit):"";
+const suffixes=new Set(["com","co","org","net","gov","edu","ac"]);
+const detectMarketplaceSource=(url)=>{try{const segments=new URL(url).hostname.toLowerCase().replace(/^www\./u,"").split(".");const lastTwo=segments.slice(-2);return segments.length>2&&suffixes.has(lastTwo[0])?segments.slice(-3).join("."):lastTwo.join(".")}catch{return"unknown"}};
+const deriveMarketplaceListingId=(url)=>{try{const parsed=new URL(url);for(const key of["listingId","listing_id","itemId","item_id","id"]){const value=clean(parsed.searchParams.get(key)||"",255);if(value)return value}return clean(parsed.pathname.split("/").filter(Boolean).pop()||"",255)||undefined}catch{return undefined}};
+const extractMarketplaceCapturePayload=(doc,locationLike,userAgent="")=>{
+  const href=clean(locationLike.href,2000);
+  const hostname=clean(locationLike.hostname,255).toLowerCase();
+  const meta=(name)=>clean(doc.querySelector("meta[property=\"" + name + "\"],meta[name=\"" + name + "\"]")?.getAttribute("content")||"",1000);
+  const arr=(value)=>Array.isArray(value)?value:[value];
+  const typeOf=(value)=>arr(value&&value["@type"]).map((type)=>clean(String(type),80).toLowerCase());
+  const findSchema=(value,depth=0,names=["product","offer"])=>{
+    if(!value||depth>4)return null;
+    if(Array.isArray(value)){for(const item of value.slice(0,20)){const found=findSchema(item,depth+1,names);if(found)return found}return null}
+    if(typeof value==="object"){if(typeOf(value).some((type)=>names.includes(type)))return value;if(value["@graph"])return findSchema(value["@graph"],depth+1,names)}
+    return null;
+  };
+  let product=null;
+  for(const script of Array.from(doc.querySelectorAll('script[type="application/ld+json"]')).slice(0,8)){try{product=findSchema(JSON.parse(script.textContent||"null"))}catch{}if(product)break}
+  const offer=Array.isArray(product&&product.offers)?product.offers[0]:product&&product.offers;
+  const selectorText=(selectors,limit=500)=>{for(const selector of selectors){const value=clean(doc.querySelector(selector)?.textContent||"",limit);if(value)return value}return""};
+  const selectorHref=(selectors)=>{for(const selector of selectors){const value=clean(doc.querySelector(selector)?.getAttribute("href")||"",2000);if(value){try{return new URL(value,href).toString()}catch{return value}}}return""};
+  const bodyText=clean(doc.body?.innerText||"",5000);
+  const email=clean((bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu)||[])[0]||"",320);
+  const phoneRegex=/(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+?\d[\d\s().-]{7,}\d)/u;
+  const telPhone=clean(doc.querySelector('a[href^="tel:"]')?.getAttribute("href")?.replace(/^tel:/iu,"")||"",64);
+  const contactText=selectorText(['[data-testid*="phone" i]','[data-testid*="contact" i]','[class*="phone" i]','[class*="contact" i]','.b-seller-block','.b-seller-block__contacts','.b-seller-block__phone'],2000);
+  const sellerBlockText=clean(doc.querySelector(".b-seller-block")?.textContent||"",2000);
+  const phoneSearchText=phoneRegex.test(contactText)?contactText:(phoneRegex.test(sellerBlockText)?sellerBlockText:bodyText);
+  const phone=telPhone||clean((phoneSearchText.match(phoneRegex)||[])[0]||"",64);
+  const price=clean((offer?.priceCurrency ? offer.priceCurrency + " " : "")+(offer?.price||""),120)||meta("product:price:amount")||meta("og:price:amount")||selectorText([".qa-advert-price-view-value",'[itemprop="price"]','[data-testid*="price" i]',".qa-advert-price-view",'[class*="price" i]'],120);
+  const inferCurrency=(value)=>/(?:GH₵|GH¢|GHS|₵)/iu.test(value||"")?"GHS":"";
+  const currency=clean(offer?.priceCurrency||meta("product:price:currency")||inferCurrency(price),16);
+  const images=arr(product?.image).concat([meta("og:image"),meta("twitter:image")],Array.from(doc.querySelectorAll('[itemprop="image"], img')).map((img)=>img.getAttribute("content")||img.getAttribute("src"))).map((url)=>{try{return new URL(clean(String(url),2000),href).toString()}catch{return clean(String(url),2000)}}).filter(Boolean);
+  const sellerName=clean(product?.brand?.name,255)||selectorText(['[itemprop="seller"]',".b-seller-block__name",'[rel="author"]','a[href*="profile" i]','a[href*="seller" i]','[class*="seller" i]'],255);
+  const sellerProfileUrl=selectorHref(['a[href*="seller" i]','a[href*="profile" i]','[rel="author"]']);
+  const portfolioListings=Array.from(doc.querySelectorAll("a[href]")).map((link)=>{const hrefValue=clean(link.getAttribute("href")||"",2000);let absoluteUrl="";try{absoluteUrl=new URL(hrefValue,href).toString()}catch{absoluteUrl=hrefValue}const title=clean(link.textContent||"",300);const priceMatch=title.match(/(?:GH₵|GH¢|GHS|₵|USD|\$)\s?[\d,.]+/iu);const priceText=clean((priceMatch||[])[0]||"",120);return{listingUrl:absoluteUrl||undefined,marketplaceListingId:deriveMarketplaceListingId(absoluteUrl),title,price:priceText||undefined,priceText:priceText||undefined,currency:inferCurrency(priceText)||undefined,metadata:{source:"bookmarklet-link"}}}).filter((item)=>item.title&&item.listingUrl&&item.listingUrl!==href).slice(0,25);
+  const strategy=product?"jsonld":(meta("og:title")||meta("og:description")?"opengraph":"fallback");
+  const productMicrodataCount=doc.querySelectorAll('[itemtype*="schema.org/Product"]').length;
+  return{sourceUrl:href,sourceHost:hostname,listingUrl:href,marketplaceSource:detectMarketplaceSource(href),sourceMarketplace:detectMarketplaceSource(href),marketplaceListingId:deriveMarketplaceListingId(href),title:clean(product?.name,300)||meta("og:title")||clean(doc.title,300),description:clean(product?.description,1000)||meta("og:description")||meta("description"),priceText:price,price,currency,images:Array.from(new Set(images)).slice(0,6),imageUrls:Array.from(new Set(images)).slice(0,6),category:clean(product?.category,255)||meta("product:category")||selectorText(['[itemprop="category"]','[class*="category" i]'],255),sellerName,rawSellerText:sellerName||undefined,sellerProfileUrl,marketplaceIdentifier:phone||sellerProfileUrl||sellerName||undefined,phone:phone||undefined,email:email||undefined,location:selectorText(['[itemprop="address"]','[class*="location" i]','[data-testid*="location" i]'],255)||undefined,capturedAt:new Date().toISOString(),pageUrl:href,userAgent:clean(userAgent,1024)||undefined,rawExtract:{strategy},portfolioListings,looksLikeGridPage:productMicrodataCount>1};
+};
+const reveal=()=>{for(const c of Array.from(document.querySelectorAll('a.js-show-contact,a.qa-show-contact,a.cy-show-contact,button[class*="phone" i],button[class*="contact" i],[data-testid*="phone" i],[data-testid*="contact" i]')).slice(0,3)){try{c.scrollIntoView({block:"center"});["mouseover","mousedown","mouseup","click"].forEach((t)=>c.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window})))}catch{}}};
+const finish=()=>{const payload=extractMarketplaceCapturePayload(document,location,(navigator&&navigator.userAgent)||"");const json=JSON.stringify(payload);if(new TextEncoder().encode(json).length>MAX){alert("WhispeRM capture is too large. Capture a single public listing page and try again.");return}if(payload.looksLikeGridPage&&!confirm("This looks like a search results page, not a single listing. Capture anyway?"))return;window.open(INTAKE+"?payload="+encodeURIComponent(json),"_blank","noopener,noreferrer")};
+reveal();
+setTimeout(finish,2500);
+`.replace("__INTAKE_URL__", intakeUrlLiteral);
   return `javascript:(function(){${source}})()`;
 }
-
 export { marketplaceCaptureMaxPayloadBytes as MARKETPLACE_CAPTURE_MAX_PAYLOAD_BYTES };
