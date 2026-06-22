@@ -35,6 +35,11 @@ const STAGE_STYLES: Record<string, { bg: string; color: string }> = {
   Proposal: { bg: "var(--color-muted)", color: "var(--color-health-amber)" },
   Engagement: { bg: "var(--color-mist)", color: "var(--color-whisper)" },
   Renewal: { bg: "var(--color-secondary)", color: "var(--color-growth)" },
+  PROSPECT: { bg: "var(--color-mist)", color: "var(--color-whisper)" },
+  QUALIFIED: { bg: "var(--color-secondary)", color: "var(--color-pulse)" },
+  PROPOSAL: { bg: "var(--color-muted)", color: "var(--color-health-amber)" },
+  ENGAGEMENT: { bg: "var(--color-mist)", color: "var(--color-whisper)" },
+  RENEWAL: { bg: "var(--color-secondary)", color: "var(--color-growth)" },
 };
 
 function StageBadge({ stage }: { stage?: string | null | undefined }) {
@@ -61,9 +66,7 @@ function getContactName(contact: Contact): string {
 }
 
 function getInitials(contact: Contact): string {
-  const name = getContactName(contact);
-
-  return name
+  return getContactName(contact)
     .split(" ")
     .map((part) => part[0])
     .join("")
@@ -100,6 +103,17 @@ export default function ContactsPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Contact | null>(null);
 
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    stage: "",
+  });
+
   useEffect(() => {
     let cancelled = false;
 
@@ -134,6 +148,61 @@ export default function ContactsPage() {
     setSortDir("asc");
   }
 
+  function openContact(contact: Contact) {
+    setSelected(contact);
+    setEditing(false);
+    setError(null);
+  }
+
+  function startEdit(contact: Contact) {
+    setError(null);
+    setEditForm({
+      firstName: contact.firstName ?? "",
+      lastName: contact.lastName ?? "",
+      email: contact.email ?? "",
+      phone: contact.phone ?? "",
+      stage: contact.stage ?? "",
+    });
+    setEditing(true);
+  }
+
+  async function saveContact() {
+    if (!selected) return;
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/contacts", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: selected.id,
+          expectedUpdatedAt: selected.updatedAt,
+          ...editForm,
+        }),
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to save contact");
+      }
+
+      const updated = payload.contact as Contact;
+
+      setContacts((current) => current.map((contact) => (contact.id === updated.id ? updated : contact)));
+      setSelected(updated);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const filtered = contacts
     .filter((contact) => {
       const term = search.trim().toLowerCase();
@@ -144,7 +213,7 @@ export default function ContactsPage() {
         (contact.email ?? "").toLowerCase().includes(term) ||
         (contact.phone ?? "").toLowerCase().includes(term);
 
-      const matchesStage = stageFilter === "All" || contact.stage === stageFilter;
+      const matchesStage = stageFilter === "All" || contact.stage?.toLowerCase() === stageFilter.toLowerCase();
 
       return matchesSearch && matchesStage;
     })
@@ -275,7 +344,7 @@ export default function ContactsPage() {
                     key={contact.id}
                     className="cursor-pointer hover:bg-secondary"
                     style={{ borderTop: "0.5px solid var(--color-border)" }}
-                    onClick={() => setSelected(contact)}
+                    onClick={() => openContact(contact)}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
@@ -330,7 +399,15 @@ export default function ContactsPage() {
                 </div>
               </div>
 
-              <button type="button" onClick={() => setSelected(null)} className="rounded-lg p-1 hover:bg-muted">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelected(null);
+                  setEditing(false);
+                  setError(null);
+                }}
+                className="rounded-lg p-1 hover:bg-muted"
+              >
                 <IconX className="size-4 text-muted-foreground" stroke={1.8} />
               </button>
             </div>
@@ -359,11 +436,98 @@ export default function ContactsPage() {
             </div>
 
             <div className="p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Details</p>
-              <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                <p>Source: {selected.source ?? "—"}</p>
-                <p>Added: {new Date(selected.createdAt).toLocaleDateString()}</p>
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Details</p>
+
+                {!editing ? (
+                  <button
+                    type="button"
+                    onClick={() => startEdit(selected)}
+                    className="rounded-lg px-3 py-1 text-xs font-medium"
+                    style={{ background: "var(--color-whisper)", color: "white" }}
+                  >
+                    Edit
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditing(false);
+                        setError(null);
+                      }}
+                      className="rounded-lg px-3 py-1 text-xs"
+                      style={{ border: "0.5px solid var(--color-border)" }}
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={saveContact}
+                      className="rounded-lg px-3 py-1 text-xs font-medium disabled:opacity-60"
+                      style={{ background: "var(--color-whisper)", color: "white" }}
+                    >
+                      {saving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {editing ? (
+                <div className="space-y-3">
+                  <input
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                    placeholder="First name"
+                    value={editForm.firstName}
+                    onChange={(event) => setEditForm((current) => ({ ...current, firstName: event.target.value }))}
+                  />
+
+                  <input
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                    placeholder="Last name"
+                    value={editForm.lastName}
+                    onChange={(event) => setEditForm((current) => ({ ...current, lastName: event.target.value }))}
+                  />
+
+                  <input
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                    placeholder="Email"
+                    value={editForm.email}
+                    onChange={(event) => setEditForm((current) => ({ ...current, email: event.target.value }))}
+                  />
+
+                  <input
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                    placeholder="Phone / WhatsApp"
+                    value={editForm.phone}
+                    onChange={(event) => setEditForm((current) => ({ ...current, phone: event.target.value }))}
+                  />
+
+                  <select
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                    value={editForm.stage}
+                    onChange={(event) => setEditForm((current) => ({ ...current, stage: event.target.value }))}
+                  >
+                    <option value="">No stage</option>
+                    <option value="PROSPECT">Prospect</option>
+                    <option value="QUALIFIED">Qualified</option>
+                    <option value="PROPOSAL">Proposal</option>
+                    <option value="ENGAGEMENT">Engagement</option>
+                    <option value="RENEWAL">Renewal</option>
+                  </select>
+
+                  {error && <p className="text-xs text-red-600">{error}</p>}
+                </div>
+              ) : (
+                <div className="space-y-1 text-sm text-muted-foreground">
+                  <p>Source: {selected.source ?? "—"}</p>
+                  <p>Phone: {selected.phone ?? "—"}</p>
+                  <p>Email: {selected.email ?? "—"}</p>
+                  <p>Added: {new Date(selected.createdAt).toLocaleDateString()}</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
