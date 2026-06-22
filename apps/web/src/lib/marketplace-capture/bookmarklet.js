@@ -72,24 +72,53 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
 
   const bodyText = clean(doc.body?.innerText || '', 5000);
   const email = clean((bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu) || [])[0] || '', 320);
+  const phoneRegex = /(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+?\d[\d\s().-]{7,}\d)/u;
   const telPhone = clean(doc.querySelector('a[href^="tel:"]')?.getAttribute('href')?.replace(/^tel:/iu, '') || '', 64);
+  const contactText = selectorText([
+    '[data-testid*="phone" i]',
+    '[data-testid*="contact" i]',
+    '[class*="phone" i]',
+    '[class*="contact" i]',
+    '.b-seller-block',
+    '.b-seller-block__contacts',
+    '.b-seller-block__phone',
+  ], 2000);
   const sellerBlockText = clean(doc.querySelector('.b-seller-block')?.textContent || '', 2000);
-  const phoneSearchText = /(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+?\d[\d\s().-]{7,}\d)/u.test(sellerBlockText) ? sellerBlockText : bodyText;
-  const phone = telPhone || clean((phoneSearchText.match(/(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}/u) || phoneSearchText.match(/(?:\+?\d[\d\s().-]{7,}\d)/u) || [])[0] || '', 64);
+  const phoneSearchText = phoneRegex.test(contactText) ? contactText : (phoneRegex.test(sellerBlockText) ? sellerBlockText : bodyText);
+  const phone = telPhone || clean((phoneSearchText.match(phoneRegex) || [])[0] || '', 64);
 
   const price = clean((offer?.priceCurrency ? `${offer.priceCurrency} ` : '') + (offer?.price || ''), 120) || meta('product:price:amount') || meta('og:price:amount') || selectorText([
     '.qa-advert-price-view-value',
-    '.qa-advert-price-view',
     '[itemprop="price"]',
-    '[class*="price" i]',
-    '[data-testid*="price" i]'
+    '[data-testid*="price" i]',
+    '.qa-advert-price-view',
+    '[class*="price" i]'
   ], 120);
+  const inferCurrency = (value) => /(?:GH₵|GH¢|GHS|₵)/iu.test(value || '') ? 'GHS' : '';
+  const currency = clean(offer?.priceCurrency || meta('product:price:currency') || inferCurrency(price), 16);
 
   const images = arr(product?.image).concat([meta('og:image'), meta('twitter:image')], Array.from(doc.querySelectorAll('[itemprop="image"], img')).map((img) => img.getAttribute('content') || img.getAttribute('src'))).map((url) => { try { return new URL(clean(String(url), 2000), href).toString(); } catch { return clean(String(url), 2000); } }).filter(Boolean);
   const sellerName = clean(product?.brand?.name, 255) || selectorText(['[itemprop="seller"]', '.b-seller-block__name', '[rel="author"]', 'a[href*="profile" i]', 'a[href*="seller" i]', '[class*="seller" i]'], 255);
   const sellerProfileUrl = selectorHref(['a[href*="seller" i]', 'a[href*="profile" i]', '[rel="author"]']);
 
-  const portfolioListings = [];
+  const portfolioListings = Array.from(doc.querySelectorAll('a[href]')).map((link) => {
+    const listingUrl = selectorHref([link.matches ? '' : '']);
+    const hrefValue = clean(link.getAttribute('href') || '', 2000);
+    let absoluteUrl = '';
+    try { absoluteUrl = new URL(hrefValue, href).toString(); } catch { absoluteUrl = hrefValue; }
+    const title = clean(link.textContent || '', 300);
+    const priceMatch = title.match(/(?:GH₵|GH¢|GHS|₵|USD|\$)\s?[\d,.]+/iu);
+    const priceText = clean((priceMatch || [])[0] || '', 120);
+    return {
+      listingUrl: absoluteUrl || undefined,
+      marketplaceListingId: deriveMarketplaceListingId(absoluteUrl),
+      title,
+      price: priceText || undefined,
+      priceText: priceText || undefined,
+      currency: inferCurrency(priceText) || undefined,
+      metadata: { source: 'bookmarklet-link' },
+    };
+  }).filter((item) => item.title && item.listingUrl && item.listingUrl !== href).slice(0, 25);
 
   const strategy = product ? 'jsonld' : (meta('og:title') || meta('og:description') ? 'opengraph' : 'fallback');
   const productMicrodataCount = doc.querySelectorAll('[itemtype*="schema.org/Product"]').length;
@@ -106,7 +135,7 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
     description: clean(product?.description, 1000) || meta('og:description') || meta('description'),
     priceText: price,
     price,
-    currency: clean(offer?.priceCurrency || meta('product:price:currency'), 16),
+    currency,
     images: Array.from(new Set(images)).slice(0, 6),
     imageUrls: Array.from(new Set(images)).slice(0, 6),
     category: clean(product?.category, 255) || meta('product:category') || selectorText(['[itemprop="category"]', '[class*="category" i]'], 255),
