@@ -2123,3 +2123,5 @@ export type {
 } from "./marketplace-acquisition/capture-service.js";
 export { RenderConversionRetryService, RenderConversionRetryError, nextRenderConversionRetryAt } from "./render-conversion-retry.js";
 export type { RenderConversionRetryContext, RenderConversionRetryDependencies, RenderConversionRetryResult, RenderInventoryConnector } from "./render-conversion-retry.js";
+
+export { SellerAcquisitionEditService } from "./seller-acquisition-edit.js";

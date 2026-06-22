@@ -21,26 +21,26 @@ interface QueueBucket {
 }
 
 const queueBuckets: readonly QueueBucket[] = [
-  { id: "needs-phone", label: "Needs Phone Reveal", matches: (record) => record.nextAction === "REVEAL_PHONE" },
-  { id: "needs-invitation", label: "Needs Invitation", matches: (record) => record.nextAction === "SEND_INVITATION" },
-  { id: "invitation-failed", label: "Invitation Failed", matches: (record) => record.nextAction === "RETRY_INVITATION" },
-  { id: "waiting-claim", label: "Waiting For Claim", matches: (record) => record.nextAction === "WAIT_FOR_CLAIM" },
-  { id: "convert-seller", label: "Ready For Seller Conversion", matches: (record) => record.nextAction === "CONVERT_SELLER" },
-  { id: "convert-inventory", label: "Ready For Inventory Conversion", matches: (record) => record.nextAction === "CONVERT_INVENTORY" },
-  { id: "complete", label: "Ready To Complete", matches: (record) => record.nextAction === "COMPLETE_ACQUISITION" },
-  { id: "completed", label: "Completed", matches: (record) => record.healthStatus === "COMPLETED" },
-  { id: "expired", label: "Expired", matches: (record) => record.healthStatus === "EXPIRED" },
+  { id: "needs-phone",       label: "Needs Phone Reveal",           matches: (r) => r.nextAction === "REVEAL_PHONE" },
+  { id: "needs-invitation",  label: "Needs Invitation",             matches: (r) => r.nextAction === "SEND_INVITATION" },
+  { id: "invitation-failed", label: "Invitation Failed",            matches: (r) => r.nextAction === "RETRY_INVITATION" },
+  { id: "waiting-claim",     label: "Waiting For Claim",            matches: (r) => r.nextAction === "WAIT_FOR_CLAIM" },
+  { id: "convert-seller",    label: "Ready For Seller Conversion",  matches: (r) => r.nextAction === "CONVERT_SELLER" },
+  { id: "convert-inventory", label: "Ready For Inventory Conversion", matches: (r) => r.nextAction === "CONVERT_INVENTORY" },
+  { id: "complete",          label: "Ready To Complete",            matches: (r) => r.nextAction === "COMPLETE_ACQUISITION" },
+  { id: "completed",         label: "Completed",                    matches: (r) => r.healthStatus === "COMPLETED" },
+  { id: "expired",           label: "Expired",                      matches: (r) => r.healthStatus === "EXPIRED" },
 ];
 
 const nextActionLabels: Record<SellerAcquisitionNextAction, string> = {
-  REVEAL_PHONE: "Reveal Phone",
-  SEND_INVITATION: "Send WhatsApp-first Invite",
-  RETRY_INVITATION: "Retry Invitation",
-  WAIT_FOR_CLAIM: "Waiting for Seller Claim",
-  CONVERT_SELLER: "Convert Seller",
-  CONVERT_INVENTORY: "Convert Inventory",
+  REVEAL_PHONE:         "Reveal Phone",
+  SEND_INVITATION:      "Send WhatsApp-first Invite",
+  RETRY_INVITATION:     "Retry Invitation",
+  WAIT_FOR_CLAIM:       "Waiting for Seller Claim",
+  CONVERT_SELLER:       "Convert Seller",
+  CONVERT_INVENTORY:    "Convert Inventory",
   COMPLETE_ACQUISITION: "Complete Acquisition",
-  NONE: "No Action",
+  NONE:                 "No Action",
 };
 
 function metadataText(record: SellerAcquisitionRecord, key: string): string | null {
@@ -68,7 +68,11 @@ function title(record: SellerAcquisitionRecord): string {
 function price(record: SellerAcquisitionRecord): string {
   const rawPrice = record.draftInventory?.price ?? record.capture.price;
   if (rawPrice === null || rawPrice === undefined || rawPrice === "") return "Price missing";
+  // Safety net for rows captured before the normalizeRecord fix -- those rows
+  // may have the literal object-stringification artifact already persisted.
   if (typeof rawPrice === "string" && rawPrice.includes("[object")) return "Price missing";
+  // `||` instead of `??` so empty-string currency also falls through to "USD".
+  // An empty string is not a valid ISO 4217 code and makes Intl.NumberFormat throw.
   const currency = record.draftInventory?.currency || record.capture.currency || "USD";
   const numericPrice = typeof rawPrice === "number" ? rawPrice : Number(rawPrice);
   if (!Number.isFinite(numericPrice)) return `${currency} ${String(rawPrice)}`;
@@ -107,7 +111,9 @@ function confidence(record: SellerAcquisitionRecord): CaptureConfidence {
   const phonePresent = hasPhone(record);
   const imagePresent = record.images.length > 0;
   const titlePresent = title(record).trim().length > 0;
-  const pricePresent = (record.draftInventory?.price ?? record.capture.price) !== null && (record.draftInventory?.price ?? record.capture.price) !== undefined;
+  const pricePresent =
+    (record.draftInventory?.price ?? record.capture.price) !== null &&
+    (record.draftInventory?.price ?? record.capture.price) !== undefined;
   const locationPresent = location(record) !== null;
   if (!phonePresent) return "LOW";
   if (imagePresent && titlePresent && pricePresent) return "HIGH";
@@ -120,7 +126,8 @@ function acquisitionScore(record: SellerAcquisitionRecord): number {
   let score = 0;
   if (hasPhone(record)) score += 35;
   if (record.images.length > 0) score += 20;
-  if ((record.draftInventory?.price ?? record.capture.price) !== null && (record.draftInventory?.price ?? record.capture.price) !== undefined) score += 15;
+  if ((record.draftInventory?.price ?? record.capture.price) !== null &&
+      (record.draftInventory?.price ?? record.capture.price) !== undefined) score += 15;
   if (title(record).trim().length > 0) score += 15;
   if (location(record) !== null) score += 10;
   if (source(record).trim().length > 0) score += 5;
@@ -132,13 +139,18 @@ function slaCopy(record: SellerAcquisitionRecord): string {
   if (record.healthStatus === "COMPLETED") return "Completed";
   if (record.healthStatus === "EXPIRED") return "Expired";
   const captured = ageFrom(record.capture.capturedAt ?? record.capture.createdAt);
-  const invited = ageFrom(record.latestInvitation?.createdAt);
-  const expires = record.latestInvitation?.expiresAt ? ageFrom(record.latestInvitation.expiresAt) : null;
-  return [captured ? `Captured ${captured}` : null, invited ? `Invited ${invited}` : null, expires ? `Claim expires ${expires}` : null].filter(Boolean).join(" · ") || "Oldest pending";
+  const invited  = ageFrom(record.latestInvitation?.createdAt);
+  const expires  = record.latestInvitation?.expiresAt ? ageFrom(record.latestInvitation.expiresAt) : null;
+  return [
+    captured ? `Captured ${captured}` : null,
+    invited  ? `Invited ${invited}`   : null,
+    expires  ? `Claim expires ${expires}` : null,
+  ].filter(Boolean).join(" · ") || "Oldest pending";
 }
 
 function searchText(record: SellerAcquisitionRecord): string {
-  return [sellerName(record), record.contact?.phone, title(record), source(record), record.capture.id].filter(Boolean).join(" ").toLowerCase();
+  return [sellerName(record), record.contact?.phone, title(record), source(record), record.capture.id]
+    .filter(Boolean).join(" ").toLowerCase();
 }
 
 function badgeTone(value: string): string {
@@ -148,16 +160,20 @@ function badgeTone(value: string): string {
 }
 
 function isActionEnabled(record: SellerAcquisitionRecord): boolean {
-  return ["SEND_INVITATION", "RETRY_INVITATION", "CONVERT_SELLER", "CONVERT_INVENTORY", "COMPLETE_ACQUISITION"].includes(record.nextAction) && hasPhone(record);
+  return ["SEND_INVITATION", "RETRY_INVITATION", "CONVERT_SELLER", "CONVERT_INVENTORY", "COMPLETE_ACQUISITION"]
+    .includes(record.nextAction) && hasPhone(record);
 }
 
 function errorMessageFromPayload(payload: unknown): string | null {
   if (typeof payload !== "object" || payload === null) return null;
   const error = (payload as { readonly error?: unknown }).error;
-  if (typeof error === "object" && error !== null && typeof (error as { readonly message?: unknown }).message === "string") {
+  if (typeof error === "object" && error !== null &&
+      typeof (error as { readonly message?: unknown }).message === "string") {
     return (error as { readonly message: string }).message;
   }
-  if (typeof (payload as { readonly message?: unknown }).message === "string") return (payload as { readonly message: string }).message;
+  if (typeof (payload as { readonly message?: unknown }).message === "string") {
+    return (payload as { readonly message: string }).message;
+  }
   return null;
 }
 
@@ -170,10 +186,10 @@ async function fetchSellerAcquisitionRecords(): Promise<readonly SellerAcquisiti
 
 async function runPrimaryAction(record: SellerAcquisitionRecord): Promise<void> {
   const paths: Partial<Record<SellerAcquisitionNextAction, string>> = {
-    SEND_INVITATION: `/api/marketplace-acquisition/captures/${record.capture.id}/invite`,
-    RETRY_INVITATION: `/api/marketplace-acquisition/captures/${record.capture.id}/invite`,
-    CONVERT_SELLER: `/api/marketplace-acquisition/captures/${record.capture.id}/convert/render-seller`,
-    CONVERT_INVENTORY: `/api/marketplace-acquisition/captures/${record.capture.id}/convert/render-inventory`,
+    SEND_INVITATION:      `/api/marketplace-acquisition/captures/${record.capture.id}/invite`,
+    RETRY_INVITATION:     `/api/marketplace-acquisition/captures/${record.capture.id}/invite`,
+    CONVERT_SELLER:       `/api/marketplace-acquisition/captures/${record.capture.id}/convert/render-seller`,
+    CONVERT_INVENTORY:    `/api/marketplace-acquisition/captures/${record.capture.id}/convert/render-inventory`,
     COMPLETE_ACQUISITION: `/api/marketplace-acquisition/captures/${record.capture.id}/complete`,
   };
   const path = paths[record.nextAction];
@@ -182,6 +198,49 @@ async function runPrimaryAction(record: SellerAcquisitionRecord): Promise<void> 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Marketplace Sellers action failed.");
 }
+
+// ---------------------------------------------------------------------------
+// Edit extract helpers
+// ---------------------------------------------------------------------------
+
+interface EditFields {
+  title:       string;
+  sellerName:  string;
+  sellerPhone: string;
+  priceText:   string;
+  currency:    string;
+  description: string;
+  location:    string;
+  category:    string;
+}
+
+function editFieldsFromRecord(record: SellerAcquisitionRecord): EditFields {
+  return {
+    title:       title(record),
+    sellerName:  record.capture.sellerName ?? sellerName(record),
+    sellerPhone: phone(record) ?? "",
+    priceText:   String(record.draftInventory?.price ?? record.capture.price ?? ""),
+    currency:    record.draftInventory?.currency ?? record.capture.currency ?? "",
+    description: record.draftInventory?.description ?? record.capture.description ?? "",
+    location:    location(record) ?? "",
+    category:    record.draftInventory?.category ?? "",
+  };
+}
+
+const EDIT_FIELD_CONFIG: readonly { key: keyof EditFields; label: string; placeholder: string }[] = [
+  { key: "title",       label: "Title",       placeholder: "Listing title" },
+  { key: "sellerName",  label: "Seller name", placeholder: "Seller name" },
+  { key: "sellerPhone", label: "Phone",       placeholder: "+233..." },
+  { key: "priceText",   label: "Price",       placeholder: "GH₵ 250,000" },
+  { key: "currency",    label: "Currency",    placeholder: "GHS" },
+  { key: "description", label: "Description", placeholder: "Optional description" },
+  { key: "location",    label: "Location",    placeholder: "Spintex, Accra" },
+  { key: "category",    label: "Category",    placeholder: "Vehicles" },
+];
+
+// ---------------------------------------------------------------------------
+// Page component
+// ---------------------------------------------------------------------------
 
 export default function MarketplaceAcquisitionPage() {
   const [records, setRecords] = useState<readonly SellerAcquisitionRecord[]>([]);
@@ -233,8 +292,13 @@ export default function MarketplaceAcquisitionPage() {
     });
   }, [records, queueFilter, healthFilter, nextActionFilter, confidenceFilter, stageFilter, searchQuery]);
 
-  const selectedRecord = filteredRecords.find((record) => record.capture.id === selectedCaptureId) ?? filteredRecords[0] ?? null;
-  const stages = [...new Set(records.map((record) => record.currentStage).filter(Boolean))];
+  const selectedRecord = filteredRecords.find((r) => r.capture.id === selectedCaptureId) ?? filteredRecords[0] ?? null;
+  const stages = [...new Set(records.map((r) => r.currentStage).filter(Boolean))];
+
+  // Patch a single updated record into the local list without a full reload
+  const patchRecord = useCallback((updated: SellerAcquisitionRecord) => {
+    setRecords((prev) => prev.map((r) => r.capture.id === updated.capture.id ? updated : r));
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -278,11 +342,11 @@ export default function MarketplaceAcquisitionPage() {
         <div className="space-y-4">
           <div className="grid gap-2 rounded-2xl bg-background p-4 md:grid-cols-5" style={{ border: "0.5px solid var(--color-border)" }}>
             <input aria-label="Search marketplace sellers" className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse md:col-span-5" placeholder="Search by seller, contact, phone, title, marketplace, or capture id" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
-            <Filter label="Queue" value={queueFilter} onChange={(value) => setQueueFilter(value as QueueBucketId)} options={["all", ...queueBuckets.map((bucket) => bucket.id)]} />
-            <Filter label="Health" value={healthFilter} onChange={setHealthFilter} options={["all", "READY", "ACTION_REQUIRED", "BLOCKED", "COMPLETED", "EXPIRED"]} />
-            <Filter label="Next Action" value={nextActionFilter} onChange={setNextActionFilter} options={["all", ...Object.keys(nextActionLabels)]} />
-            <Filter label="Confidence" value={confidenceFilter} onChange={setConfidenceFilter} options={["all", "HIGH", "MEDIUM", "LOW"]} />
-            <Filter label="Stage" value={stageFilter} onChange={setStageFilter} options={["all", ...stages]} />
+            <Filter label="Queue"       value={queueFilter}       onChange={(value) => setQueueFilter(value as QueueBucketId)} options={["all", ...queueBuckets.map((b) => b.id)]} />
+            <Filter label="Health"      value={healthFilter}      onChange={setHealthFilter}      options={["all", "READY", "ACTION_REQUIRED", "BLOCKED", "COMPLETED", "EXPIRED"]} />
+            <Filter label="Next Action" value={nextActionFilter}  onChange={setNextActionFilter}  options={["all", ...Object.keys(nextActionLabels)]} />
+            <Filter label="Confidence"  value={confidenceFilter}  onChange={setConfidenceFilter}  options={["all", "HIGH", "MEDIUM", "LOW"]} />
+            <Filter label="Stage"       value={stageFilter}       onChange={setStageFilter}       options={["all", ...stages]} />
           </div>
 
           {loading ? (
@@ -295,35 +359,78 @@ export default function MarketplaceAcquisitionPage() {
             </section>
           ) : (
             <div className="grid gap-3 xl:grid-cols-2">
-              {filteredRecords.map((record) => <RecordCard key={record.capture.id} record={record} selected={selectedRecord?.capture.id === record.capture.id} onSelect={() => setSelectedCaptureId(record.capture.id)} />)}
+              {filteredRecords.map((record) => (
+                <RecordCard
+                  key={record.capture.id}
+                  record={record}
+                  selected={selectedRecord?.capture.id === record.capture.id}
+                  onSelect={() => setSelectedCaptureId(record.capture.id)}
+                />
+              ))}
             </div>
           )}
         </div>
-        <Workbench record={selectedRecord} actionError={actionError} onActionError={setActionError} onRefresh={refreshRecords} />
+        <Workbench
+          record={selectedRecord}
+          actionError={actionError}
+          onActionError={setActionError}
+          onRefresh={refreshRecords}
+          onRecordPatched={patchRecord}
+        />
       </section>
     </div>
   );
 }
 
-function Filter({ label, value, options, onChange }: { readonly label: string; readonly value: string; readonly options: readonly string[]; readonly onChange: (value: string) => void }) {
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function Filter({ label, value, options, onChange }: {
+  readonly label: string;
+  readonly value: string;
+  readonly options: readonly string[];
+  readonly onChange: (value: string) => void;
+}) {
   return (
     <label className="text-xs font-medium text-muted-foreground">
       {label}
-      <select className="mt-1 h-10 w-full rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse" value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => <option key={option} value={option}>{option === "all" ? `All ${label.toLowerCase()}` : option}</option>)}
+      <select
+        className="mt-1 h-10 w-full rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option === "all" ? `All ${label.toLowerCase()}` : option}
+          </option>
+        ))}
       </select>
     </label>
   );
 }
 
 function Badge({ children, tone }: { readonly children: ReactNode; readonly tone?: string }) {
-  return <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone ?? "bg-secondary text-muted-foreground"}`}>{children}</span>;
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone ?? "bg-secondary text-muted-foreground"}`}>
+      {children}
+    </span>
+  );
 }
 
-function RecordCard({ record, selected, onSelect }: { readonly record: SellerAcquisitionRecord; readonly selected: boolean; readonly onSelect: () => void }) {
+function RecordCard({ record, selected, onSelect }: {
+  readonly record: SellerAcquisitionRecord;
+  readonly selected: boolean;
+  readonly onSelect: () => void;
+}) {
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
   return (
-    <button className={`rounded-2xl bg-background p-4 text-left transition hover:opacity-90 ${selected ? "ring-2 ring-pulse" : ""}`} onClick={onSelect} style={{ border: "0.5px solid var(--color-border)" }} type="button">
+    <button
+      className={`rounded-2xl bg-background p-4 text-left transition hover:opacity-90 ${selected ? "ring-2 ring-pulse" : ""}`}
+      onClick={onSelect}
+      style={{ border: "0.5px solid var(--color-border)" }}
+      type="button"
+    >
       <div className="flex gap-3">
         <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-secondary text-xs text-muted-foreground">
           {record.images[0] ? <img alt="Captured inventory" className="size-full object-cover" src={record.images[0]} /> : "No image"}
@@ -343,16 +450,93 @@ function RecordCard({ record, selected, onSelect }: { readonly record: SellerAcq
         <Badge>{record.currentStage}</Badge>
         <Badge>{nextActionLabels[record.nextAction]}</Badge>
       </div>
-      {record.deal?.deal.id ? <Link className="mt-3 inline-block text-xs font-semibold text-whisper" href={`/marketplace-acquisition/${record.deal.deal.id}`}>Open detail</Link> : null}
+      {record.deal?.deal.id ? (
+        <Link className="mt-3 inline-block text-xs font-semibold text-whisper" href={`/marketplace-acquisition/${record.deal.deal.id}`}>
+          Open detail
+        </Link>
+      ) : null}
     </button>
   );
 }
 
-function Workbench({ record, actionError, onActionError, onRefresh }: { readonly record: SellerAcquisitionRecord | null; readonly actionError: string | null; readonly onActionError: (message: string | null) => void; readonly onRefresh: () => Promise<void> }) {
+function Workbench({ record, actionError, onActionError, onRefresh, onRecordPatched }: {
+  readonly record: SellerAcquisitionRecord | null;
+  readonly actionError: string | null;
+  readonly onActionError: (message: string | null) => void;
+  readonly onRefresh: () => Promise<void>;
+  readonly onRecordPatched: (updated: SellerAcquisitionRecord) => void;
+}) {
   const [busy, setBusy] = useState(false);
-  if (record === null) return <aside className="rounded-2xl bg-background p-5 text-sm text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>Select a marketplace seller to triage.</aside>;
+  const [editMode, setEditMode] = useState(false);
+  const [editFields, setEditFields] = useState<EditFields>({
+    title: "", sellerName: "", sellerPhone: "", priceText: "",
+    currency: "", description: "", location: "", category: "",
+  });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Reset edit mode whenever the selected record changes so the form does not
+  // carry stale values from a previously-selected card.
+  useEffect(() => {
+    setEditMode(false);
+    setEditError(null);
+  }, [record?.capture.id]);
+
+  if (record === null) {
+    return (
+      <aside className="rounded-2xl bg-background p-5 text-sm text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>
+        Select a marketplace seller to triage.
+      </aside>
+    );
+  }
+
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
   const enabled = isActionEnabled(record);
+
+  const openEdit = () => {
+    setEditFields(editFieldsFromRecord(record));
+    setEditError(null);
+    setEditMode(true);
+  };
+
+  const saveEdit = async () => {
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      // Only send fields that have a non-empty value after trimming.
+      const body: Record<string, string> = {};
+      for (const { key } of EDIT_FIELD_CONFIG) {
+        const val = editFields[key].trim();
+        if (val.length > 0) body[key] = val;
+      }
+      if (Object.keys(body).length === 0) {
+        setEditError("No changes to save.");
+        return;
+      }
+
+      const response = await fetch(
+        `/api/marketplace-acquisition/records/${encodeURIComponent(record.capture.id)}`,
+        { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+      );
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setEditError(errorMessageFromPayload(result) ?? "Save failed. Please try again.");
+        return;
+      }
+
+      const updated = (result as { readonly data?: { readonly record?: SellerAcquisitionRecord } }).data?.record;
+      if (updated !== undefined) {
+        onRecordPatched(updated);
+      }
+      setEditMode(false);
+    } catch {
+      setEditError("Save failed. Please try again.");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   return (
     <aside className="space-y-4 rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
       <div>
@@ -360,6 +544,7 @@ function Workbench({ record, actionError, onActionError, onRefresh }: { readonly
         <h2 className="mt-1 text-lg font-semibold text-foreground">{sellerName(record)}</h2>
         <p className="mt-1 text-xs text-muted-foreground">Contact Type: Seller · Source: Marketplace · Lifecycle: Acquisition Prospect</p>
       </div>
+
       <div className="space-y-2 text-sm text-muted-foreground">
         <p><strong className="text-foreground">Mobile status:</strong> {hasPhone(record) ? `Ready for WhatsApp candidate (${phone(record)})` : "Mobile required"}</p>
         {blocked ? <p className="font-semibold text-red-700">PHONE_REQUIRED blocks invitation. Next action: Reveal Phone.</p> : null}
@@ -370,23 +555,85 @@ function Workbench({ record, actionError, onActionError, onRefresh }: { readonly
         <p><strong className="text-foreground">Next action:</strong> {nextActionLabels[record.nextAction]}</p>
         <p><strong className="text-foreground">SLA:</strong> {slaCopy(record)}</p>
       </div>
-      <button className="h-10 w-full rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!enabled || busy} onClick={async () => {
-        setBusy(true);
-        onActionError(null);
-        try {
-          await runPrimaryAction(record);
-          await onRefresh();
+
+      <button
+        className="h-10 w-full rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={!enabled || busy}
+        onClick={async () => {
+          setBusy(true);
           onActionError(null);
-        } catch (error) {
-          onActionError(error instanceof Error ? error.message : "Marketplace Sellers action failed.");
-        } finally {
-          setBusy(false);
-        }
-      }} type="button">
+          try {
+            await runPrimaryAction(record);
+            await onRefresh();
+            onActionError(null);
+          } catch (error) {
+            onActionError(error instanceof Error ? error.message : "Marketplace Sellers action failed.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        type="button"
+      >
         {busy ? "Working…" : nextActionLabels[record.nextAction]}
       </button>
+
       {actionError ? <p className="text-xs font-semibold text-red-700" role="alert">{actionError}</p> : null}
       {!enabled ? <p className="text-xs text-muted-foreground">This action is disabled because it is either waiting-only, not wired safely in this slice, or blocked by missing mobile.</p> : null}
+
+      {/* Edit extract -------------------------------------------------------- */}
+      {editMode ? (
+        <div
+          className="space-y-3 rounded-2xl bg-secondary p-4"
+          style={{ border: "0.5px solid var(--color-border)" }}
+        >
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Edit extract</p>
+
+          {EDIT_FIELD_CONFIG.map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <label className="block text-xs font-medium text-muted-foreground">{label}</label>
+              <input
+                className="mt-1 h-9 w-full rounded-xl bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+                style={{ border: "0.5px solid var(--color-border)" }}
+                placeholder={placeholder}
+                value={editFields[key]}
+                onChange={(e) => setEditFields((prev) => ({ ...prev, [key]: e.target.value }))}
+                disabled={editSaving}
+              />
+            </div>
+          ))}
+
+          {editError ? <p className="text-xs text-red-600" role="alert">{editError}</p> : null}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              disabled={editSaving}
+              onClick={saveEdit}
+              className="flex-1 rounded-xl bg-whisper py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {editSaving ? "Saving…" : "Save changes"}
+            </button>
+            <button
+              type="button"
+              disabled={editSaving}
+              onClick={() => { setEditMode(false); setEditError(null); }}
+              className="rounded-xl px-4 py-2 text-sm text-muted-foreground hover:bg-mist disabled:opacity-60"
+              style={{ border: "0.5px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={openEdit}
+          className="w-full rounded-xl py-2 text-sm font-medium text-muted-foreground hover:bg-mist"
+          style={{ border: "0.5px solid var(--color-border)" }}
+        >
+          Edit extract
+        </button>
+      )}
     </aside>
   );
 }
