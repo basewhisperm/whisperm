@@ -74,7 +74,23 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
   const bodyText = clean(doc.body?.innerText || '', 5000);
   const email = clean((bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu) || [])[0] || '', 320);
   const phoneRegex = /(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+233|233|0)\d{9}|(?:\+?\d[\d\s().-]{7,}\d)/u;
-  const telPhone = clean(doc.querySelector('a[href^="tel:"]')?.getAttribute('href')?.replace(/^tel:/iu, '') || '', 64);
+  const phoneFromHref = (raw) => {
+    const value = clean(raw || "", 500);
+    if (!value) return "";
+    try {
+      const parsed = new URL(value, href);
+      const direct = parsed.protocol === "tel:" ? parsed.pathname : "";
+      const whatsapp = parsed.hostname.includes("wa.me")
+        ? parsed.pathname.replace(/^\//u, "")
+        : parsed.searchParams.get("phone") || "";
+      return clean((direct || whatsapp).replace(/[^+\d]/gu, ""), 64);
+    } catch {
+      return clean(value.replace(/^tel:/iu, "").replace(/[^+\d]/gu, ""), 64);
+    }
+  };
+  const hrefPhone = Array.from(doc.querySelectorAll('a[href]'))
+    .map((a) => phoneFromHref(a.getAttribute('href')))
+    .find((value) => phoneRegex.test(value)) || "";
   const contactText = selectorText([
     '[data-testid*="phone" i]',
     '[data-testid*="contact" i]',
@@ -86,7 +102,7 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
   ], 2000);
   const sellerBlockText = clean(doc.querySelector('.b-seller-block')?.textContent || '', 2000);
   const phoneSearchText = phoneRegex.test(contactText) ? contactText : (phoneRegex.test(sellerBlockText) ? sellerBlockText : bodyText);
-  const phone = telPhone || clean((phoneSearchText.match(phoneRegex) || [])[0] || '', 64);
+  const phone = hrefPhone || clean((phoneSearchText.match(phoneRegex) || [])[0] || '', 64);
 
   const offerPrice = scalar(offer?.price);
   const offerCurrency = scalar(offer?.priceCurrency);
@@ -194,11 +210,12 @@ const extractMarketplaceCapturePayload=(doc,locationLike,userAgent="")=>{
   const bodyText=clean(doc.body?.innerText||"",5000);
   const email=clean((bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu)||[])[0]||"",320);
   const phoneRegex=/(?:\+233|233|0)\s?\d{2,3}[\s.-]?\d{3}[\s.-]?\d{3,4}|(?:\+?\d[\d\s().-]{7,}\d)/u;
-  const telPhone=clean(doc.querySelector('a[href^="tel:"]')?.getAttribute("href")?.replace(/^tel:/iu,"")||"",64);
+  const phoneFromHref=(raw)=>{const value=clean(raw||"",500);if(!value)return"";try{const parsed=new URL(value,href);const direct=parsed.protocol==="tel:"?parsed.pathname:"";const whatsapp=parsed.hostname.includes("wa.me")?parsed.pathname.replace(/^\//u,""):parsed.searchParams.get("phone")||"";return clean((direct||whatsapp).replace(/[^+\d]/gu,""),64)}catch{return clean(value.replace(/^tel:/iu,"").replace(/[^+\d]/gu,""),64)}};
+  const hrefPhone=Array.from(doc.querySelectorAll("a[href]")).map((a)=>phoneFromHref(a.getAttribute("href"))).find((value)=>phoneRegex.test(value))||"";
   const contactText=selectorText(['[data-testid*="phone" i]','[data-testid*="contact" i]','[class*="phone" i]','[class*="contact" i]','.b-seller-block','.b-seller-block__contacts','.b-seller-block__phone'],2000);
   const sellerBlockText=clean(doc.querySelector(".b-seller-block")?.textContent||"",2000);
   const phoneSearchText=phoneRegex.test(contactText)?contactText:(phoneRegex.test(sellerBlockText)?sellerBlockText:bodyText);
-  const phone=telPhone||clean((phoneSearchText.match(phoneRegex)||[])[0]||"",64);
+  const phone=hrefPhone||clean((phoneSearchText.match(phoneRegex)||[])[0]||"",64);
   const offerPrice=scalar(offer?.price);
 const offerCurrency=scalar(offer?.priceCurrency);
 const price=clean((offerCurrency ? offerCurrency + " " : "")+offerPrice,120)||meta("product:price:amount")||meta("og:price:amount")||selectorText([".qa-advert-price-view-value",'[itemprop="price"]','[data-testid*="price" i]',".qa-advert-price-view",'[class*="price" i]'],120);
@@ -212,7 +229,7 @@ const price=clean((offerCurrency ? offerCurrency + " " : "")+offerPrice,120)||me
   const productMicrodataCount=doc.querySelectorAll('[itemtype*="schema.org/Product"]').length;
   return{sourceUrl:href,sourceHost:hostname,listingUrl:href,marketplaceSource:detectMarketplaceSource(href),sourceMarketplace:detectMarketplaceSource(href),marketplaceListingId:deriveMarketplaceListingId(href),title:clean(product?.name,300)||meta("og:title")||clean(doc.title,300),description:clean(product?.description,1000)||meta("og:description")||meta("description"),priceText:price,price,currency,images:Array.from(new Set(images)).slice(0,6),imageUrls:Array.from(new Set(images)).slice(0,6),category:clean(product?.category,255)||meta("product:category")||selectorText(['[itemprop="category"]','[class*="category" i]'],255),sellerName,rawSellerText:sellerName||undefined,sellerProfileUrl,marketplaceIdentifier:phone||sellerProfileUrl||sellerName||undefined,phone:phone||undefined,email:email||undefined,location:selectorText(['[itemprop="address"]','[class*="location" i]','[data-testid*="location" i]'],255)||undefined,capturedAt:new Date().toISOString(),pageUrl:href,userAgent:clean(userAgent,1024)||undefined,rawExtract:{strategy},portfolioListings,looksLikeGridPage:productMicrodataCount>1};
 };
-const reveal=()=>{const nodes=Array.from(document.querySelectorAll('button,a,[role="button"],a.js-show-contact,a.qa-show-contact,a.cy-show-contact,button[class*="phone" i],button[class*="contact" i],[data-testid*="phone" i],[data-testid*="contact" i]'));const targets=nodes.filter((e)=>/show\s+contact|phone|contact/i.test((e.textContent||"").trim())||e.matches('a.js-show-contact,a.qa-show-contact,a.cy-show-contact,button[class*="phone" i],button[class*="contact" i],[data-testid*="phone" i],[data-testid*="contact" i]')).slice(0,3);for(const c of targets){try{c.scrollIntoView({block:"center"});["mouseover","mousedown","mouseup","click"].forEach((t)=>c.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window})))}catch{}}};
+const reveal=()=>{const nodes=Array.from(document.querySelectorAll('button,[role="button"],a.js-show-contact,a.qa-show-contact,a.cy-show-contact,button[class*="phone" i],button[class*="contact" i],[data-testid*="phone" i],[data-testid*="contact" i]'));const targets=nodes.filter((e)=>{const href=(e.getAttribute&&e.getAttribute("href")||"").toLowerCase();if(href.startsWith("tel:")||href.includes("wa.me")||href.includes("whatsapp"))return false;return /show\s+contact|show\s+phone|reveal\s+phone|phone|contact/i.test((e.textContent||"").trim())||e.matches('a.js-show-contact,a.qa-show-contact,a.cy-show-contact,button[class*="phone" i],button[class*="contact" i],[data-testid*="phone" i],[data-testid*="contact" i]')}).slice(0,3);for(const c of targets){try{c.scrollIntoView({block:"center"});["mouseover","mousedown","mouseup","click"].forEach((t)=>c.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window})))}catch{}}};
 const finish=()=>{const payload=extractMarketplaceCapturePayload(document,location,(navigator&&navigator.userAgent)||"");const json=JSON.stringify(payload);if(new TextEncoder().encode(json).length>MAX){alert("WhispeRM capture is too large. Capture a single public listing page and try again.");return}if(payload.looksLikeGridPage&&!confirm("This looks like a search results page, not a single listing. Capture anyway?"))return;window.open(INTAKE+"?payload="+encodeURIComponent(json),"_blank","noopener,noreferrer")};
 reveal();
 setTimeout(finish,2500);
