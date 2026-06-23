@@ -233,6 +233,41 @@ test("capture creates a marketplace acquisition deal linked to contact and Captu
 });
 
 
+test("different listings with same seller marketplaceIdentifier do not collapse to one capture", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const first = await services.marketplaceAcquisition.capture(context, {
+    ...captureInput,
+    listingUrl: "https://jiji.com.gh/listings/seller-shared-1",
+    externalId: undefined,
+    marketplaceListingId: undefined,
+    marketplaceIdentifier: "+233558153403",
+    sellerPhone: "0558153403",
+    phone: "0558153403",
+    title: "BMW 520i",
+  });
+
+  const second = await services.marketplaceAcquisition.capture(context, {
+    ...captureInput,
+    listingUrl: "https://jiji.com.gh/listings/seller-shared-2",
+    externalId: undefined,
+    marketplaceListingId: undefined,
+    marketplaceIdentifier: "+233558153403",
+    sellerPhone: "0558153403",
+    phone: "0558153403",
+    title: "Toyota Prado",
+  });
+
+  assert.equal(first.contactId, second.contactId);
+  assert.equal(first.dealId, second.dealId);
+  assert.notEqual(first.captureId, second.captureId);
+  assert.equal(repositories.contactsById.size, 1);
+  assert.equal(repositories.dealsByExternalId.size, 1);
+  assert.equal(repositories.capturesByUrl.size, 2);
+  assert.equal(repositories.draftInventoriesByCapture.size, 2);
+});
+
 test("multiple listings from same seller phone reuse one contact and one acquisition deal", async () => {
   const repositories = createRepositories();
   const services = createWhispeRMServices(repositories);
