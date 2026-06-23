@@ -9,9 +9,10 @@ export async function GET() {
 
   const context = { tenantId: tenant.id };
   const repo = new PrismaContactRepository(prisma as any);
-  const page = await repo.list(context, { limit: 50 });
+  const page = await repo.list(context, { limit: 200 });
+  const contacts = [...page.items].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 
-  return NextResponse.json({ contacts: page.items, nextCursor: page.nextCursor });
+  return NextResponse.json({ contacts, nextCursor: page.nextCursor });
 }
 
 export async function POST(request: NextRequest) {
