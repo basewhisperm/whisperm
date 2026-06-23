@@ -123,7 +123,7 @@ const isSentInvitation = (invitation: SellerInvitationRecord | null): boolean =>
 const stageFromCapture = (status: string): string => status;
 const stageFromDeal = (deal: DealDetailRecord | null, capture: MarketplaceCaptureRecord): string => {
   const metadata = isRecord(deal?.deal.metadata) ? deal.deal.metadata : {};
-  return nonEmpty(metadata.pipelineStageName) ?? nonEmpty(metadata.stageName) ?? deal?.deal.pipelineStageId ?? stageFromCapture(capture.status);
+  return nonEmpty(metadata.pipelineStageName) ?? nonEmpty(metadata.stageName) ?? stageFromCapture(capture.status);
 };
 
 export class SellerAcquisitionRecordService {
