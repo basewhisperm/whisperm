@@ -1605,10 +1605,25 @@ export class MarketplaceAcquisitionCaptureService {
       const createdCaptureIds = firstCapture.created ? [finalCapture.id] : [];
       const matchedCaptureIds = firstCapture.created ? [] : [finalCapture.id];
       const draftInventoryIds: string[] = [];
-      for (const listingInput of listingInputs) {
+
+      for (const [index, listingInput] of listingInputs.entries()) {
+        const listingCapture =
+          index === 0
+            ? finalCapture
+            : (await this.createOrMatchCapture(repositories, context, tenantScope, listingInput, contactResult.contact.id)).capture;
+
+        if (index > 0) {
+          if (listingCapture.dealId !== dealResult.deal.id) {
+            await repositories.marketplaceCaptures.update(tenantScope, listingCapture.id, { dealId: dealResult.deal.id });
+          }
+          if (!createdCaptureIds.includes(listingCapture.id) && !matchedCaptureIds.includes(listingCapture.id)) {
+            matchedCaptureIds.push(listingCapture.id);
+          }
+        }
+
         const draftInventory = await repositories.draftInventories.upsertForCapture(tenantScope, {
           tenantId: context.tenantId,
-          marketplaceCaptureId: finalCapture.id,
+          marketplaceCaptureId: listingCapture.id,
           contactId: contactResult.contact.id,
           dealId: dealResult.deal.id,
           title: listingInput.title,
