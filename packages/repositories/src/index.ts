@@ -1352,12 +1352,13 @@ export class PrismaDraftInventoryRepository implements DraftInventoryRepository 
 
   async upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord> {
     ensureTenantInput(context, input);
-    const existingByCapture = await this.findByMarketplaceCaptureId(context, input.marketplaceCaptureId);
-    if (existingByCapture !== null) return existingByCapture;
     if (input.marketplaceSource !== undefined && input.marketplaceSource !== null && input.marketplaceListingId !== undefined && input.marketplaceListingId !== null) {
       const existingByListing = await this.findByMarketplaceListing(context, input.marketplaceSource, input.marketplaceListingId);
       if (existingByListing !== null) return this.update(context, existingByListing.id, input);
+      return this.create(context, input);
     }
+    const existingByCapture = await this.findByMarketplaceCaptureId(context, input.marketplaceCaptureId);
+    if (existingByCapture !== null) return existingByCapture;
     return this.create(context, input);
   }
 

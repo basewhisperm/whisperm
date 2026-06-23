@@ -114,8 +114,6 @@ const createRepositories = (overrides = {}) => {
       },
       async upsertForCapture(scope, input) {
         push("draftInventories", "upsertForCapture", [scope, input]);
-        const existingByCapture = draftInventories.get(`${scope.tenantId}:${input.marketplaceCaptureId}`);
-        if (existingByCapture) return existingByCapture;
         if (input.marketplaceSource && input.marketplaceListingId) {
           const existingByListing = [...draftInventories.values()].find((draft) => draft.tenantId === scope.tenantId && draft.marketplaceSource === input.marketplaceSource && draft.marketplaceListingId === input.marketplaceListingId);
           if (existingByListing) {
@@ -123,7 +121,10 @@ const createRepositories = (overrides = {}) => {
             draftInventories.set(`${scope.tenantId}:${updated.marketplaceCaptureId}`, updated);
             return updated;
           }
+          return this.create(scope, input);
         }
+        const existingByCapture = draftInventories.get(`${scope.tenantId}:${input.marketplaceCaptureId}`);
+        if (existingByCapture) return existingByCapture;
         return this.create(scope, input);
       },
       async update(scope, draftInventoryId, input) {

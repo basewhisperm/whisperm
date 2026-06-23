@@ -148,8 +148,12 @@ function slaCopy(record: SellerAcquisitionRecord): string {
   ].filter(Boolean).join(" · ") || "Oldest pending";
 }
 
+function listingCount(record: SellerAcquisitionRecord): number {
+  return Math.max(1, record.portfolio?.listingCount ?? 1);
+}
+
 function searchText(record: SellerAcquisitionRecord): string {
-  return [sellerName(record), record.contact?.phone, title(record), source(record), record.capture.id]
+  return [sellerName(record), record.contact?.phone, title(record), source(record), record.capture.id, ...(record.portfolio?.captureIds ?? [])]
     .filter(Boolean).join(" ").toLowerCase();
 }
 
@@ -549,6 +553,7 @@ function Workbench({ record, actionError, onActionError, onRefresh, onRecordPatc
         <p><strong className="text-foreground">Mobile status:</strong> {hasPhone(record) ? `Ready for WhatsApp candidate (${phone(record)})` : "Mobile required"}</p>
         {blocked ? <p className="font-semibold text-red-700">PHONE_REQUIRED blocks invitation. Next action: Reveal Phone.</p> : null}
         <p><strong className="text-foreground">Inventory:</strong> {title(record)} · {price(record)} · {source(record)}</p>
+        <p><strong className="text-foreground">Portfolio:</strong> {listingCount(record)} listing{listingCount(record) === 1 ? "" : "s"} attached to this seller.</p>
         <p><strong className="text-foreground">Latest invitation:</strong> {record.latestInvitation ? `${record.latestInvitation.channel} ${record.latestInvitation.status}` : "No invitation sent"}</p>
         <p><strong className="text-foreground">Current stage:</strong> {record.currentStage}</p>
         <p><strong className="text-foreground">Health:</strong> {record.healthStatus}</p>

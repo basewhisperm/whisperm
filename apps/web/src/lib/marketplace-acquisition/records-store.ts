@@ -39,6 +39,7 @@ export interface SellerAcquisitionDeal {
 }
 
 export interface DraftInventoryRecord {
+  readonly id?: string;
   readonly title: string;
   readonly description?: string | null;
   readonly price?: number | string | null;
@@ -60,12 +61,20 @@ export interface SellerInvitationRecord {
   readonly expiresAt: string;
 }
 
+export interface SellerAcquisitionPortfolioSummary {
+  readonly listingCount: number;
+  readonly captureIds: readonly string[];
+  readonly draftInventoryIds: readonly string[];
+  readonly images: readonly string[];
+}
+
 export interface SellerAcquisitionRecord {
   readonly capture: MarketplaceCaptureRecord;
   readonly contact: SellerAcquisitionContact | null;
   readonly deal: SellerAcquisitionDeal | null;
   readonly draftInventory: DraftInventoryRecord | null;
   readonly images: readonly string[];
+  readonly portfolio?: SellerAcquisitionPortfolioSummary;
   readonly latestInvitation: SellerInvitationRecord | null;
   readonly invitationHistory: readonly SellerInvitationRecord[];
   readonly claimTokenStatus: { readonly status: string; readonly expiresAt?: string | null } | null;

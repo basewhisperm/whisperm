@@ -24,12 +24,20 @@ export type SellerAcquisitionNextAction = "REVEAL_PHONE" | "SEND_INVITATION" | "
 export type SellerAcquisitionMissingRequirement = "PHONE_REQUIRED" | "DRAFT_INVENTORY_REQUIRED" | "CLAIM_REQUIRED" | "SELLER_CONVERSION_REQUIRED" | "INVENTORY_CONVERSION_REQUIRED";
 export type CaptureConfidence = "HIGH" | "MEDIUM" | "LOW";
 
+export interface SellerAcquisitionPortfolioSummary {
+  readonly listingCount: number;
+  readonly captureIds: readonly string[];
+  readonly draftInventoryIds: readonly string[];
+  readonly images: readonly string[];
+}
+
 export interface SellerAcquisitionRecord {
   readonly capture: MarketplaceCaptureRecord;
   readonly contact: ContactRecord | null;
   readonly deal: DealDetailRecord | null;
   readonly draftInventory: DraftInventoryRecord | null;
   readonly images: readonly string[];
+  readonly portfolio: SellerAcquisitionPortfolioSummary;
   readonly latestInvitation: SellerInvitationRecord | null;
   readonly invitationHistory: readonly SellerInvitationRecord[];
   readonly claimTokenStatus: MarketplaceClaimTokenRecord | null;
@@ -124,7 +132,46 @@ export class SellerAcquisitionRecordService {
   async list(context: Context): Promise<readonly SellerAcquisitionRecord[]> {
     const page = await this.deps.marketplaceCaptures.list(context, { limit: 100 });
     const captures = [...page.items].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-    return Promise.all(captures.map((capture) => this.buildFromCapture(context, capture)));
+    const records = await Promise.all(captures.map((capture) => this.buildFromCapture(context, capture)));
+    const groups = new Map<string, SellerAcquisitionRecord[]>();
+
+    for (const record of records) {
+      const phone = resolvePhone(record.capture, record.contact);
+      const groupKey =
+        phone === null
+          ? record.capture.dealId ?? record.capture.contactId ?? record.capture.sellerProfileUrl ?? `${record.capture.sellerName ?? "unknown"}:${record.capture.marketplaceSourceId ?? "unknown"}`
+          : `phone:${phone}`;
+      groups.set(groupKey, [...(groups.get(groupKey) ?? []), record]);
+    }
+
+    return [...groups.values()].map((group) => {
+      const representative = [...group].sort((a, b) => {
+        const aScore = (a.isQualifiedSellerLead ? 100 : 0) + (a.images.length > 0 ? 10 : 0);
+        const bScore = (b.isQualifiedSellerLead ? 100 : 0) + (b.images.length > 0 ? 10 : 0);
+        if (aScore !== bScore) return bScore - aScore;
+        return Date.parse(b.capture.createdAt) - Date.parse(a.capture.createdAt);
+      })[0];
+
+      if (representative === undefined) {
+        throw new Error("Seller acquisition record group unexpectedly empty");
+      }
+
+      const images = Array.from(new Set(group.flatMap((record) => record.images)));
+      const draftInventoryIds = group
+        .map((record) => record.draftInventory?.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+      return {
+        ...representative,
+        images: images.length > 0 ? images : representative.images,
+        portfolio: {
+          listingCount: group.length,
+          captureIds: group.map((record) => record.capture.id),
+          draftInventoryIds,
+          images,
+        },
+      };
+    });
   }
 
   async findByCaptureId(context: Context, captureId: string): Promise<SellerAcquisitionRecord | null> {
@@ -168,6 +215,12 @@ export class SellerAcquisitionRecordService {
       deal,
       draftInventory,
       images,
+      portfolio: {
+        listingCount: 1,
+        captureIds: [capture.id],
+        draftInventoryIds: draftInventory?.id === undefined ? [] : [draftInventory.id],
+        images,
+      },
       latestInvitation,
       invitationHistory,
       claimTokenStatus,
