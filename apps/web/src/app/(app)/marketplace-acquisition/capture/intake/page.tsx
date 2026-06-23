@@ -81,7 +81,11 @@ function CaptureForm({ payload }: { readonly payload: MarketplaceCapturePayload 
 
   const submit = async () => {
     setState({ status: "submitting" });
-    const clean = (value: string) => value.trim() || undefined;
+    const clean = (value: string) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0 || trimmed === "[object Object]") return undefined;
+      return trimmed;
+    };
     const cleanedFields = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, clean(value)]));
     const body = {
       ...payload,
