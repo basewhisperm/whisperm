@@ -1344,7 +1344,7 @@ const marketplacePriceForDecimal = (input: MarketplaceCaptureServiceInput): stri
   return /^\d+(\.\d+)?$/u.test(decimal) ? decimal : undefined;
 };
 const listingUrlForCapture = (input: MarketplaceCaptureServiceInput): string => input.listingUrl ?? input.sourceUrl ?? "";
-const externalIdForCapture = (input: MarketplaceCaptureServiceInput): string | undefined => input.externalId ?? input.marketplaceListingId ?? input.marketplaceIdentifier ?? undefined;
+const externalIdForCapture = (input: MarketplaceCaptureServiceInput): string | undefined => input.externalId ?? input.marketplaceListingId ?? undefined;
 const marketplaceSourceForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => input.marketplaceSource ?? input.sourceMarketplace ?? input.marketplaceSourceId ?? sourceHost(listingUrlForCapture(input));
 
 const marketplaceImagesForDraft = (input: MarketplaceCaptureServiceInput): readonly string[] | undefined =>

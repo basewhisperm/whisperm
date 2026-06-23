@@ -5,6 +5,7 @@ function byteLength(value) { return new TextEncoder().encode(value).length; }
 
 /** @param {unknown} value @param {number} [limit] */
 const clean = (value, limit = 500) => typeof value === 'string' ? value.replace(/\s+/gu, ' ').trim().slice(0, limit) : '';
+const scalar = (value) => typeof value === 'string' || typeof value === 'number' ? String(value) : '';
 
 const compoundSecondLevelHostSuffixes = new Set(['com', 'co', 'org', 'net', 'gov', 'edu', 'ac']);
 
@@ -87,7 +88,9 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
   const phoneSearchText = phoneRegex.test(contactText) ? contactText : (phoneRegex.test(sellerBlockText) ? sellerBlockText : bodyText);
   const phone = telPhone || clean((phoneSearchText.match(phoneRegex) || [])[0] || '', 64);
 
-  const price = clean((offer?.priceCurrency ? `${offer.priceCurrency} ` : '') + (offer?.price || ''), 120) || meta('product:price:amount') || meta('og:price:amount') || selectorText([
+  const offerPrice = scalar(offer?.price);
+  const offerCurrency = scalar(offer?.priceCurrency);
+  const price = clean((offerCurrency ? `${offerCurrency} ` : '') + offerPrice, 120) || meta('product:price:amount') || meta('og:price:amount') || selectorText([
     '.qa-advert-price-view-value',
     '[itemprop="price"]',
     '[data-testid*="price" i]',
@@ -167,6 +170,7 @@ export function createMarketplaceCaptureBookmarklet(options) {
 const INTAKE=__INTAKE_URL__;
 const MAX=12000;
 const clean=(value,limit=500)=>typeof value==="string"?value.replace(/\s+/gu," ").trim().slice(0,limit):"";
+const scalar=(value)=>typeof value==="string"||typeof value==="number"?String(value):"";
 const suffixes=new Set(["com","co","org","net","gov","edu","ac"]);
 const detectMarketplaceSource=(url)=>{try{const segments=new URL(url).hostname.toLowerCase().replace(/^www\./u,"").split(".");const lastTwo=segments.slice(-2);return segments.length>2&&suffixes.has(lastTwo[0])?segments.slice(-3).join("."):lastTwo.join(".")}catch{return"unknown"}};
 const deriveMarketplaceListingId=(url)=>{try{const parsed=new URL(url);for(const key of["listingId","listing_id","itemId","item_id","id"]){const value=clean(parsed.searchParams.get(key)||"",255);if(value)return value}return clean(parsed.pathname.split("/").filter(Boolean).pop()||"",255)||undefined}catch{return undefined}};
@@ -195,7 +199,9 @@ const extractMarketplaceCapturePayload=(doc,locationLike,userAgent="")=>{
   const sellerBlockText=clean(doc.querySelector(".b-seller-block")?.textContent||"",2000);
   const phoneSearchText=phoneRegex.test(contactText)?contactText:(phoneRegex.test(sellerBlockText)?sellerBlockText:bodyText);
   const phone=telPhone||clean((phoneSearchText.match(phoneRegex)||[])[0]||"",64);
-  const price=clean((offer?.priceCurrency ? offer.priceCurrency + " " : "")+(offer?.price||""),120)||meta("product:price:amount")||meta("og:price:amount")||selectorText([".qa-advert-price-view-value",'[itemprop="price"]','[data-testid*="price" i]',".qa-advert-price-view",'[class*="price" i]'],120);
+  const offerPrice=scalar(offer?.price);
+const offerCurrency=scalar(offer?.priceCurrency);
+const price=clean((offerCurrency ? offerCurrency + " " : "")+offerPrice,120)||meta("product:price:amount")||meta("og:price:amount")||selectorText([".qa-advert-price-view-value",'[itemprop="price"]','[data-testid*="price" i]',".qa-advert-price-view",'[class*="price" i]'],120);
   const inferCurrency=(value)=>/(?:GH₵|GH¢|GHS|₵)/iu.test(value||"")?"GHS":"";
   const currency=clean(offer?.priceCurrency||meta("product:price:currency")||inferCurrency(price),16);
   const images=arr(product?.image).concat([meta("og:image"),meta("twitter:image")],Array.from(doc.querySelectorAll('[itemprop="image"], img')).map((img)=>img.getAttribute("content")||img.getAttribute("src"))).map((url)=>{try{return new URL(clean(String(url),2000),href).toString()}catch{return clean(String(url),2000)}}).filter(Boolean);
