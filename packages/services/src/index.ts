@@ -1779,7 +1779,13 @@ export class MarketplaceAcquisitionCaptureService {
       status: "CAPTURED",
       metadata: { ...mergedCaptureMetadata(data), sellerListingCount: 1, sourceMarketplace: data.marketplaceSource ?? data.sourceMarketplace ?? undefined }
     });
-    const linkedCapture = contactId === undefined || capture.contactId === contactId ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId });
+    const linkedCapture =
+      contactId === undefined || capture.contactId === contactId
+        ? capture
+        : await repositories.marketplaceCaptures.update(tenantScope, capture.id, {
+            contactId,
+            metadata: { ...(capture.metadata ?? {}), ...mergedCaptureMetadata(data) },
+          });
     return { capture: linkedCapture, created: existingCapture === null };
   }
 
