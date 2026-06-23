@@ -152,6 +152,56 @@ function listingCount(record: SellerAcquisitionRecord): number {
   return Math.max(1, record.portfolio?.listingCount ?? 1);
 }
 
+function hasPrice(record: SellerAcquisitionRecord): boolean {
+  const rawPrice = record.draftInventory?.price ?? record.capture.price;
+  return rawPrice !== null && rawPrice !== undefined && rawPrice !== "" && !(typeof rawPrice === "string" && rawPrice.includes("[object"));
+}
+
+function readinessChecks(record: SellerAcquisitionRecord): readonly { readonly label: string; readonly passed: boolean }[] {
+  return [
+    { label: "Mobile number", passed: hasPhone(record) },
+    { label: "Seller name", passed: sellerName(record) !== "Marketplace seller" },
+    { label: "Listing title", passed: title(record) !== "Untitled marketplace listing" },
+    { label: "Price", passed: hasPrice(record) },
+    { label: "Images", passed: record.images.length > 0 },
+  ];
+}
+
+function readinessScore(record: SellerAcquisitionRecord): number {
+  return readinessChecks(record).reduce((score, item) => score + (item.passed ? 20 : 0), 0);
+}
+
+function readinessStatus(record: SellerAcquisitionRecord): "READY" | "REVIEW" | "BLOCKED" {
+  if (!hasPhone(record)) return "BLOCKED";
+  return readinessScore(record) >= 80 ? "READY" : "REVIEW";
+}
+
+function qualityIssues(record: SellerAcquisitionRecord): readonly string[] {
+  return readinessChecks(record).filter((item) => !item.passed).map((item) => `${item.label} missing`);
+}
+
+function nextActionReason(record: SellerAcquisitionRecord): string {
+  if (!hasPhone(record)) return "Mobile number is required before invitation.";
+  if (record.nextAction === "SEND_INVITATION") return "Seller has a mobile number and is ready for WhatsApp-first invitation.";
+  if (record.nextAction === "WAIT_FOR_CLAIM") return "Invitation has been sent. Waiting for seller claim.";
+  if (record.nextAction === "RETRY_INVITATION") return "Latest invitation failed and should be retried.";
+  if (record.nextAction === "CONVERT_SELLER") return "Seller claim is ready for Render seller conversion.";
+  if (record.nextAction === "CONVERT_INVENTORY") return "Seller exists in Render. Inventory is ready for conversion.";
+  if (record.nextAction === "COMPLETE_ACQUISITION") return "Seller and inventory are converted. Complete the acquisition.";
+  return "No operator action is currently required.";
+}
+
+function timelineItems(record: SellerAcquisitionRecord): readonly { readonly label: string; readonly done: boolean }[] {
+  return [
+    { label: "Captured", done: true },
+    { label: "Contact", done: record.contact !== null },
+    { label: "Deal", done: record.deal !== null },
+    { label: "Draft inventory", done: record.draftInventory !== null },
+    { label: "Invited", done: record.latestInvitation !== null },
+    { label: "Completed", done: record.healthStatus === "COMPLETED" },
+  ];
+}
+
 function searchText(record: SellerAcquisitionRecord): string {
   return [sellerName(record), record.contact?.phone, title(record), source(record), record.capture.id, ...(record.portfolio?.captureIds ?? [])]
     .filter(Boolean).join(" ").toLowerCase();
@@ -422,6 +472,24 @@ function Badge({ children, tone }: { readonly children: ReactNode; readonly tone
   );
 }
 
+function WorkbenchSection({ title, children }: { readonly title: string; readonly children: ReactNode }) {
+  return (
+    <section className="rounded-2xl bg-secondary p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{title}</p>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function CheckLine({ label, passed }: { readonly label: string; readonly passed: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={passed ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{passed ? "✓" : "⚠"}</span>
+    </div>
+  );
+}
+
 function RecordCard({ record, selected, onSelect }: {
   readonly record: SellerAcquisitionRecord;
   readonly selected: boolean;
@@ -548,18 +616,57 @@ function Workbench({ record, actionError, onActionError, onRefresh, onRecordPatc
         <h2 className="mt-1 text-lg font-semibold text-foreground">{sellerName(record)}</h2>
         <p className="mt-1 text-xs text-muted-foreground">Contact Type: Seller · Source: Marketplace · Lifecycle: Acquisition Prospect</p>
       </div>
+        <WorkbenchSection title="Acquisition readiness">
+          <div className="space-y-2">
+            {readinessChecks(record).map((item) => (
+              <CheckLine key={item.label} label={item.label} passed={item.passed} />
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Badge tone={badgeTone(readinessStatus(record))}>{readinessStatus(record)}</Badge>
+            <Badge>{readinessScore(record)}/100</Badge>
+          </div>
+        </WorkbenchSection>
 
-      <div className="space-y-2 text-sm text-muted-foreground">
-        <p><strong className="text-foreground">Mobile status:</strong> {hasPhone(record) ? `Ready for WhatsApp candidate (${phone(record)})` : "Mobile required"}</p>
-        {blocked ? <p className="font-semibold text-red-700">PHONE_REQUIRED blocks invitation. Next action: Reveal Phone.</p> : null}
-        <p><strong className="text-foreground">Inventory:</strong> {title(record)} · {price(record)} · {source(record)}</p>
-        <p><strong className="text-foreground">Portfolio:</strong> {listingCount(record)} listing{listingCount(record) === 1 ? "" : "s"} attached to this seller.</p>
-        <p><strong className="text-foreground">Latest invitation:</strong> {record.latestInvitation ? `${record.latestInvitation.channel} ${record.latestInvitation.status}` : "No invitation sent"}</p>
-        <p><strong className="text-foreground">Current stage:</strong> {record.currentStage}</p>
-        <p><strong className="text-foreground">Health:</strong> {record.healthStatus}</p>
-        <p><strong className="text-foreground">Next action:</strong> {nextActionLabels[record.nextAction]}</p>
-        <p><strong className="text-foreground">SLA:</strong> {slaCopy(record)}</p>
-      </div>
+        <WorkbenchSection title="Next action">
+          <p className="text-base font-semibold text-foreground">{nextActionLabels[record.nextAction]}</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{nextActionReason(record)}</p>
+          {blocked ? <p className="mt-2 text-sm font-semibold text-red-700">PHONE_REQUIRED blocks invitation.</p> : null}
+        </WorkbenchSection>
+
+        <WorkbenchSection title="Invitation status">
+          <p className="text-sm text-muted-foreground">
+            {record.latestInvitation ? `${record.latestInvitation.channel} ${record.latestInvitation.status}` : "No invitation sent"}
+          </p>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="Acquisition timeline">
+          <div className="space-y-2">
+            {timelineItems(record).map((item) => (
+              <CheckLine key={item.label} label={item.label} passed={item.done} />
+            ))}
+          </div>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="Extract quality issues">
+          {qualityIssues(record).length === 0 ? (
+            <p className="text-sm font-medium text-emerald-700">No major extract issues detected.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {qualityIssues(record).map((issue) => (
+                <Badge key={issue} tone="bg-amber-50 text-amber-700">⚠ {issue}</Badge>
+              ))}
+            </div>
+          )}
+          <button
+            className="mt-3 h-10 w-full rounded-xl bg-background px-4 text-sm font-semibold text-foreground"
+            onClick={openEdit}
+            style={{ border: "0.5px solid var(--color-border)" }}
+            type="button"
+          >
+            Edit extract
+          </button>
+        </WorkbenchSection>
 
       <button
         className="h-10 w-full rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -629,16 +736,7 @@ function Workbench({ record, actionError, onActionError, onRefresh, onRecordPatc
             </button>
           </div>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={openEdit}
-          className="w-full rounded-xl py-2 text-sm font-medium text-muted-foreground hover:bg-mist"
-          style={{ border: "0.5px solid var(--color-border)" }}
-        >
-          Edit extract
-        </button>
-      )}
+        ) : null}
     </aside>
   );
 }
