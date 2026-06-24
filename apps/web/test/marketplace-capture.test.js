@@ -101,6 +101,10 @@ test('intake page submits seller and inventory data to capture API', () => {
     assert.match(source, new RegExp(field, 'u'));
   }
   assert.match(source, /fetch\("\/api\/marketplace-acquisition\/captures"/u);
+  assert.match(source, /sellerPhone: clean\(fields\.phone \?\? ""\)/u);
+  assert.match(source, /Capture result/u);
+  assert.match(source, /Contact, deal, and draft inventory/u);
+  assert.match(source, /Edit phone and retry qualification/u);
 });
 
 test('mobile URL capture posts URL only and does not require manual seller fields', () => {

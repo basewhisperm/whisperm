@@ -5,7 +5,16 @@ function byteLength(value) { return new TextEncoder().encode(value).length; }
 
 /** @param {unknown} value @param {number} [limit] */
 const clean = (value, limit = 500) => typeof value === 'string' ? value.replace(/\s+/gu, ' ').trim().slice(0, limit) : '';
-const scalar = (value) => typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+const scalar = (value) => {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (value && typeof value === 'object') {
+    for (const key of ['price', 'amount', 'value', 'lowPrice', 'highPrice']) {
+      const nested = value[key];
+      if (typeof nested === 'string' || typeof nested === 'number') return String(nested);
+    }
+  }
+  return '';
+};
 
 const compoundSecondLevelHostSuffixes = new Set(['com', 'co', 'org', 'net', 'gov', 'edu', 'ac']);
 
@@ -186,7 +195,7 @@ export function createMarketplaceCaptureBookmarklet(options) {
 const INTAKE=__INTAKE_URL__;
 const MAX=12000;
 const clean=(value,limit=500)=>typeof value==="string"?value.replace(/\s+/gu," ").trim().slice(0,limit):"";
-const scalar=(value)=>typeof value==="string"||typeof value==="number"?String(value):"";
+const scalar=(value)=>{if(typeof value==="string"||typeof value==="number")return String(value);if(value&&typeof value==="object"){for(const key of["price","amount","value","lowPrice","highPrice"]){const nested=value[key];if(typeof nested==="string"||typeof nested==="number")return String(nested)}}return""};
 const suffixes=new Set(["com","co","org","net","gov","edu","ac"]);
 const detectMarketplaceSource=(url)=>{try{const segments=new URL(url).hostname.toLowerCase().replace(/^www\./u,"").split(".");const lastTwo=segments.slice(-2);return segments.length>2&&suffixes.has(lastTwo[0])?segments.slice(-3).join("."):lastTwo.join(".")}catch{return"unknown"}};
 const deriveMarketplaceListingId=(url)=>{try{const parsed=new URL(url);for(const key of["listingId","listing_id","itemId","item_id","id"]){const value=clean(parsed.searchParams.get(key)||"",255);if(value)return value}return clean(parsed.pathname.split("/").filter(Boolean).pop()||"",255)||undefined}catch{return undefined}};
