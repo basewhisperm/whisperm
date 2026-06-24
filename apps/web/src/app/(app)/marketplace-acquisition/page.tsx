@@ -410,6 +410,9 @@ export default function MarketplaceAcquisitionPage() {
 
   const selectedRecord = filteredRecords.find((r) => r.capture.id === selectedCaptureId) ?? filteredRecords[0] ?? null;
   const filteredRollups = rollupRecords(filteredRecords);
+  const selectedRollup = selectedRecord === null
+    ? null
+    : filteredRollups.find((rollup) => rollup.records.some((record) => record.capture.id === selectedRecord.capture.id)) ?? null;
   const visibleQueueGroups = queueBuckets
     .map((bucket) => ({ bucket, rollups: filteredRollups.filter((rollup) => rollup.records.some(bucket.matches)) }))
     .filter((group) => queueFilter === "all" ? group.rollups.length > 0 : group.bucket.id === queueFilter);
@@ -614,6 +617,7 @@ export default function MarketplaceAcquisitionPage() {
         </div>
         <Workbench
           record={selectedRecord}
+          rollupRecords={selectedRollup?.records ?? []}
           actionError={actionError}
           onActionError={setActionError}
           onRefresh={refreshRecords}
@@ -771,8 +775,9 @@ function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle
   );
 }
 
-function Workbench({ record, actionError, onActionError, onRefresh, onRecordPatched }: {
+function Workbench({ record, rollupRecords, actionError, onActionError, onRefresh, onRecordPatched }: {
   readonly record: SellerAcquisitionRecord | null;
+  readonly rollupRecords: readonly SellerAcquisitionRecord[];
   readonly actionError: string | null;
   readonly onActionError: (message: string | null) => void;
   readonly onRefresh: () => Promise<void>;
@@ -804,6 +809,11 @@ function Workbench({ record, actionError, onActionError, onRefresh, onRecordPatc
 
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
   const enabled = isActionEnabled(record);
+  const sellerRecords = rollupRecords.length > 0 ? rollupRecords : [record];
+  const sellerListingTitles = [...new Set(sellerRecords.map(title))].slice(0, 8);
+  const sellerImageCount = sellerRecords.reduce((count, item) => count + item.images.length, 0);
+  const sellerPhoneReadyCount = sellerRecords.filter(hasPhone).length;
+  const sellerLatestInvitation = sellerRecords.find((item) => item.latestInvitation !== null)?.latestInvitation ?? null;
 
   const openEdit = () => {
     setEditFields(editFieldsFromRecord(record));
@@ -852,10 +862,28 @@ function Workbench({ record, actionError, onActionError, onRefresh, onRecordPatc
   return (
     <aside className="space-y-4 rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
       <div>
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Workbench</p>
+        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Seller dossier</p>
         <h2 className="mt-1 text-lg font-semibold text-foreground">{sellerName(record)}</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Contact Type: Seller · Source: Marketplace · Lifecycle: Acquisition Prospect</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {hasPhone(record) ? phone(record) : "Mobile required"} · {source(record)} · {sellerRecords.length} capture{sellerRecords.length === 1 ? "" : "s"}
+        </p>
       </div>
+
+      <WorkbenchSection title="Seller portfolio">
+        <div className="grid gap-2 text-sm text-muted-foreground">
+          <p><strong className="text-foreground">Listings:</strong> {sellerListingTitles.length}</p>
+          <p><strong className="text-foreground">Phone-ready captures:</strong> {sellerPhoneReadyCount}/{sellerRecords.length}</p>
+          <p><strong className="text-foreground">Images captured:</strong> {sellerImageCount}</p>
+          <p><strong className="text-foreground">Latest invitation:</strong> {sellerLatestInvitation ? `${sellerLatestInvitation.channel} ${sellerLatestInvitation.status}` : "No invitation sent"}</p>
+        </div>
+        {sellerListingTitles.length > 0 ? (
+          <ul className="mt-3 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+            {sellerListingTitles.map((item) => (
+              <li key={item} className="truncate">{item}</li>
+            ))}
+          </ul>
+        ) : null}
+      </WorkbenchSection>
         <WorkbenchSection title="Acquisition readiness">
           <div className="space-y-2">
             {readinessChecks(record).map((item) => (
@@ -876,7 +904,7 @@ function Workbench({ record, actionError, onActionError, onRefresh, onRecordPatc
 
         <WorkbenchSection title="Invitation status">
           <p className="text-sm text-muted-foreground">
-            {record.latestInvitation ? `${record.latestInvitation.channel} ${record.latestInvitation.status}` : "No invitation sent"}
+            {sellerLatestInvitation ? `${sellerLatestInvitation.channel} ${sellerLatestInvitation.status}` : "No invitation sent"}
           </p>
         </WorkbenchSection>
 
