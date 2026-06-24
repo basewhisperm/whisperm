@@ -447,12 +447,11 @@ function RecordCard({ record, selected, onSelect }: {
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        {blocked ? <Badge tone="bg-red-50 text-red-700">BLOCKED</Badge> : null}
-        <Badge tone={badgeTone(record.healthStatus)}>{record.healthStatus}</Badge>
-        <Badge tone={badgeTone(confidence(record))}>Capture Confidence: {confidence(record)}</Badge>
-        <Badge>Acquisition Score: {String(acquisitionScore(record))}</Badge>
-        <Badge>{record.currentStage}</Badge>
-        <Badge>{nextActionLabels[record.nextAction]}</Badge>
+        <Badge tone={blocked ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}>
+          {blocked ? "BLOCKED" : "PHONE READY"}
+        </Badge>
+        <Badge>{queueBuckets.find((bucket) => bucket.matches(record))?.label ?? "All Sellers"}</Badge>
+        <Badge>{capturedAge(record)}</Badge>
       </div>
       {record.deal?.deal.id ? (
         <Link className="mt-3 inline-block text-xs font-semibold text-whisper" href={`/marketplace-acquisition/${record.deal.deal.id}`}>
