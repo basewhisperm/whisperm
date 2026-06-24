@@ -1590,10 +1590,6 @@ export class MarketplaceAcquisitionCaptureService {
     }
 
     return runWrite(this.deps, context, async (repositories) => {
-      if (sellerPhoneForInput(data) === undefined) {
-        return this.captureUnqualifiedListing(repositories, context, tenantScope, data);
-      }
-
       const contactResult = await this.resolveContact(repositories, context, data);
       const listingInputs = this.listingInputs(data);
       const firstInput = listingInputs[0] ?? data;
@@ -1658,12 +1654,12 @@ export class MarketplaceAcquisitionCaptureService {
         captureId: finalCapture.id,
         contactId: contactResult.contact.id,
         dealId: dealResult.deal.id,
-        contactMatchStrategy: contactResult.strategy,
+        contactMatchStrategy: sellerPhoneForInput(data) === undefined ? "unqualified" : contactResult.strategy,
         dealCreated: dealResult.created,
         dealMatched: !dealResult.created,
         draftInventoryId,
         status: finalCapture.status,
-        sellerIdentityStrategy: contactResult.strategy,
+        sellerIdentityStrategy: sellerPhoneForInput(data) === undefined ? "unqualified" : contactResult.strategy,
         portfolioCaptureCount: listingInputs.length,
         createdCaptureIds,
         matchedCaptureIds,
