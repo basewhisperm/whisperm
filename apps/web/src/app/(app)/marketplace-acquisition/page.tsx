@@ -20,6 +20,12 @@ interface QueueBucket {
   readonly matches: (record: SellerAcquisitionRecord) => boolean;
 }
 
+interface SellerRollup {
+  readonly key: string;
+  readonly primary: SellerAcquisitionRecord;
+  readonly records: readonly SellerAcquisitionRecord[];
+}
+
 const queueBuckets: readonly QueueBucket[] = [
   { id: "needs-phone",       label: "Needs Phone Reveal",           matches: (r) => r.nextAction === "REVEAL_PHONE" },
   { id: "needs-invitation",  label: "Needs Invitation",             matches: (r) => r.nextAction === "SEND_INVITATION" },
@@ -150,6 +156,60 @@ function slaCopy(record: SellerAcquisitionRecord): string {
 
 function listingCount(record: SellerAcquisitionRecord): number {
   return Math.max(1, record.portfolio?.listingCount ?? 1);
+}
+
+function sellerRollupKey(record: SellerAcquisitionRecord): string {
+  const contactId = record.contact?.id;
+  if (contactId) return `contact:${contactId}`;
+
+  const phoneValue = phone(record);
+  if (phoneValue) return `phone:${phoneValue}`;
+
+  const profileUrl = metadataText(record, "sellerProfileUrl");
+  if (profileUrl) return `profile:${profileUrl.toLowerCase()}`;
+
+  const marketplaceIdentifier = metadataText(record, "marketplaceIdentifier");
+  if (marketplaceIdentifier) return `marketplace:${source(record).toLowerCase()}:${marketplaceIdentifier.toLowerCase()}`;
+
+  const name = sellerName(record);
+  if (name !== "Marketplace seller") return `name:${source(record).toLowerCase()}:${name.toLowerCase()}`;
+
+  return `capture:${record.capture.id}`;
+}
+
+function rollupRecords(records: readonly SellerAcquisitionRecord[]): readonly SellerRollup[] {
+  const bySeller = new Map<string, SellerAcquisitionRecord[]>();
+
+  for (const record of records) {
+    const key = sellerRollupKey(record);
+    const current = bySeller.get(key) ?? [];
+    current.push(record);
+    bySeller.set(key, current);
+  }
+
+  return [...bySeller.entries()].flatMap(([key, grouped]) => {
+    const primary = grouped[0];
+    if (primary === undefined) return [];
+    return [{ key, primary, records: grouped }];
+  });
+}
+
+function rollupListingCount(rollup: SellerRollup): number {
+  return Math.max(
+    rollup.records.length,
+    ...rollup.records.map((record) => listingCount(record)),
+  );
+}
+
+function rollupListingTitles(rollup: SellerRollup): readonly string[] {
+  return [...new Set(rollup.records.map(title).filter((value) => value.trim().length > 0))].slice(0, 4);
+}
+
+function rollupPriceSummary(rollup: SellerRollup): string {
+  const values = [...new Set(rollup.records.map(price).filter((value) => value !== "Price missing"))];
+  if (values.length === 0) return "Price missing";
+  if (values.length === 1) return values[0] ?? "Price missing";
+  return `${values[0]} + ${values.length - 1} more price${values.length === 2 ? "" : "s"}`;
 }
 
 function hasPrice(record: SellerAcquisitionRecord): boolean {
@@ -349,11 +409,12 @@ export default function MarketplaceAcquisitionPage() {
   }, [records, queueFilter, healthFilter, nextActionFilter, confidenceFilter, stageFilter, searchQuery]);
 
   const selectedRecord = filteredRecords.find((r) => r.capture.id === selectedCaptureId) ?? filteredRecords[0] ?? null;
+  const filteredRollups = rollupRecords(filteredRecords);
   const visibleQueueGroups = queueBuckets
-    .map((bucket) => ({ bucket, records: filteredRecords.filter(bucket.matches) }))
-    .filter((group) => queueFilter === "all" ? group.records.length > 0 : group.bucket.id === queueFilter);
-  const ungroupedVisibleRecords = queueFilter === "all"
-    ? filteredRecords.filter((record) => !queueBuckets.some((bucket) => bucket.matches(record)))
+    .map((bucket) => ({ bucket, rollups: filteredRollups.filter((rollup) => rollup.records.some(bucket.matches)) }))
+    .filter((group) => queueFilter === "all" ? group.rollups.length > 0 : group.bucket.id === queueFilter);
+  const ungroupedVisibleRollups = queueFilter === "all"
+    ? filteredRollups.filter((rollup) => !queueBuckets.some((bucket) => rollup.records.some(bucket.matches)))
     : [];
   const bulkEligibleRecords = filteredRecords.filter((record) =>
     ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction) && hasPhone(record)
@@ -366,6 +427,21 @@ export default function MarketplaceAcquisitionPage() {
     setSelectedBulkIds((current) =>
       current.includes(captureId) ? current.filter((id) => id !== captureId) : [...current, captureId],
     );
+  }, []);
+
+  const toggleBulkRollup = useCallback((recordsToToggle: readonly SellerAcquisitionRecord[]) => {
+    const eligibleIds = recordsToToggle
+      .filter((record) => ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction) && hasPhone(record))
+      .map((record) => record.capture.id);
+
+    if (eligibleIds.length === 0) return;
+
+    setSelectedBulkIds((current) => {
+      const allSelected = eligibleIds.every((id) => current.includes(id));
+      return allSelected
+        ? current.filter((id) => !eligibleIds.includes(id))
+        : [...new Set([...current, ...eligibleIds])];
+    });
   }, []);
 
   const toggleAllEligible = useCallback(() => {
@@ -487,47 +563,47 @@ export default function MarketplaceAcquisitionPage() {
             </section>
           ) : (
             <div className="space-y-4">
-              {visibleQueueGroups.map(({ bucket, records: groupRecords }) => (
+              {visibleQueueGroups.map(({ bucket, rollups }) => (
                 <section key={bucket.id} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{bucket.label}</p>
-                      <h2 className="mt-1 text-sm font-semibold text-foreground">{groupRecords.length} seller{groupRecords.length === 1 ? "" : "s"}</h2>
+                      <h2 className="mt-1 text-sm font-semibold text-foreground">{rollups.length} seller{rollups.length === 1 ? "" : "s"}</h2>
                     </div>
-                    <Badge>{groupRecords.filter((record) => hasPhone(record)).length} phone-ready</Badge>
+                    <Badge>{rollups.filter((rollup) => rollup.records.some(hasPhone)).length} phone-ready</Badge>
                   </div>
                   <div className="grid gap-3 xl:grid-cols-2">
-                    {groupRecords.map((record) => (
-                      <RecordCard
-                        key={record.capture.id}
-                        record={record}
-                        selected={selectedRecord?.capture.id === record.capture.id}
-                        bulkSelected={selectedBulkIds.includes(record.capture.id)}
-                        bulkEligible={bulkEligibleRecords.some((item) => item.capture.id === record.capture.id)}
-                        onBulkToggle={() => toggleBulkRecord(record.capture.id)}
-                        onSelect={() => setSelectedCaptureId(record.capture.id)}
+                    {rollups.map((rollup) => (
+                      <SellerRollupCard
+                        key={rollup.key}
+                        rollup={rollup}
+                        selectedCaptureId={selectedRecord?.capture.id ?? null}
+                        selectedBulkIds={selectedBulkIds}
+                        bulkEligibleRecords={bulkEligibleRecords}
+                        onBulkToggle={() => toggleBulkRollup(rollup.records)}
+                        onSelect={() => setSelectedCaptureId(rollup.primary.capture.id)}
                       />
                     ))}
                   </div>
                 </section>
               ))}
 
-              {ungroupedVisibleRecords.length > 0 ? (
+              {ungroupedVisibleRollups.length > 0 ? (
                 <section className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
                   <div className="mb-3">
                     <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Other sellers</p>
-                    <h2 className="mt-1 text-sm font-semibold text-foreground">{ungroupedVisibleRecords.length} seller{ungroupedVisibleRecords.length === 1 ? "" : "s"}</h2>
+                    <h2 className="mt-1 text-sm font-semibold text-foreground">{ungroupedVisibleRollups.length} seller{ungroupedVisibleRollups.length === 1 ? "" : "s"}</h2>
                   </div>
                   <div className="grid gap-3 xl:grid-cols-2">
-                    {ungroupedVisibleRecords.map((record) => (
-                      <RecordCard
-                        key={record.capture.id}
-                        record={record}
-                        selected={selectedRecord?.capture.id === record.capture.id}
-                        bulkSelected={selectedBulkIds.includes(record.capture.id)}
-                        bulkEligible={bulkEligibleRecords.some((item) => item.capture.id === record.capture.id)}
-                        onBulkToggle={() => toggleBulkRecord(record.capture.id)}
-                        onSelect={() => setSelectedCaptureId(record.capture.id)}
+                    {ungroupedVisibleRollups.map((rollup) => (
+                      <SellerRollupCard
+                        key={rollup.key}
+                        rollup={rollup}
+                        selectedCaptureId={selectedRecord?.capture.id ?? null}
+                        selectedBulkIds={selectedBulkIds}
+                        bulkEligibleRecords={bulkEligibleRecords}
+                        onBulkToggle={() => toggleBulkRollup(rollup.records)}
+                        onSelect={() => setSelectedCaptureId(rollup.primary.capture.id)}
                       />
                     ))}
                   </div>
@@ -598,6 +674,47 @@ function CheckLine({ label, passed }: { readonly label: string; readonly passed:
     <div className="flex items-center justify-between gap-3 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className={passed ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{passed ? "✓" : "⚠"}</span>
+    </div>
+  );
+}
+
+function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkEligibleRecords, onBulkToggle, onSelect }: {
+  readonly rollup: SellerRollup;
+  readonly selectedCaptureId: string | null;
+  readonly selectedBulkIds: readonly string[];
+  readonly bulkEligibleRecords: readonly SellerAcquisitionRecord[];
+  readonly onBulkToggle: () => void;
+  readonly onSelect: () => void;
+}) {
+  const eligibleIds = rollup.records
+    .filter((record) => bulkEligibleRecords.some((item) => item.capture.id === record.capture.id))
+    .map((record) => record.capture.id);
+  const primary = rollup.primary;
+  const selected = rollup.records.some((record) => record.capture.id === selectedCaptureId);
+  const bulkEligible = eligibleIds.length > 0;
+  const bulkSelected = bulkEligible && eligibleIds.every((id) => selectedBulkIds.includes(id));
+  const childTitles = rollupListingTitles(rollup);
+
+  return (
+    <div className="space-y-2">
+      <RecordCard
+        record={primary}
+        selected={selected}
+        bulkSelected={bulkSelected}
+        bulkEligible={bulkEligible}
+        onBulkToggle={onBulkToggle}
+        onSelect={onSelect}
+      />
+      {rollup.records.length > 1 || childTitles.length > 1 ? (
+        <div className="rounded-2xl bg-secondary px-4 py-3 text-xs text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>
+          <p className="font-semibold text-foreground">{rollupListingCount(rollup)} listings · {rollupPriceSummary(rollup)}</p>
+          <ul className="mt-2 list-disc space-y-1 pl-4">
+            {childTitles.map((item) => (
+              <li key={item} className="truncate">{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
