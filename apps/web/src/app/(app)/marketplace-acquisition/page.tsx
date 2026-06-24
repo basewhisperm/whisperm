@@ -262,6 +262,26 @@ function timelineItems(record: SellerAcquisitionRecord): readonly { readonly lab
   ];
 }
 
+function sellerTimelineItems(records: readonly SellerAcquisitionRecord[]): readonly { readonly label: string; readonly done: boolean }[] {
+  const hasInvitation = records.some((r) => r.latestInvitation !== null);
+  const hasClaim = records.some((r) => r.claimTokenStatus?.status === "CLAIMED" || r.claimTokenStatus?.status === "ACCEPTED");
+  const sellerConverted = records.some((r) => r.sellerConversion !== null);
+  const inventoryConverted = records.some((r) => r.inventoryConversion !== null);
+  const completed = records.some((r) => r.healthStatus === "COMPLETED");
+
+  return [
+    { label: "Marketplace captured", done: true },
+    { label: "Contact created", done: records.some((r) => r.contact !== null) },
+    { label: "Deal created", done: records.some((r) => r.deal !== null) },
+    { label: "Draft inventory created", done: records.some((r) => r.draftInventory !== null) },
+    { label: "Invitation sent", done: hasInvitation },
+    { label: "Seller claimed", done: hasClaim },
+    { label: "Seller converted", done: sellerConverted },
+    { label: "Inventory converted", done: inventoryConverted },
+    { label: "Acquisition completed", done: completed },
+  ];
+}
+
 function searchText(record: SellerAcquisitionRecord): string {
   return [sellerName(record), record.contact?.phone, title(record), source(record), record.capture.id, ...(record.portfolio?.captureIds ?? [])]
     .filter(Boolean).join(" ").toLowerCase();
@@ -874,6 +894,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
           <p><strong className="text-foreground">Listings:</strong> {sellerListingTitles.length}</p>
           <p><strong className="text-foreground">Phone-ready captures:</strong> {sellerPhoneReadyCount}/{sellerRecords.length}</p>
           <p><strong className="text-foreground">Images captured:</strong> {sellerImageCount}</p>
+          <p><strong className="text-foreground">Activity events:</strong> {sellerRecords.reduce((count, item) => count + item.activityTimeline.length, 0)}</p>
           <p><strong className="text-foreground">Latest invitation:</strong> {sellerLatestInvitation ? `${sellerLatestInvitation.channel} ${sellerLatestInvitation.status}` : "No invitation sent"}</p>
         </div>
         {sellerListingTitles.length > 0 ? (
@@ -908,9 +929,9 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
           </p>
         </WorkbenchSection>
 
-        <WorkbenchSection title="Acquisition timeline">
+        <WorkbenchSection title="Seller timeline">
           <div className="space-y-2">
-            {timelineItems(record).map((item) => (
+            {sellerTimelineItems(sellerRecords).map((item) => (
               <CheckLine key={item.label} label={item.label} passed={item.done} />
             ))}
           </div>
