@@ -39,9 +39,9 @@ test("marketplace sellers page uses SellerAcquisitionRecord command center", () 
   assert.match(source, /PHONE READY/u);
   assert.match(source, /queueBuckets\.find\(\(bucket\) => bucket\.matches\(record\)\)/u);
   assert.match(source, /Captured \$\{captured\}/u);
-  assert.match(source, /Contact Type: Seller/u);
-  assert.match(source, /Source: Marketplace/u);
-  assert.match(source, /Lifecycle: Acquisition Prospect/u);
+  assert.match(source, /Seller dossier/u);
+  assert.match(source, /Seller portfolio/u);
+  assert.match(source, /Phone-ready captures/u);
   assert.doesNotMatch(source, /generic Prospect/u);
 });
 
