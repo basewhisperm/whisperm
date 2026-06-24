@@ -508,10 +508,10 @@ function RecordCard({ record, selected, onSelect }: {
           {record.images[0] ? <img alt="Captured inventory" className="size-full object-cover" src={record.images[0]} /> : "No image"}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-foreground">{title(record)}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{price(record)} · {source(record)}{location(record) ? ` · ${location(record)}` : ""}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{sellerName(record)} · {hasPhone(record) ? `Mobile ready: ${phone(record)}` : "Mobile required"}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{slaCopy(record)}</p>
+          <h3 className="truncate text-sm font-semibold text-foreground">{sellerName(record)}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{hasPhone(record) ? phone(record) : "Mobile required"} · {source(record)}{location(record) ? ` · ${location(record)}` : ""}</p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">{listingCount(record)} listing{listingCount(record) === 1 ? "" : "s"} · {title(record)}</p>
+          <p className="mt-1 text-xs font-medium text-foreground">{price(record)}</p>
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
