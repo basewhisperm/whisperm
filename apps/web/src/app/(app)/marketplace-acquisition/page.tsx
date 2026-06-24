@@ -300,6 +300,8 @@ export default function MarketplaceAcquisitionPage() {
   const [records, setRecords] = useState<readonly SellerAcquisitionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
+  const [selectedBulkIds, setSelectedBulkIds] = useState<readonly string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [queueFilter, setQueueFilter] = useState<QueueBucketId>("all");
   const [healthFilter, setHealthFilter] = useState("all");
   const [nextActionFilter, setNextActionFilter] = useState("all");
@@ -347,7 +349,46 @@ export default function MarketplaceAcquisitionPage() {
   }, [records, queueFilter, healthFilter, nextActionFilter, confidenceFilter, stageFilter, searchQuery]);
 
   const selectedRecord = filteredRecords.find((r) => r.capture.id === selectedCaptureId) ?? filteredRecords[0] ?? null;
+  const bulkEligibleRecords = filteredRecords.filter((record) =>
+    ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction) && hasPhone(record)
+  );
+  const selectedBulkRecords = bulkEligibleRecords.filter((record) => selectedBulkIds.includes(record.capture.id));
+  const allEligibleSelected = bulkEligibleRecords.length > 0 && selectedBulkRecords.length === bulkEligibleRecords.length;
   const stages = [...new Set(records.map((r) => r.currentStage).filter(Boolean))];
+
+  const toggleBulkRecord = useCallback((captureId: string) => {
+    setSelectedBulkIds((current) =>
+      current.includes(captureId) ? current.filter((id) => id !== captureId) : [...current, captureId],
+    );
+  }, []);
+
+  const toggleAllEligible = useCallback(() => {
+    setSelectedBulkIds(allEligibleSelected ? [] : bulkEligibleRecords.map((record) => record.capture.id));
+  }, [allEligibleSelected, bulkEligibleRecords]);
+
+  const runBulkInvites = useCallback(async () => {
+    if (selectedBulkRecords.length === 0) return;
+    setBulkBusy(true);
+    setActionError(null);
+    const failures: string[] = [];
+
+    for (const record of selectedBulkRecords) {
+      try {
+        await runPrimaryAction(record);
+      } catch (error) {
+        failures.push(`${sellerName(record)}: ${error instanceof Error ? error.message : "Invite failed"}`);
+      }
+    }
+
+    await refreshRecords();
+    setSelectedBulkIds([]);
+
+    if (failures.length > 0) {
+      setActionError(`${failures.length} invite${failures.length === 1 ? "" : "s"} failed. ${failures.slice(0, 3).join(" · ")}`);
+    }
+
+    setBulkBusy(false);
+  }, [refreshRecords, selectedBulkRecords]);
 
   // Patch a single updated record into the local list without a full reload
   const patchRecord = useCallback((updated: SellerAcquisitionRecord) => {
@@ -403,6 +444,33 @@ export default function MarketplaceAcquisitionPage() {
             <Filter label="Stage"       value={stageFilter}       onChange={setStageFilter}       options={["all", ...stages]} />
           </div>
 
+          <div className="flex flex-col gap-3 rounded-2xl bg-background p-4 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Bulk invitation queue</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {selectedBulkRecords.length} selected · {bulkEligibleRecords.length} eligible in current view
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="h-10 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground disabled:opacity-50"
+                disabled={bulkEligibleRecords.length === 0 || bulkBusy}
+                onClick={toggleAllEligible}
+                type="button"
+              >
+                {allEligibleSelected ? "Clear eligible" : "Select eligible"}
+              </button>
+              <button
+                className="h-10 rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:opacity-50"
+                disabled={selectedBulkRecords.length === 0 || bulkBusy}
+                onClick={runBulkInvites}
+                type="button"
+              >
+                {bulkBusy ? "Sending…" : `Send Invites (${selectedBulkRecords.length})`}
+              </button>
+            </div>
+          </div>
+
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading Marketplace Sellers…</p>
           ) : filteredRecords.length === 0 ? (
@@ -418,6 +486,9 @@ export default function MarketplaceAcquisitionPage() {
                   key={record.capture.id}
                   record={record}
                   selected={selectedRecord?.capture.id === record.capture.id}
+                  bulkSelected={selectedBulkIds.includes(record.capture.id)}
+                  bulkEligible={bulkEligibleRecords.some((item) => item.capture.id === record.capture.id)}
+                  onBulkToggle={() => toggleBulkRecord(record.capture.id)}
                   onSelect={() => setSelectedCaptureId(record.capture.id)}
                 />
               ))}
@@ -490,9 +561,12 @@ function CheckLine({ label, passed }: { readonly label: string; readonly passed:
   );
 }
 
-function RecordCard({ record, selected, onSelect }: {
+function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle, onSelect }: {
   readonly record: SellerAcquisitionRecord;
   readonly selected: boolean;
+  readonly bulkSelected: boolean;
+  readonly bulkEligible: boolean;
+  readonly onBulkToggle: () => void;
   readonly onSelect: () => void;
 }) {
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
@@ -504,6 +578,15 @@ function RecordCard({ record, selected, onSelect }: {
       type="button"
     >
       <div className="flex gap-3">
+        <input
+          aria-label={`Select ${sellerName(record)} for bulk invite`}
+          checked={bulkSelected}
+          className="mt-1 size-4 shrink-0"
+          disabled={!bulkEligible}
+          onChange={onBulkToggle}
+          onClick={(event) => event.stopPropagation()}
+          type="checkbox"
+        />
         <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-secondary text-xs text-muted-foreground">
           {record.images[0] ? <img alt="Captured inventory" className="size-full object-cover" src={record.images[0]} /> : "No image"}
         </div>
