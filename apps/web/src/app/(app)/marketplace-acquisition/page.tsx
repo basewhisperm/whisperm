@@ -349,6 +349,12 @@ export default function MarketplaceAcquisitionPage() {
   }, [records, queueFilter, healthFilter, nextActionFilter, confidenceFilter, stageFilter, searchQuery]);
 
   const selectedRecord = filteredRecords.find((r) => r.capture.id === selectedCaptureId) ?? filteredRecords[0] ?? null;
+  const visibleQueueGroups = queueBuckets
+    .map((bucket) => ({ bucket, records: filteredRecords.filter(bucket.matches) }))
+    .filter((group) => queueFilter === "all" ? group.records.length > 0 : group.bucket.id === queueFilter);
+  const ungroupedVisibleRecords = queueFilter === "all"
+    ? filteredRecords.filter((record) => !queueBuckets.some((bucket) => bucket.matches(record)))
+    : [];
   const bulkEligibleRecords = filteredRecords.filter((record) =>
     ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction) && hasPhone(record)
   );
@@ -480,18 +486,53 @@ export default function MarketplaceAcquisitionPage() {
               <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Use + Capture Seller to add a listing into this command center.</p>
             </section>
           ) : (
-            <div className="grid gap-3 xl:grid-cols-2">
-              {filteredRecords.map((record) => (
-                <RecordCard
-                  key={record.capture.id}
-                  record={record}
-                  selected={selectedRecord?.capture.id === record.capture.id}
-                  bulkSelected={selectedBulkIds.includes(record.capture.id)}
-                  bulkEligible={bulkEligibleRecords.some((item) => item.capture.id === record.capture.id)}
-                  onBulkToggle={() => toggleBulkRecord(record.capture.id)}
-                  onSelect={() => setSelectedCaptureId(record.capture.id)}
-                />
+            <div className="space-y-4">
+              {visibleQueueGroups.map(({ bucket, records: groupRecords }) => (
+                <section key={bucket.id} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{bucket.label}</p>
+                      <h2 className="mt-1 text-sm font-semibold text-foreground">{groupRecords.length} seller{groupRecords.length === 1 ? "" : "s"}</h2>
+                    </div>
+                    <Badge>{groupRecords.filter((record) => hasPhone(record)).length} phone-ready</Badge>
+                  </div>
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {groupRecords.map((record) => (
+                      <RecordCard
+                        key={record.capture.id}
+                        record={record}
+                        selected={selectedRecord?.capture.id === record.capture.id}
+                        bulkSelected={selectedBulkIds.includes(record.capture.id)}
+                        bulkEligible={bulkEligibleRecords.some((item) => item.capture.id === record.capture.id)}
+                        onBulkToggle={() => toggleBulkRecord(record.capture.id)}
+                        onSelect={() => setSelectedCaptureId(record.capture.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
+
+              {ungroupedVisibleRecords.length > 0 ? (
+                <section className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+                  <div className="mb-3">
+                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Other sellers</p>
+                    <h2 className="mt-1 text-sm font-semibold text-foreground">{ungroupedVisibleRecords.length} seller{ungroupedVisibleRecords.length === 1 ? "" : "s"}</h2>
+                  </div>
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {ungroupedVisibleRecords.map((record) => (
+                      <RecordCard
+                        key={record.capture.id}
+                        record={record}
+                        selected={selectedRecord?.capture.id === record.capture.id}
+                        bulkSelected={selectedBulkIds.includes(record.capture.id)}
+                        bulkEligible={bulkEligibleRecords.some((item) => item.capture.id === record.capture.id)}
+                        onBulkToggle={() => toggleBulkRecord(record.capture.id)}
+                        onSelect={() => setSelectedCaptureId(record.capture.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
           )}
         </div>
