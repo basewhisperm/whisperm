@@ -36,8 +36,8 @@ test("marketplace sellers page uses SellerAcquisitionRecord command center", () 
   assert.match(source, /WhatsApp will be attempted first/u);
   assert.match(source, /SMS is fallback/u);
   assert.match(source, /Email is optional for non-cellphone-first markets/u);
-  assert.match(source, /Acquisition Score:/u);
-  assert.match(source, /Capture Confidence:/u);
+  assert.match(source, /PHONE READY/u);
+  assert.match(source, /queueBuckets\.find\(\(bucket\) => bucket\.matches\(record\)\)/u);
   assert.match(source, /Captured \$\{captured\}/u);
   assert.match(source, /Contact Type: Seller/u);
   assert.match(source, /Source: Marketplace/u);
