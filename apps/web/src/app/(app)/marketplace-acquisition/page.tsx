@@ -847,6 +847,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
   const enabled = isActionEnabled(record);
   const sellerRecords = rollupRecords.length > 0 ? rollupRecords : [record];
   const sellerListingTitles = [...new Set(sellerRecords.map(title))].slice(0, 8);
+  const sellerListingCount = sellerRecords.reduce((count, item) => count + listingCount(item), 0);
   const sellerImageCount = sellerRecords.reduce((count, item) => count + item.images.length, 0);
   const sellerPhoneReadyCount = sellerRecords.filter(hasPhone).length;
   const sellerLatestInvitation = sellerRecords.find((item) => item.latestInvitation !== null)?.latestInvitation ?? null;
@@ -907,7 +908,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
 
       <WorkbenchSection title="Seller portfolio">
         <div className="grid gap-2 text-sm text-muted-foreground">
-          <p><strong className="text-foreground">Listings:</strong> {sellerListingTitles.length}</p>
+          <p><strong className="text-foreground">Listings:</strong> {sellerListingCount}</p>
           <p><strong className="text-foreground">Phone-ready captures:</strong> {sellerPhoneReadyCount}/{sellerRecords.length}</p>
           <p><strong className="text-foreground">Images captured:</strong> {sellerImageCount}</p>
           <p><strong className="text-foreground">Activity events:</strong> {sellerRecords.reduce((count, item) => count + item.activityTimeline.length, 0)}</p>
