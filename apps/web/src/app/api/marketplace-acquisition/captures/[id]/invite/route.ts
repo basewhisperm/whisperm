@@ -114,7 +114,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     );
     return NextResponse.json(result);
   } catch (error) {
-    console.error("SELLER_INVITATION_ERROR", error);
 
     if (error instanceof ServiceError) {
       return NextResponse.json(

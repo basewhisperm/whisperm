@@ -76,7 +76,7 @@ export class RenderSellerConversionService {
       await this.deps.renderConversions.update(scope, conversion.id, { status: "FAILED", failedAt: this.now().toISOString(), failureReason });
       await this.audit(scope, context.correlation, "RENDER_SELLER_CONVERSION_FAILED", conversion.id, { marketplaceCaptureId: capture.id, contactId, attestationId: attestation.id, conversionId: conversion.id, failureReason });
       await this.appendActivity(scope, context, capture, contactId, "Render seller conversion failed", this.now().toISOString(), { eventType: "RENDER_SELLER_CONVERSION_FAILED", marketplaceCaptureId: capture.id, contactId, attestationId: attestation.id, conversionId: conversion.id, failureReason });
-      throw this.error(context.correlation, "SERVICE_REPOSITORY_FAILED", `Render seller conversion failed: ${failureReason}`, 502, { conversionId: conversion.id }, cause);
+      throw this.error(context.correlation, "SERVICE_REPOSITORY_FAILED", "Render seller conversion failed.", 502, { conversionId: conversion.id }, cause);
     }
   }
 
