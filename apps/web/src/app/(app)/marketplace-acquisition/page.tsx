@@ -446,6 +446,13 @@ export default function MarketplaceAcquisitionPage() {
   const allEligibleSelected = bulkEligibleRecords.length > 0 && selectedBulkRecords.length === bulkEligibleRecords.length;
   const stages = [...new Set(records.map((r) => r.currentStage).filter(Boolean))];
 
+  const commandCenterStats = [
+    { label: "Total sellers", value: filteredRollups.length },
+    { label: "Phone-ready", value: filteredRecords.filter(hasPhone).length },
+    { label: "Needs action", value: filteredRecords.filter((record) => record.healthStatus === "ACTION_REQUIRED").length },
+    { label: "Blocked", value: filteredRecords.filter((record) => record.missingRequirements.includes("PHONE_REQUIRED")).length },
+  ] as const;
+
   const toggleBulkRecord = useCallback((captureId: string) => {
     setSelectedBulkIds((current) =>
       current.includes(captureId) ? current.filter((id) => id !== captureId) : [...current, captureId],
@@ -513,6 +520,15 @@ export default function MarketplaceAcquisitionPage() {
           + Capture Seller
           <IconArrowRight aria-hidden="true" className="size-4" stroke={1.8} />
         </Link>
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-4" aria-label="Seller command center summary">
+        {commandCenterStats.map((stat) => (
+          <div key={stat.label} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
+            <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
+          </div>
+        ))}
       </section>
 
       <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
