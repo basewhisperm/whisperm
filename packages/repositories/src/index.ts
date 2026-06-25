@@ -610,16 +610,16 @@ export interface TenantRepository extends RepositoryTransactionRunner {
   update(id: string, input: UpdateTenantInput): Promise<Tenant>;
 }
 export interface UserRepository { create(context: TenantScoped, input: CreateUserInput): Promise<User>; findById(context: TenantScoped, id: string): Promise<User | null>; findByEmail(context: TenantScoped, email: string): Promise<User | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<User>>; update(context: TenantScoped, id: string, input: UpdateUserInput): Promise<User>; }
-export interface ContactRepository { create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord>; createMany(context: TenantScoped, inputs: readonly CreateContactInput[]): Promise<number>; count(context: TenantScoped): Promise<number>; findById(context: TenantScoped, id: string): Promise<ContactRecord | null>; findByPhone(context: TenantScoped, phone: string): Promise<ContactRecord | null>; findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]>; list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>>; update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord>; listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>>; }
+export interface ContactRepository { create(context: TenantScoped, input: CreateContactInput): Promise<ContactRecord>; createMany(context: TenantScoped, inputs: readonly CreateContactInput[]): Promise<number>; count(context: TenantScoped): Promise<number>; findById(context: TenantScoped, id: string): Promise<ContactRecord | null>; findByIds(context: TenantScoped, ids: readonly string[]): Promise<readonly ContactRecord[]>; findByPhone(context: TenantScoped, phone: string): Promise<ContactRecord | null>; findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]>; list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>>; update(context: TenantScoped, id: string, input: UpdateContactInput): Promise<ContactRecord>; listLeadEvents(context: TenantScoped, contactId: string, page?: PageRequest): Promise<Page<LeadEventRecord>>; }
 export interface PipelineRepository { findByWorkspace(workspaceId: string): Promise<PipelineRecord | null>; findByDefaultKey(workspaceId: string, defaultKey: string): Promise<PipelineRecord | null>; updateStages(workspaceId: string, pipelineId: string, stages: readonly UpdatePipelineStageInput[]): Promise<PipelineRecord>; }
-export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findByExternalId(workspaceId: string, externalId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
-export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; listActivitiesByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly ActivityRecord[]>; }
+export interface DealsRepository { create(workspaceId: string, input: CreateDealInput): Promise<DealRecord>; list(workspaceId: string, filters?: DealFilters): Promise<readonly DealRecord[]>; findById(workspaceId: string, dealId: string): Promise<DealRecord | null>; findByExternalId(workspaceId: string, externalId: string): Promise<DealRecord | null>; findBoardByPipeline(workspaceId: string, pipelineId: string, pagination?: BoardPaginationRequest): Promise<PipelineBoardRecord | null>; updateStageWithOptimisticLock(workspaceId: string, dealId: string, stageId: string, expectedUpdatedAt: string): Promise<{ readonly deal: DealRecord; readonly previousStageId: string }>; findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null>; findDetailsByIds(workspaceId: string, dealIds: readonly string[]): Promise<readonly DealDetailRecord[]>; updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord>; findByContact(workspaceId: string, contactId: string): Promise<readonly DealRecord[]>; }
+export interface ActivityRepository { create(context: ActivityCreateContext, input: CreateActivityInput): Promise<ActivityRecord>; list(context: TenantScoped, filters?: ActivityListFilters, page?: PageRequest): Promise<Page<ActivityRecord>>; listByDeal(context: TenantScoped, dealId: string, page?: PageRequest): Promise<Page<ActivityRecord>>; listActivitiesByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly ActivityRecord[]>; listActivitiesByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly ActivityRecord[]>; }
 export interface MarketplaceCaptureRepository { create(context: TenantScoped, input: CreateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; findByListingUrl(context: TenantScoped, listingUrl: string): Promise<MarketplaceCaptureRecord | null>; findByExternalId(context: TenantScoped, externalId: string): Promise<MarketplaceCaptureRecord | null>; findById(context: TenantScoped, captureId: string): Promise<MarketplaceCaptureRecord | null>; findByDealId(context: TenantScoped, dealId: string): Promise<MarketplaceCaptureRecord | null>; list(context: TenantScoped, page?: PageRequest): Promise<Page<MarketplaceCaptureRecord>>; update(context: TenantScoped, captureId: string, input: UpdateMarketplaceCaptureInput): Promise<MarketplaceCaptureRecord>; }
-export interface SellerInvitationRepository { create(context: TenantScoped, input: CreateSellerInvitationInput): Promise<SellerInvitationRecord>; update(context: TenantScoped, invitationId: string, input: UpdateSellerInvitationInput): Promise<SellerInvitationRecord>; listSellerInvitationsByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly SellerInvitationRecord[]>; }
-export interface MarketplaceClaimTokenRepository { create(context: TenantScoped, input: CreateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord>; findByTokenHash(context: TenantScoped, tokenHash: string): Promise<MarketplaceClaimTokenRecord | null>; update(context: TenantScoped, tokenId: string, input: UpdateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord>; listClaimTokensByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly MarketplaceClaimTokenRecord[]>; }
-export interface MarketplaceOwnershipAttestationRepository { create(context: TenantScoped, input: CreateMarketplaceOwnershipAttestationInput): Promise<MarketplaceOwnershipAttestationRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceOwnershipAttestationRecord | null>; }
-export interface DraftInventoryRepository { create(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null>; findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null>; upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord>; }
-export interface RenderConversionRepository { findById(context: TenantScoped, conversionId: string): Promise<RenderConversionRecord | null>; findSuccessfulSellerConversion(context: TenantScoped, marketplaceCaptureId: string, contactId: string | null): Promise<RenderConversionRecord | null>; findSuccessfulInventoryConversion(context: TenantScoped, marketplaceCaptureId: string, externalId: string | null): Promise<RenderConversionRecord | null>; listRenderConversionsByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly RenderConversionRecord[]>; create(context: TenantScoped, input: CreateRenderConversionInput): Promise<RenderConversionRecord>; update(context: TenantScoped, conversionId: string, input: UpdateRenderConversionInput): Promise<RenderConversionRecord>; }
+export interface SellerInvitationRepository { create(context: TenantScoped, input: CreateSellerInvitationInput): Promise<SellerInvitationRecord>; update(context: TenantScoped, invitationId: string, input: UpdateSellerInvitationInput): Promise<SellerInvitationRecord>; listSellerInvitationsByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly SellerInvitationRecord[]>; listSellerInvitationsByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly SellerInvitationRecord[]>; }
+export interface MarketplaceClaimTokenRepository { create(context: TenantScoped, input: CreateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord>; findByTokenHash(context: TenantScoped, tokenHash: string): Promise<MarketplaceClaimTokenRecord | null>; update(context: TenantScoped, tokenId: string, input: UpdateMarketplaceClaimTokenInput): Promise<MarketplaceClaimTokenRecord>; listClaimTokensByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly MarketplaceClaimTokenRecord[]>; listClaimTokensByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly MarketplaceClaimTokenRecord[]>; }
+export interface MarketplaceOwnershipAttestationRepository { create(context: TenantScoped, input: CreateMarketplaceOwnershipAttestationInput): Promise<MarketplaceOwnershipAttestationRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceOwnershipAttestationRecord | null>; listByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly MarketplaceOwnershipAttestationRecord[]>; }
+export interface DraftInventoryRepository { create(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null>; listByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly DraftInventoryRecord[]>; findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null>; upsertForCapture(context: TenantScoped, input: CreateDraftInventoryInput): Promise<DraftInventoryRecord>; update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord>; }
+export interface RenderConversionRepository { findById(context: TenantScoped, conversionId: string): Promise<RenderConversionRecord | null>; findSuccessfulSellerConversion(context: TenantScoped, marketplaceCaptureId: string, contactId: string | null): Promise<RenderConversionRecord | null>; findSuccessfulInventoryConversion(context: TenantScoped, marketplaceCaptureId: string, externalId: string | null): Promise<RenderConversionRecord | null>; listRenderConversionsByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly RenderConversionRecord[]>; listRenderConversionsByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly RenderConversionRecord[]>; create(context: TenantScoped, input: CreateRenderConversionInput): Promise<RenderConversionRecord>; update(context: TenantScoped, conversionId: string, input: UpdateRenderConversionInput): Promise<RenderConversionRecord>; }
 
 export interface DashboardContactRecord { readonly id: string; readonly firstName?: string | null | undefined; readonly lastName?: string | null | undefined; readonly company?: string | null | undefined; readonly email?: string | null | undefined; readonly lastTouchAt?: string | null | undefined; }
 export interface DashboardActivityRecord { readonly id: string; readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined; readonly type: string; readonly note?: string | null | undefined; readonly createdById: string; readonly createdAt: string; }
@@ -757,6 +757,7 @@ export class PrismaContactRepository implements ContactRepository {
   async createMany(context: TenantScoped, inputs: readonly CreateContactInput[]): Promise<number> { ensureContext(context); if (inputs.length === 0) return 0; const rows = inputs.map((input) => { ensureTenantInput(context, input); return dataWithDefined(input); }); try { const result = await this.prisma.contact.createMany?.({ data: rows }); if (result === undefined) throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Contact bulk insert is not supported by this Prisma client", status: 503 }); return result.count; } catch (error) { return mapPrismaError(error, "Contact bulk insert failed"); } }
   async count(context: TenantScoped): Promise<number> { ensureContext(context); const result = await this.prisma.contact.count?.({ where: { tenantId: context.tenantId } }); if (result === undefined) throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Contact count is not supported by this Prisma client", status: 503 }); return result; }
   async findById(context: TenantScoped, id: string): Promise<ContactRecord | null> { ensureContext(context); const result = await this.prisma.contact.findFirst({ where: byTenantId(context, id) }); return result === null ? null : parseRecord(contactRecordSchema, result); }
+  async findByIds(context: TenantScoped, ids: readonly string[]): Promise<readonly ContactRecord[]> { ensureContext(context); const uniqueIds = [...new Set(ids.filter((id) => id.length > 0))]; if (uniqueIds.length === 0) return []; const rows = await this.prisma.contact.findMany({ where: withTenant(context, { id: { in: uniqueIds } }) }); return rows.map((row) => parseRecord(contactRecordSchema, row)); }
   async findByPhone(context: TenantScoped, phone: string): Promise<ContactRecord | null> { ensureContext(context); const result = await this.prisma.contact.findFirst({ where: withTenant(context, { phone }) }); return result === null ? null : parseRecord(contactRecordSchema, result); }
   async findByEmails(context: TenantScoped, emails: readonly string[]): Promise<readonly ContactRecord[]> { ensureContext(context); if (emails.length === 0) return []; const rows = await this.prisma.contact.findMany({ where: { tenantId: context.tenantId, email: { in: [...new Set(emails)] } } }); return rows.map((row) => parseRecord(contactRecordSchema, row)); }
   async list(context: TenantScoped, page?: PageRequest): Promise<Page<ContactRecord>> { ensureContext(context); const args = pageArgs(page); const rows = await this.prisma.contact.findMany({ where: cursorWhere(context, args.cursor), take: args.take, orderBy: { id: "asc" } }); return paginate(rows.map((row) => parseRecord(contactRecordSchema, row)), args.take - 1); }
@@ -908,15 +909,51 @@ export class PrismaDealsRepository implements DealsRepository {
     return { deal: parseRecord(dealRecordSchema, row), previousStageId: currentDeal.pipelineStageId };
   }
   async findDetailById(workspaceId: string, dealId: string): Promise<DealDetailRecord | null> {
+    const details = await this.findDetailsByIds(workspaceId, [dealId]);
+    return details[0] ?? null;
+  }
+
+  async findDetailsByIds(workspaceId: string, dealIds: readonly string[]): Promise<readonly DealDetailRecord[]> {
     const context = workspaceContext(workspaceId);
-    const deal = await this.findById(workspaceId, dealId);
-    if (deal === null) return null;
-    const [contact, owner, activityPage] = await Promise.all([
-      deal.contactId === undefined || deal.contactId === null ? Promise.resolve(null) : this.findContact(context, deal.contactId),
-      deal.ownerId === undefined || deal.ownerId === null ? Promise.resolve(null) : this.findOwner(context, deal.ownerId),
-      this.listActivities(context, deal.id),
+    ensureContext(context);
+    const uniqueDealIds = [...new Set(dealIds.filter((id) => id.length > 0))];
+    if (uniqueDealIds.length === 0) return [];
+
+    const deals = (await this.prisma.deal.findMany({
+      where: withTenant(context, { id: { in: uniqueDealIds } }),
+      orderBy: { id: "asc" },
+    })).map((row) => parseRecord(dealRecordSchema, row));
+
+    const contactIds = [...new Set(deals.flatMap((deal) => deal.contactId == null ? [] : [deal.contactId]))];
+    const ownerIds = [...new Set(deals.flatMap((deal) => deal.ownerId == null ? [] : [deal.ownerId]))];
+
+    const [contactRows, ownerRows, activityRows] = await Promise.all([
+      contactIds.length === 0 ? Promise.resolve([]) : this.prisma.contact.findMany({ where: withTenant(context, { id: { in: contactIds } }) }),
+      ownerIds.length === 0 ? Promise.resolve([]) : this.prisma.tenantUser.findMany({ where: withTenant(context, { id: { in: ownerIds } }) }),
+      this.prisma.activity.findMany({ where: withTenant(context, { dealId: { in: uniqueDealIds } }), orderBy: { id: "asc" } }),
     ]);
-    return { deal, contact, owner, activity: activityPage.items };
+
+    const contacts = new Map(contactRows.map((row) => {
+      const parsed = parseRecord(dealContactRecordSchema, row);
+      return [parsed.id, parsed] as const;
+    }));
+    const owners = new Map(ownerRows.map((row) => {
+      const parsed = parseRecord(dealOwnerRecordSchema, row);
+      return [parsed.id, parsed] as const;
+    }));
+    const activities = new Map<string, ActivityRecord[]>();
+    for (const row of activityRows) {
+      const parsed = parseRecord(activityRecordSchema, row);
+      if (parsed.dealId == null) continue;
+      activities.set(parsed.dealId, [...(activities.get(parsed.dealId) ?? []), parsed]);
+    }
+
+    return deals.map((deal) => ({
+      deal,
+      contact: deal.contactId == null ? null : contacts.get(deal.contactId) ?? null,
+      owner: deal.ownerId == null ? null : owners.get(deal.ownerId) ?? null,
+      activity: activities.get(deal.id) ?? [],
+    }));
   }
   async updateStage(workspaceId: string, dealId: string, stageId: string): Promise<DealRecord> {
     const context = workspaceContext(workspaceId);
@@ -1260,8 +1297,14 @@ export class PrismaSellerInvitationRepository implements SellerInvitationReposit
   }
 
   async listSellerInvitationsByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly SellerInvitationRecord[]> {
+    return this.listSellerInvitationsByMarketplaceCaptureIds(context, [marketplaceCaptureId]);
+  }
+
+  async listSellerInvitationsByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly SellerInvitationRecord[]> {
     ensureContext(context);
-    const rows = await this.prisma.marketplaceSellerInvitation.findMany({ where: withTenant(context, { marketplaceCaptureId }), orderBy: { createdAt: "desc" } });
+    const uniqueIds = [...new Set(marketplaceCaptureIds.filter((id) => id.length > 0))];
+    if (uniqueIds.length === 0) return [];
+    const rows = await this.prisma.marketplaceSellerInvitation.findMany({ where: withTenant(context, { marketplaceCaptureId: { in: uniqueIds } }), orderBy: { createdAt: "desc" } });
     return rows.map((row) => parseRecord(sellerInvitationRecordSchema, row));
   }
 
@@ -1296,8 +1339,14 @@ export class PrismaMarketplaceClaimTokenRepository implements MarketplaceClaimTo
   }
 
   async listClaimTokensByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly MarketplaceClaimTokenRecord[]> {
+    return this.listClaimTokensByMarketplaceCaptureIds(context, [marketplaceCaptureId]);
+  }
+
+  async listClaimTokensByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly MarketplaceClaimTokenRecord[]> {
     ensureContext(context);
-    const rows = await this.prisma.marketplaceClaimToken.findMany({ where: withTenant(context, { marketplaceCaptureId }), orderBy: { createdAt: "desc" } });
+    const uniqueIds = [...new Set(marketplaceCaptureIds.filter((id) => id.length > 0))];
+    if (uniqueIds.length === 0) return [];
+    const rows = await this.prisma.marketplaceClaimToken.findMany({ where: withTenant(context, { marketplaceCaptureId: { in: uniqueIds } }), orderBy: { createdAt: "desc" } });
     return rows.map((row) => parseRecord(marketplaceClaimTokenRecordSchema, row));
   }
 
@@ -1322,9 +1371,16 @@ export class PrismaMarketplaceOwnershipAttestationRepository implements Marketpl
   }
 
   async findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<MarketplaceOwnershipAttestationRecord | null> {
+    const rows = await this.listByMarketplaceCaptureIds(context, [marketplaceCaptureId]);
+    return rows[0] ?? null;
+  }
+
+  async listByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly MarketplaceOwnershipAttestationRecord[]> {
     ensureContext(context);
-    const row = await this.prisma.marketplaceOwnershipAttestation.findFirst({ where: withTenant(context, { marketplaceCaptureId }) });
-    return row === null ? null : parseRecord(marketplaceOwnershipAttestationRecordSchema, row);
+    const uniqueIds = [...new Set(marketplaceCaptureIds.filter((id) => id.length > 0))];
+    if (uniqueIds.length === 0) return [];
+    const rows = await this.prisma.marketplaceOwnershipAttestation.findMany({ where: withTenant(context, { marketplaceCaptureId: { in: uniqueIds } }), orderBy: { createdAt: "desc" } });
+    return rows.map((row) => parseRecord(marketplaceOwnershipAttestationRecordSchema, row));
   }
 }
 
@@ -1339,9 +1395,16 @@ export class PrismaDraftInventoryRepository implements DraftInventoryRepository 
   }
 
   async findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<DraftInventoryRecord | null> {
+    const rows = await this.listByMarketplaceCaptureIds(context, [marketplaceCaptureId]);
+    return rows[0] ?? null;
+  }
+
+  async listByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly DraftInventoryRecord[]> {
     ensureContext(context);
-    const row = await this.prisma.draftInventory.findFirst({ where: withTenant(context, { marketplaceCaptureId }) });
-    return row === null ? null : parseRecord(draftInventoryRecordSchema, row);
+    const uniqueIds = [...new Set(marketplaceCaptureIds.filter((id) => id.length > 0))];
+    if (uniqueIds.length === 0) return [];
+    const rows = await this.prisma.draftInventory.findMany({ where: withTenant(context, { marketplaceCaptureId: { in: uniqueIds } }), orderBy: { createdAt: "desc" } });
+    return rows.map((row) => parseRecord(draftInventoryRecordSchema, row));
   }
 
   async findByMarketplaceListing(context: TenantScoped, marketplaceSource: string, marketplaceListingId: string): Promise<DraftInventoryRecord | null> {
@@ -1391,8 +1454,14 @@ export class PrismaRenderConversionRepository implements RenderConversionReposit
     return row === null ? null : parseRecord(renderConversionRecordSchema, row);
   }
   async listRenderConversionsByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly RenderConversionRecord[]> {
+    return this.listRenderConversionsByMarketplaceCaptureIds(context, [marketplaceCaptureId]);
+  }
+
+  async listRenderConversionsByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly RenderConversionRecord[]> {
     ensureContext(context);
-    const rows = await this.prisma.renderConversion.findMany({ where: withTenant(context, { marketplaceCaptureId }), orderBy: { createdAt: "desc" } });
+    const uniqueIds = [...new Set(marketplaceCaptureIds.filter((id) => id.length > 0))];
+    if (uniqueIds.length === 0) return [];
+    const rows = await this.prisma.renderConversion.findMany({ where: withTenant(context, { marketplaceCaptureId: { in: uniqueIds } }), orderBy: { createdAt: "desc" } });
     return rows.map((row) => parseRecord(renderConversionRecordSchema, row));
   }
 
@@ -1453,10 +1522,16 @@ export class PrismaActivityRepository implements ActivityRepository {
   }
 
   async listActivitiesByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly ActivityRecord[]> {
+    return this.listActivitiesByMarketplaceCaptureIds(context, [marketplaceCaptureId]);
+  }
+
+  async listActivitiesByMarketplaceCaptureIds(context: TenantScoped, marketplaceCaptureIds: readonly string[]): Promise<readonly ActivityRecord[]> {
     ensureContext(context);
+    const uniqueIds = [...new Set(marketplaceCaptureIds.filter((id) => id.length > 0))];
+    if (uniqueIds.length === 0) return [];
     const rows = await this.prisma.activity.findMany({
-      where: withTenant(context, { metadata: { path: ["marketplaceCaptureId"], equals: marketplaceCaptureId } }),
-      take: 100,
+      where: withTenant(context, { OR: uniqueIds.map((id) => ({ metadata: { path: ["marketplaceCaptureId"], equals: id } })) }),
+      take: Math.min(uniqueIds.length * 100, 1000),
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => parseRecord(activityRecordSchema, row));
