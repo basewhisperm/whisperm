@@ -214,10 +214,12 @@ export class SellerAcquisitionRecordService {
   constructor(private readonly deps: SellerAcquisitionRecordDependencies) {}
 
   async list(context: Context, page?: PageRequest): Promise<SellerAcquisitionRecordPage> {
-    const capturePageRequest: PageRequest = page?.cursor === undefined
-      ? { limit: limitOf(page) }
-      : { limit: limitOf(page), cursor: page.cursor };
-    const capturePage = await this.deps.marketplaceCaptures.list(context, capturePageRequest);
+    const capturePage = page === undefined
+      ? await this.deps.marketplaceCaptures.list(context, { limit: 100 })
+      : await this.deps.marketplaceCaptures.list(
+        context,
+        page.cursor === undefined ? { limit: limitOf(page) } : { limit: limitOf(page), cursor: page.cursor },
+      );
     const captures = [...capturePage.items].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const records = await this.buildFromCaptures(context, captures);
     const groupedRecords = this.groupPortfolio(records);
