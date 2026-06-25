@@ -72,6 +72,19 @@ type Metadata = Readonly<Record<string, unknown>>;
 const isRecord = (value: unknown): value is Metadata => typeof value === "object" && value !== null && !Array.isArray(value);
 const metadataOf = (capture: MarketplaceCaptureRecord): Metadata => isRecord(capture.metadata) ? capture.metadata : {};
 const nonEmpty = (value: unknown): string | null => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const normalizeIdentity = (value: unknown): string | null => nonEmpty(value)?.toLowerCase().replace(/\s+/gu, " ") ?? null;
+const normalizeUrlIdentity = (value: unknown): string | null => {
+  const input = nonEmpty(value);
+  if (input === null) return null;
+  try {
+    const url = new URL(input);
+    url.hash = "";
+    url.search = "";
+    return url.toString().replace(/\/$/u, "").toLowerCase();
+  } catch {
+    return normalizeIdentity(input);
+  }
+};
 
 const resolvePhone = (capture: MarketplaceCaptureRecord, contact: ContactRecord | null): string | null => {
   const metadata = metadataOf(capture);
@@ -126,6 +139,26 @@ const stageFromDeal = (deal: DealDetailRecord | null, capture: MarketplaceCaptur
   return nonEmpty(metadata.pipelineStageName) ?? nonEmpty(metadata.stageName) ?? stageFromCapture(capture.status);
 };
 
+const sellerGroupKey = (record: SellerAcquisitionRecord): string => {
+  const phone = resolvePhone(record.capture, record.contact);
+  if (phone !== null) return `phone:${phone}`;
+
+  const metadata = metadataOf(record.capture);
+  const contactName = normalizeIdentity([record.contact?.firstName, record.contact?.lastName].filter(Boolean).join(" "));
+  const profile = normalizeUrlIdentity(record.capture.sellerProfileUrl) ?? normalizeUrlIdentity(metadata.sellerProfileUrl);
+  const marketplaceIdentity = normalizeIdentity(metadata.marketplaceIdentifier) ?? normalizeIdentity(metadata.marketplaceSellerId);
+  const sellerName = normalizeIdentity(record.capture.sellerName) ?? normalizeIdentity(metadata.sellerName) ?? contactName;
+  const source = normalizeIdentity(record.capture.marketplaceSourceId) ?? normalizeIdentity(metadata.marketplaceSource) ?? normalizeIdentity(metadata.sourceMarketplace);
+
+  if (record.capture.dealId != null) return `deal:${record.capture.dealId}`;
+  if (record.capture.contactId != null) return `contact:${record.capture.contactId}`;
+  if (profile !== null) return `profile:${profile}`;
+  if (marketplaceIdentity !== null) return `marketplace:${marketplaceIdentity}`;
+  if (sellerName !== null && source !== null) return `seller:${source}:${sellerName}`;
+
+  return `capture:${record.capture.id}`;
+};
+
 export class SellerAcquisitionRecordService {
   constructor(private readonly deps: SellerAcquisitionRecordDependencies) {}
 
@@ -136,11 +169,7 @@ export class SellerAcquisitionRecordService {
     const groups = new Map<string, SellerAcquisitionRecord[]>();
 
     for (const record of records) {
-      const phone = resolvePhone(record.capture, record.contact);
-      const groupKey =
-        phone === null
-          ? record.capture.dealId ?? record.capture.contactId ?? record.capture.sellerProfileUrl ?? `${record.capture.sellerName ?? "unknown"}:${record.capture.marketplaceSourceId ?? "unknown"}`
-          : `phone:${phone}`;
+      const groupKey = sellerGroupKey(record);
       groups.set(groupKey, [...(groups.get(groupKey) ?? []), record]);
     }
 

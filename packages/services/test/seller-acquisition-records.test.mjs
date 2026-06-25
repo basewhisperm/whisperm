@@ -104,3 +104,20 @@ test('inventory conversion lookup uses draft inventory id instead of capture ext
   assert.notEqual(result.nextAction, 'CONVERT_INVENTORY');
   assert.equal(result.nextAction, 'COMPLETE_ACQUISITION');
 });
+
+
+test('groups captures with normalized seller profile URL when phone is missing', async () => {
+  const first = capture({ id: 'capture-1', contactId: null, sellerProfileUrl: 'https://market.test/sellers/SAM?ref=one', metadata: {} });
+  const second = capture({ id: 'capture-2', contactId: null, sellerProfileUrl: 'https://market.test/sellers/sam?ref=two', listingUrl: 'https://market.test/2', externalId: 'listing-2', metadata: {} });
+  const result = await service({ capture: first, contact: null, draft: draft({ contactId: null }), otherCaptures: [second] }).list(ctx);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].portfolio.listingCount, 2);
+  assert.deepEqual(new Set(result[0].portfolio.captureIds), new Set(['capture-1', 'capture-2']));
+});
+
+test('does not collapse anonymous no-phone captures into one seller', async () => {
+  const first = capture({ id: 'capture-1', contactId: null, sellerName: null, marketplaceSourceId: null, metadata: {} });
+  const second = capture({ id: 'capture-2', contactId: null, sellerName: null, marketplaceSourceId: null, listingUrl: 'https://market.test/2', externalId: 'listing-2', metadata: {} });
+  const result = await service({ capture: first, contact: null, draft: draft({ contactId: null }), otherCaptures: [second] }).list(ctx);
+  assert.equal(result.length, 2);
+});
