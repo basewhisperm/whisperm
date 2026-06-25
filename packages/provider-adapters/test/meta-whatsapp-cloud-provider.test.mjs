@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("../src/whatsapp/meta-whatsapp-cloud-provider.ts", import.meta.url), "utf8");
-const exportsSource = readFileSync("packages/provider-adapters/src/index.ts", "utf8");
+const exportsSource = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
 
 test("Meta WhatsApp Cloud provider uses Graph API template messages", () => {
   assert.match(source, /class MetaWhatsAppCloudProvider/u);
