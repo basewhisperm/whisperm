@@ -63,6 +63,7 @@ const createRenderSellerConnector = () => ({
         "idempotency-key": input.idempotencyKey,
       },
       body: JSON.stringify(input),
+      signal: AbortSignal.timeout(8_000),
     });
 
     const rawResponse = await response.json().catch(() => ({} as unknown));

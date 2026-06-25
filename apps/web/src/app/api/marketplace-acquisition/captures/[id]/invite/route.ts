@@ -43,6 +43,7 @@ const configuredEmailProvider = (env: NodeJS.ProcessEnv): SellerInvitationProvid
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ from, to: message.to, subject: message.subject, html: message.html }),
+        signal: AbortSignal.timeout(8_000),
       });
       if (!response.ok) throw new Error("Seller invitation email provider failed");
     },
