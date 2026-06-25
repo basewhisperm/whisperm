@@ -13,7 +13,7 @@ import {
   PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { createHttpSmsProviderFromEnv } from "@whisperm/provider-adapters";
+import { createHttpSmsProviderFromEnv, createMetaWhatsAppCloudProviderFromEnv } from "@whisperm/provider-adapters";
 import { SellerInvitationService, ServiceError, type SellerInvitationProviderPorts } from "@whisperm/services";
 import { sellerInvitationCreateRequestSchema } from "@whisperm/types";
 
@@ -48,46 +48,6 @@ const configuredEmailProvider = (env: NodeJS.ProcessEnv): SellerInvitationProvid
   };
 };
 
-const configuredWhatsappProvider = (env: NodeJS.ProcessEnv): SellerInvitationProviderPorts["whatsapp"] | undefined => {
-  const token = env.META_WHATSAPP_ACCESS_TOKEN?.trim() ?? env.WHATSAPP_CLOUD_API_TOKEN?.trim();
-  const phoneNumberId = env.META_WHATSAPP_PHONE_NUMBER_ID?.trim() ?? env.WHATSAPP_CLOUD_PHONE_NUMBER_ID?.trim();
-  const templateName = env.WHATSAPP_CLOUD_TEMPLATE_NAME?.trim() ?? "seller_invitation_v1";
-  const languageCode = env.WHATSAPP_CLOUD_TEMPLATE_LANGUAGE?.trim() ?? "en";
-
-  if (!token || !phoneNumberId) return undefined;
-
-  return {
-    async send(message) {
-      const response = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/messages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: message.to.replace(/[^\d]/gu, ""),
-          type: "template",
-          template: {
-            name: templateName,
-            language: { code: languageCode },
-            components: [
-              {
-                type: "body",
-                parameters: [{ type: "text", text: message.body }],
-              },
-            ],
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        const detail = await response.text().catch(() => "");
-        throw new Error(`WhatsApp Cloud API failed with ${response.status}: ${detail.slice(0, 500)}`);
-      }
-    },
-  };
-};
 
 const configuredSmsProvider = (env: NodeJS.ProcessEnv): SellerInvitationProviderPorts["sms"] | undefined => {
   const provider = env.SELLER_INVITATION_SMS_PROVIDER?.trim();
@@ -101,7 +61,7 @@ const configuredSmsProvider = (env: NodeJS.ProcessEnv): SellerInvitationProvider
 const sellerInvitationNotifications = (): SellerInvitationProviderPorts => {
   const email = configuredEmailProvider(process.env);
   const sms = configuredSmsProvider(process.env);
-  const whatsapp = configuredWhatsappProvider(process.env);
+  const whatsapp = createMetaWhatsAppCloudProviderFromEnv(process.env);
   const notifications: SellerInvitationProviderPorts = {
     whatsappEnabled: process.env.SELLER_INVITATION_WHATSAPP_ENABLED !== "false",
     fallbackToSmsWhenWhatsappMissing: process.env.SELLER_INVITATION_FALLBACK_TO_SMS !== "false",

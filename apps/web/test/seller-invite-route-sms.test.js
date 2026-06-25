@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const route = readFileSync(new URL('../src/app/api/marketplace-acquisition/captures/[id]/invite/route.ts', import.meta.url), 'utf8');
+const metaWhatsappProvider = readFileSync(new URL("../../../packages/provider-adapters/src/whatsapp/meta-whatsapp-cloud-provider.ts", import.meta.url), "utf8");
 
 test('seller acquisition invite route wires the generic SMS provider from launch environment variables', () => {
   assert.match(route, /createHttpSmsProviderFromEnv/u);
@@ -22,10 +23,10 @@ test('seller acquisition invite route keeps Resend email optional and avoids Tru
 
 
 test('seller acquisition invite route wires Meta WhatsApp Cloud API provider from environment variables', () => {
-  assert.match(route, /configuredWhatsappProvider/u);
-  assert.match(route, /META_WHATSAPP_ACCESS_TOKEN/u);
-  assert.match(route, /META_WHATSAPP_PHONE_NUMBER_ID/u);
-  assert.match(route, /WHATSAPP_CLOUD_TEMPLATE_NAME/u);
-  assert.match(route, /graph\.facebook\.com\/v20\.0/u);
+  assert.match(route, /createMetaWhatsAppCloudProviderFromEnv/u);
+  assert.match(metaWhatsappProvider, /META_WHATSAPP_ACCESS_TOKEN/u);
+  assert.match(metaWhatsappProvider, /META_WHATSAPP_PHONE_NUMBER_ID/u);
+  assert.match(metaWhatsappProvider, /WHATSAPP_CLOUD_TEMPLATE_NAME/u);
+  assert.match(metaWhatsappProvider, /graph\.facebook\.com/u);
   assert.match(route, /\.\.\.\(whatsapp === undefined \? \{\} : \{ whatsapp \}\)/u);
 });
