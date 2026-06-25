@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import {
   PrismaAuditLogRepository,
@@ -80,7 +81,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
-  const parsed = sellerInvitationCreateRequestSchema.safeParse(await request.json().catch(() => ({})));
+  let body: unknown;
+  try {
+    body = await readJsonBody(request, { maxBytes: 16_000 });
+  } catch (error) {
+    if (error instanceof RequestBodyError) return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });
+    body = {};
+  }
+
+  const parsed = sellerInvitationCreateRequestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "A supported preferredChannel is required when provided" }, { status: 400 });
   }

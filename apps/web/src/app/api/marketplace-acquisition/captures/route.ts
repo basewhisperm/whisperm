@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { createWhispeRMServices, ServiceError } from "@whisperm/services";
@@ -91,8 +92,9 @@ export async function POST(request: NextRequest) {
 
   let body: Record<string, unknown>;
   try {
-    body = safeRecord(await request.json());
-  } catch {
+    body = safeRecord(await readJsonBody(request, { maxBytes: 96_000 }));
+  } catch (error) {
+    if (error instanceof RequestBodyError) return errorResponse(error.message, error.status, error.code);
     return errorResponse("Capture request body must be valid JSON.", 400);
   }
 
