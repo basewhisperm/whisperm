@@ -23,6 +23,14 @@ export interface RenderInventoryConversionContext {
   readonly correlation: PersistenceCorrelationMetadata;
 }
 
+
+const redactProviderFailure = (message: string): string =>
+  message
+    .replace(/Bearer\s+[^\s"',}]+/giu, "Bearer [REDACTED]")
+    .replace(/access[_-]?token["'=:\s]+[^\s"',}]+/giu, "accessToken=[REDACTED]")
+    .replace(/api[_-]?key["'=:\s]+[^\s"',}]+/giu, "apiKey=[REDACTED]")
+    .slice(0, 500);
+
 type RenderInventoryConversionErrorCode =
   | "SERVICE_TENANT_MISMATCH"
   | "SERVICE_NOT_FOUND"
@@ -246,20 +254,20 @@ export class RenderInventoryConversionService {
       await this.deps.renderConversions.update(scope, conversion.id, {
         status: "FAILED",
         failedAt: this.now().toISOString(),
-        failureReason,
+        failureReason: redactProviderFailure(failureReason),
       });
       await this.audit(scope, context.correlation, "RENDER_INVENTORY_CONVERSION_FAILED", conversion.id, {
         marketplaceCaptureId: capture.id,
         draftInventoryId: draft.id,
         conversionId: conversion.id,
         renderSellerId: sellerConversion?.renderSellerId ?? null,
-        failureReason,
+        failureReason: redactProviderFailure(failureReason),
       });
       await this.appendActivity(scope, context, capture, draft, "Render inventory conversion failed", this.now().toISOString(), { eventType: "RENDER_INVENTORY_CONVERSION_FAILED", marketplaceCaptureId: capture.id, draftInventoryId: draft.id, conversionId: conversion.id, renderSellerId: sellerConversion?.renderSellerId ?? null, failureReason });
       throw this.error(
         context.correlation,
         "SERVICE_REPOSITORY_FAILED",
-        `Render inventory conversion failed: ${failureReason}`,
+        "Render inventory conversion failed.",
         502,
         { conversionId: conversion.id },
         cause,

@@ -61,7 +61,7 @@ export class MetaWhatsAppCloudProvider implements WhatsAppProvider {
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`WhatsApp Cloud API failed with ${response.status}: ${detail.slice(0, 500)}`);
+      throw new Error(`WhatsApp Cloud API failed with ${response.status}: ${"provider response redacted"}`);
     }
   }
 }

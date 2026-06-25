@@ -1402,6 +1402,14 @@ const hasDeliveryProvider = (channel: SellerInvitationChannel, notifications: Se
   return notifications?.email !== undefined;
 };
 
+
+const redactProviderFailure = (message: string): string =>
+  message
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/giu, "Bearer [REDACTED]")
+    .replace(/access[_-]?token["'=:\s]+[^\s"',}]+/giu, "accessToken=[REDACTED]")
+    .replace(/api[_-]?key["'=:\s]+[^\s"',}]+/giu, "apiKey=[REDACTED]")
+    .slice(0, 300);
+
 const canDeliverInvitation = (channel: SellerInvitationChannel, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined): boolean =>
   hasDeliveryProvider(channel, notifications) ||
   (channel === "WHATSAPP" && contact.phone !== undefined && notifications?.fallbackToSmsWhenWhatsappMissing !== false && notifications?.sms !== undefined);
@@ -1526,7 +1534,7 @@ export class SellerInvitationService {
             ...(record.metadata ?? {}),
             providerOutcome: "PROVIDER_FAILED",
             providerFailureChannel: channel,
-            providerFailureMessage: failureMessage.slice(0, 500),
+            providerFailureMessage: redactProviderFailure(failureMessage),
           },
         });
 
@@ -1537,7 +1545,7 @@ export class SellerInvitationService {
           metadata: {
             captureId: record.marketplaceCaptureId,
             channel,
-            failureMessage: failureMessage.slice(0, 500),
+            failureMessage: redactProviderFailure(failureMessage),
           },
         });
 

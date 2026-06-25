@@ -222,6 +222,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       return errorResponse(error.message, error.status, error.code);
     }
 
-    return errorResponse("Render inventory conversion failed.", 500, "RENDER_INVENTORY_CONVERSION_FAILED");
+    return errorResponse("Render inventory conversion failed.", 502, "RENDER_INVENTORY_CONVERSION_FAILED");
   }
 }
