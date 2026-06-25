@@ -7,7 +7,11 @@ const correlation = (request: NextRequest) => ({ correlationId: request.headers.
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
-    const result = await createSellerClaimService().accept({ correlation: correlation(request) }, params.token, await request.json().catch(() => ({})));
+    const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
+    const body = Number.isFinite(contentLength) && contentLength > 16_000
+      ? {}
+      : await request.json().catch(() => ({}));
+    const result = await createSellerClaimService().accept({ correlation: correlation(request) }, params.token, body);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") return NextResponse.json({ error: "acceptedTerms must be true" }, { status: 400 });

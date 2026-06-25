@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
@@ -43,7 +44,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
-  const body = await request.json().catch(() => ({}));
+  let body: unknown;
+  try {
+    body = await readJsonBody(request, { maxBytes: 32_000 });
+  } catch (error) {
+    if (error instanceof RequestBodyError) return errorResponse(error.message, error.status);
+    body = {};
+  }
   const prismaPersistenceClient = prisma as unknown as PrismaPersistenceClient;
   const repositories = createPrismaRepositories(prismaPersistenceClient);
 
