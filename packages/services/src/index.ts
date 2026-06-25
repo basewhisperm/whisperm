@@ -1506,13 +1506,41 @@ export class SellerInvitationService {
   }
 
   private async sendOrFallback(context: ServiceContext, scope: TenantScoped, repositories: ServiceRepositories, invitation: SellerInvitationRecord, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined): Promise<SellerInvitationRecord> {
+    let lastProviderFailureChannel: SellerInvitationChannel | undefined;
+    let lastProviderFailureMessage: string | undefined;
+
     const trySend = async (channel: SellerInvitationChannel, record: SellerInvitationRecord): Promise<SellerInvitationRecord | null> => {
       const body = `You are invited to Seller Acquisition: ${record.inviteUrl}`;
       try {
         if (channel === "WHATSAPP") { if (notifications?.whatsapp === undefined) return null; await notifications.whatsapp.send({ to: record.recipient, body }); }
         if (channel === "SMS") { if (notifications?.sms === undefined) return null; await notifications.sms.send({ to: record.recipient, body }); }
         if (channel === "EMAIL") { if (notifications?.email === undefined) return null; await notifications.email.send({ to: record.recipient, subject: "Seller Acquisition invitation", html: `<p>${body}</p>` }); }
-      } catch {
+      } catch (error) {
+        const failureMessage = error instanceof Error ? error.message : "Invitation provider failed";
+        lastProviderFailureChannel = channel;
+        lastProviderFailureMessage = failureMessage;
+
+        await this.deps.sellerInvitations!.update(scope, record.id, {
+          status: "PENDING",
+          metadata: {
+            ...(record.metadata ?? {}),
+            providerOutcome: "PROVIDER_FAILED",
+            providerFailureChannel: channel,
+            providerFailureMessage: failureMessage.slice(0, 500),
+          },
+        });
+
+        await appendAudit(repositories, context, {
+          action: "INVITATION_PROVIDER_FAILED",
+          targetType: "SELLER_INVITATION",
+          targetId: record.id,
+          metadata: {
+            captureId: record.marketplaceCaptureId,
+            channel,
+            failureMessage: failureMessage.slice(0, 500),
+          },
+        });
+
         return null;
       }
       const sentAt = new Date().toISOString();
@@ -1547,6 +1575,8 @@ export class SellerInvitationService {
         ...(invitation.metadata ?? {}),
         providerOutcome: "MANUAL_DELIVERY_REQUIRED",
         failureReason: "INVITATION_PROVIDER_UNAVAILABLE",
+        providerFailureChannel: lastProviderFailureChannel,
+        providerFailureMessage: lastProviderFailureMessage?.slice(0, 500),
       },
     });
 

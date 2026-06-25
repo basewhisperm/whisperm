@@ -19,3 +19,13 @@ test('seller acquisition invite route keeps Resend email optional and avoids Tru
   assert.match(route, /RESEND_API_KEY/u);
   assert.doesNotMatch(route, /TrustLayer|trustLayer/u);
 });
+
+
+test('seller acquisition invite route wires Meta WhatsApp Cloud API provider from environment variables', () => {
+  assert.match(route, /configuredWhatsappProvider/u);
+  assert.match(route, /META_WHATSAPP_ACCESS_TOKEN/u);
+  assert.match(route, /META_WHATSAPP_PHONE_NUMBER_ID/u);
+  assert.match(route, /WHATSAPP_CLOUD_TEMPLATE_NAME/u);
+  assert.match(route, /graph\.facebook\.com\/v20\.0/u);
+  assert.match(route, /\.\.\.\(whatsapp === undefined \? \{\} : \{ whatsapp \}\)/u);
+});
