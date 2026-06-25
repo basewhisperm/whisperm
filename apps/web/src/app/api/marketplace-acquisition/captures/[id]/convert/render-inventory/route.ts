@@ -129,6 +129,7 @@ const createRenderInventoryConnector = () => ({
         sourceCaptureId: clean(input.marketplaceCaptureId),
         sourceDraftInventoryId: clean(input.draftInventoryId),
       }),
+      signal: AbortSignal.timeout(8_000),
     });
 
     const rawResponse = await response.json().catch(() => ({} as unknown));

@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
         "user-agent": "WhispeRM Seller Capture/1.0",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(8_000),
     });
 
     if (!response.ok) {
@@ -93,6 +93,9 @@ export async function POST(request: NextRequest) {
       nextAction: missingRequirements.includes("PHONE_REQUIRED") ? "REVEAL_PHONE" : undefined,
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return NextResponse.json({ ok: false, error: { message: "Listing fetch timed out.", code: "EXTERNAL_TIMEOUT" } }, { status: 504 });
+    }
     if (error instanceof ServiceError) {
       return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });
     }
