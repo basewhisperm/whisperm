@@ -41,7 +41,7 @@ const dashboardNavigationItems = [
 
 const sellerAcquisitionNavigationItems = [
   // marketplaceSellers.title
-  { labelKey: "sellerAcquisition.nav.campaigns", icon: IconRocket, disabled: true },
+  { labelKey: "sellerAcquisition.nav.campaigns", icon: IconRocket, href: "/marketplace-acquisition/campaigns" },
   { labelKey: "sellerAcquisition.nav.workbench", icon: IconInbox, href: "/marketplace-acquisition" },
   { labelKey: "sellerAcquisition.nav.sellers", icon: IconBookmark, disabled: true },
   { labelKey: "sellerAcquisition.nav.invites", icon: IconSend, disabled: true },
