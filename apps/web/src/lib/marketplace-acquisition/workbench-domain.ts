@@ -20,6 +20,15 @@ export interface SellerRollup {
 }
 
 export const queueBuckets: readonly QueueBucket[] = [
+  {
+    id: "needs_human_review",
+    label: "Needs Human Review",
+    matches: (r) =>
+      confidence(r) === "LOW" ||
+      !hasPhone(r) ||
+      qualityIssues(r).length >= 2 ||
+      r.healthStatus === "BLOCKED",
+  },
   { id: "needs-phone",       label: "Needs Phone Reveal",                 matches: (r) => r.nextAction === "REVEAL_PHONE" },
   { id: "needs-invitation",  label: "Needs Invitation",             matches: (r) => r.nextAction === "SEND_INVITATION" },
   { id: "invitation-failed", label: "Invitation Failed",               matches: (r) => r.nextAction === "RETRY_INVITATION" },
