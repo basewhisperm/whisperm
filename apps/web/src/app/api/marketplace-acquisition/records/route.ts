@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
 
   const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
   const cursor = request.nextUrl.searchParams.get("cursor") ?? undefined;
+  const campaignId = request.nextUrl.searchParams.get("campaignId")?.trim() || undefined;
 
   const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
   const services = createWhispeRMServices(repositories);
@@ -31,7 +32,9 @@ export async function GET(request: NextRequest) {
     ...(limit === undefined ? {} : { limit }),
     ...(cursor === undefined ? {} : { cursor }),
   };
-  const result = await services.sellerAcquisitionRecords.list({ tenantId: tenant.id }, page);
+  const result = campaignId === undefined
+    ? await services.sellerAcquisitionRecords.list({ tenantId: tenant.id }, page)
+    : await services.sellerAcquisitionRecords.listByCampaignId({ tenantId: tenant.id }, campaignId, page);
 
   return NextResponse.json({ ok: true, data: { records: result.records, nextCursor: result.nextCursor } });
 }
