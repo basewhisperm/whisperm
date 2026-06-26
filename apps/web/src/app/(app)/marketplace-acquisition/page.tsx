@@ -206,9 +206,11 @@ export default function MarketplaceAcquisitionPage() {
 
   const commandCenterStats = [
     { label: "Total sellers", value: filteredRollups.length },
-    { label: "Phone-ready", value: filteredRecords.filter(hasPhone).length },
-    { label: "Needs Invitation", value: filteredRecords.filter((record) => record.nextAction === "SEND_INVITATION").length },
-    { label: "Blocked", value: filteredRecords.filter((record) => record.missingRequirements.includes("PHONE_REQUIRED")).length },
+    { label: "Needs Review", value: filteredRecords.filter((record) => confidence(record) === "LOW" || qualityIssues(record).length >= 2).length },
+    { label: "Needs Invitation", value: filteredRecords.filter((record) => record.nextAction === "SEND_INVITATION" && hasPhone(record)).length },
+    { label: "Waiting Claim", value: filteredRecords.filter((record) => record.nextAction === "WAIT_FOR_CLAIM").length },
+    { label: "Ready Conversion", value: filteredRecords.filter((record) => ["CONVERT_SELLER", "CONVERT_INVENTORY", "COMPLETE_ACQUISITION"].includes(record.nextAction)).length },
+    { label: "Completed", value: filteredRecords.filter((record) => record.healthStatus === "COMPLETED").length },
   ] as const;
 
   const toggleBulkRecord = useCallback((captureId: string) => {
@@ -282,7 +284,7 @@ export default function MarketplaceAcquisitionPage() {
         </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-4" aria-label="Acquisition workbench summary">
+      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6" aria-label="Acquisition workbench summary">
         {commandCenterStats.map((stat) => (
           <div key={stat.label} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
@@ -328,7 +330,9 @@ export default function MarketplaceAcquisitionPage() {
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">
           <div className="grid gap-2 rounded-2xl bg-background p-4 md:grid-cols-5" style={{ border: "0.5px solid var(--color-border)" }}>
-            <input aria-label="Search marketplace sellers" className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse md:col-span-5" placeholder="Search by seller, contact, phone, title, marketplace, or capture id" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
+            <input aria-label="Search marketplace sellers" className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse md:col-span-3" placeholder="Search by seller, contact, phone, title, marketplace, or capture id" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
+                  <button className="h-10 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground disabled:opacity-50" disabled={loading} onClick={() => void refreshRecords()} type="button">Refresh</button>
+                  <Link className="inline-flex h-10 items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white" href="/marketplace-acquisition/capture">Capture</Link>
             <Filter label="Queue"       value={queueFilter}       onChange={(value) => setQueueFilter(value as QueueBucketId)} options={["all", ...queueBuckets.map((b) => b.id)]} />
             <Filter label="Health"      value={healthFilter}      onChange={setHealthFilter}      options={["all", "READY", "ACTION_REQUIRED", "BLOCKED", "COMPLETED", "EXPIRED"]} />
             <Filter label="Next Action" value={nextActionFilter}  onChange={setNextActionFilter}  options={["all", ...Object.keys(nextActionLabels)]} />
