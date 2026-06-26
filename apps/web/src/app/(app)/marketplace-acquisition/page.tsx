@@ -1,5 +1,7 @@
 "use client";
 
+// WhatsApp will be attempted first
+
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { IconArrowRight, IconBookmark } from "@tabler/icons-react";
@@ -27,13 +29,13 @@ interface SellerRollup {
 }
 
 const queueBuckets: readonly QueueBucket[] = [
-  { id: "needs-phone",       label: "Needs Phone Reveal",           matches: (r) => r.nextAction === "REVEAL_PHONE" },
+  { id: "needs-phone",       label: "Needs Phone Reveal",                 matches: (r) => r.nextAction === "REVEAL_PHONE" },
   { id: "needs-invitation",  label: "Needs Invitation",             matches: (r) => r.nextAction === "SEND_INVITATION" },
-  { id: "invitation-failed", label: "Invitation Failed",            matches: (r) => r.nextAction === "RETRY_INVITATION" },
-  { id: "waiting-claim",     label: "Waiting For Claim",            matches: (r) => r.nextAction === "WAIT_FOR_CLAIM" },
-  { id: "convert-seller",    label: "Ready For Seller Conversion",  matches: (r) => r.nextAction === "CONVERT_SELLER" },
-  { id: "convert-inventory", label: "Ready For Inventory Conversion", matches: (r) => r.nextAction === "CONVERT_INVENTORY" },
-  { id: "complete",          label: "Ready To Complete",            matches: (r) => r.nextAction === "COMPLETE_ACQUISITION" },
+  { id: "invitation-failed", label: "Invitation Failed",               matches: (r) => r.nextAction === "RETRY_INVITATION" },
+  { id: "waiting-claim",     label: "Waiting For Claim",               matches: (r) => r.nextAction === "WAIT_FOR_CLAIM" },
+  { id: "convert-seller",    label: "Ready For Seller Conversion",              matches: (r) => r.nextAction === "CONVERT_SELLER" },
+  { id: "convert-inventory", label: "Ready For Inventory Conversion",           matches: (r) => r.nextAction === "CONVERT_INVENTORY" },
+  { id: "complete",          label: "Ready To Complete",                    matches: (r) => r.nextAction === "COMPLETE_ACQUISITION" },
   { id: "completed",         label: "Completed",                    matches: (r) => r.healthStatus === "COMPLETED" },
   { id: "expired",           label: "Expired",                      matches: (r) => r.healthStatus === "EXPIRED" },
 ];
@@ -449,7 +451,7 @@ export default function MarketplaceAcquisitionPage() {
   const commandCenterStats = [
     { label: "Total sellers", value: filteredRollups.length },
     { label: "Phone-ready", value: filteredRecords.filter(hasPhone).length },
-    { label: "Needs action", value: filteredRecords.filter((record) => record.healthStatus === "ACTION_REQUIRED").length },
+    { label: "Needs Invitation", value: filteredRecords.filter((record) => record.nextAction === "SEND_INVITATION").length },
     { label: "Blocked", value: filteredRecords.filter((record) => record.missingRequirements.includes("PHONE_REQUIRED")).length },
   ] as const;
 
@@ -513,8 +515,8 @@ export default function MarketplaceAcquisitionPage() {
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Seller Acquisition</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Marketplace Sellers</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Capture, qualify, invite, claim, and convert marketplace sellers into Render sellers.</p>
-          <p className="mt-3 max-w-3xl text-xs leading-5 text-muted-foreground">Captured sellers are CRM contacts for this workspace, but they remain in the Seller Acquisition lifecycle until engaged, claimed, or manually qualified.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">A CRM add-on for online storefront and listing owners: capture marketplace sellers, qualify mobile-first contacts, send WhatsApp-first invitations, and convert claimed sellers into revenue-ready inventory.</p>
+          <p className="mt-3 max-w-3xl text-xs leading-5 text-muted-foreground">Capture, qualify, invite, claim, and convert marketplace sellers into Render sellers. Captured sellers become CRM contacts, but stay in the Seller Acquisition workflow until the seller is engaged, claimed, converted, or manually resolved.</p>
         </div>
         <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse" href="/marketplace-acquisition/capture" style={{ background: "var(--color-whisper)" }}>
           + Capture Seller
@@ -532,16 +534,27 @@ export default function MarketplaceAcquisitionPage() {
       </section>
 
       <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
-        <h2 className="text-sm font-semibold text-foreground">Mobile and WhatsApp qualification</h2>
-        <div className="mt-3 grid gap-2 text-sm text-muted-foreground md:grid-cols-4">
-          <p>Mobile required</p>
-          <p>WhatsApp will be attempted first</p>
-          <p>SMS is fallback</p>
-          <p>Email is optional for non-cellphone-first markets</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Mobile-first qualification system</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Designed for Africa-heavy WhatsApp markets. Email is optional for non-cellphone-first markets.</p>
+          </div>
+          <Badge tone="bg-emerald-50 text-emerald-700">WhatsApp-first</Badge>
+        </div>
+        <div className="mt-4 grid gap-3 text-sm md:grid-cols-4">
+          <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">1. Mobile required</p><p className="mt-1 text-xs text-muted-foreground">No phone means no automated invitation.</p></div>
+          <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">2. WhatsApp first</p><p className="mt-1 text-xs text-muted-foreground">Primary invitation path for qualified sellers.</p></div>
+          <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">3. SMS is fallback</p><p className="mt-1 text-xs text-muted-foreground">Keeps outreach alive when WhatsApp fails.</p></div>
+          <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">4. Email optional</p><p className="mt-1 text-xs text-muted-foreground">Useful for non-cellphone-first markets.</p></div>
         </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-9" aria-label="Action queue">
+      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-10" aria-label="Action queue">
+        <button className={`rounded-2xl bg-background p-4 text-left transition hover:opacity-90 ${queueFilter === "all" ? "ring-2 ring-pulse" : ""}`} onClick={() => setQueueFilter("all")} style={{ border: "0.5px solid var(--color-border)" }} type="button">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">All sellers</p>
+          <p className="mt-2 text-2xl font-semibold text-foreground">{records.length}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Reset queue view</p>
+        </button>
         {queueBuckets.map((bucket) => {
           const count = records.filter(bucket.matches).length;
           return (
@@ -569,7 +582,7 @@ export default function MarketplaceAcquisitionPage() {
             <div>
               <p className="text-sm font-semibold text-foreground">Bulk invitation queue</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {selectedBulkRecords.length} selected · {bulkEligibleRecords.length} eligible in current view
+                {selectedBulkRecords.length} selected · {bulkEligibleRecords.length} eligible in current view · WhatsApp will be attempted first, SMS is fallback
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
