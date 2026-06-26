@@ -9,6 +9,8 @@ import type {
   MarketplaceCaptureRepository,
   MarketplaceClaimTokenRecord,
   MarketplaceClaimTokenRepository,
+  SellerAcquisitionCampaignMemberRecord,
+  SellerAcquisitionCampaignRepository,
   MarketplaceOwnershipAttestationRecord,
   MarketplaceOwnershipAttestationRepository,
   PageRequest,
@@ -61,6 +63,7 @@ export interface SellerAcquisitionRecordPage {
 
 export interface SellerAcquisitionRecordDependencies {
   readonly marketplaceCaptures: MarketplaceCaptureRepository;
+  readonly sellerAcquisitionCampaigns?: SellerAcquisitionCampaignRepository | undefined;
   readonly contacts: {
     findById(context: TenantScoped, id: string): Promise<ContactRecord | null>;
     findByIds?(context: TenantScoped, ids: readonly string[]): Promise<readonly ContactRecord[]>;
@@ -227,6 +230,30 @@ export class SellerAcquisitionRecordService {
       records: groupedRecords,
       nextCursor: capturePage.nextCursor,
     });
+  }
+
+  async listByCampaignId(context: Context, campaignId: string, page?: PageRequest): Promise<SellerAcquisitionRecordPage> {
+    if (this.deps.sellerAcquisitionCampaigns === undefined) {
+      return { records: [] };
+    }
+
+    const campaign = await this.deps.sellerAcquisitionCampaigns.findById(context, campaignId);
+    if (campaign === null) {
+      return { records: [] };
+    }
+
+    const memberPage = await this.deps.sellerAcquisitionCampaigns.listMembers(context, campaignId, page);
+    const captureIds = uniqueStrings(memberPage.items.map((member: SellerAcquisitionCampaignMemberRecord) => member.marketplaceCaptureId));
+    const captures = await Promise.all(captureIds.map((captureId) => this.deps.marketplaceCaptures.findById(context, captureId)));
+    const records = await this.buildFromCaptures(
+      context,
+      captures.filter((capture): capture is MarketplaceCaptureRecord => capture !== null),
+    );
+
+    return {
+      records: this.groupPortfolio(records),
+      nextCursor: memberPage.nextCursor,
+    };
   }
 
   async findByCaptureId(context: Context, captureId: string): Promise<SellerAcquisitionRecord | null> {

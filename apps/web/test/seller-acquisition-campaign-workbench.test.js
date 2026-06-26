@@ -26,3 +26,19 @@ test("reusable acquisition workbench preserves core V1 operations", () => {
   assert.match(component, /runPrimaryAction/u);
   assert.match(component, /recordsPath/u);
 });
+
+test("records API supports campaignId scoped record listing", () => {
+  const route = readFileSync("src/app/api/marketplace-acquisition/records/route.ts", "utf8");
+  assert.match(route, /searchParams\.get\("campaignId"\)/u);
+  assert.match(route, /sellerAcquisitionRecords\.listByCampaignId/u);
+  assert.match(route, /sellerAcquisitionRecords\.list/u);
+});
+
+test("SellerAcquisitionRecordService lists records by campaign membership", () => {
+  const service = readFileSync("../../packages/services/src/seller-acquisition-records.ts", "utf8");
+  assert.match(service, /async listByCampaignId/u);
+  assert.match(service, /sellerAcquisitionCampaigns\.findById/u);
+  assert.match(service, /sellerAcquisitionCampaigns\.listMembers/u);
+  assert.match(service, /marketplaceCaptures\.findById/u);
+  assert.match(service, /member\.marketplaceCaptureId/u);
+});
