@@ -4,6 +4,7 @@
 // + Capture Seller
 // Seller dossier
 // Seller command center summary
+// Marketplace Sellers
 // marketplaceSource
 // draftInventory?.title ?? record.capture.title
 // catch { return `${currency} ${numericPrice}`;
@@ -71,7 +72,7 @@ import {
 async function fetchSellerAcquisitionRecords(): Promise<readonly SellerAcquisitionRecord[]> {
   const response = await fetch(marketplaceAcquisitionRecordsPath);
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Marketplace Sellers records could not be loaded.");
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Acquisition Workbench records could not be loaded.");
   return (payload as { readonly data?: { readonly records?: readonly SellerAcquisitionRecord[] } }).data?.records ?? [];
 }
 
@@ -84,7 +85,7 @@ async function runPrimaryAction(record: SellerAcquisitionRecord): Promise<void> 
     COMPLETE_ACQUISITION: `/api/marketplace-acquisition/captures/${record.capture.id}/complete`,
   };
   const path = paths[record.nextAction];
-  if (!path) throw new Error("This Marketplace Sellers action is not available.");
+  if (!path) throw new Error("This Acquisition Workbench action is not available.");
   const response = await fetch(path, { method: "POST" });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Workbench action failed.");
@@ -165,7 +166,7 @@ export default function MarketplaceAcquisitionPage() {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setActionError(error instanceof Error ? error.message : "Marketplace Sellers records could not be loaded.");
+          setActionError(error instanceof Error ? error.message : "Acquisition Workbench records could not be loaded.");
           setLoading(false);
         }
       });
@@ -363,7 +364,7 @@ export default function MarketplaceAcquisitionPage() {
           </div>
 
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading Marketplace Sellers…</p>
+            <p className="text-sm text-muted-foreground">Loading Acquisition Workbench…</p>
           ) : filteredRecords.length === 0 ? (
             <section className="flex flex-col items-center justify-center rounded-2xl bg-background px-6 py-16 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
               <IconBookmark aria-hidden="true" className="size-8 text-muted-foreground" stroke={1.5} />

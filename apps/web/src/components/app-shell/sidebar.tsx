@@ -35,13 +35,14 @@ type NavigationSection = {
   readonly items: readonly NavigationItem[];
 };
 
-const workspaceNavigationItems = [
+const dashboardNavigationItems = [
   { labelKey: "dashboard.title", icon: IconLayoutDashboard, href: "/dashboard" },
 ] satisfies readonly NavigationItem[];
 
 const sellerAcquisitionNavigationItems = [
+  // marketplaceSellers.title
   { labelKey: "sellerAcquisition.nav.campaigns", icon: IconRocket, disabled: true },
-  { labelKey: "marketplaceSellers.title", icon: IconInbox, href: "/marketplace-acquisition" },
+  { labelKey: "sellerAcquisition.nav.workbench", icon: IconInbox, href: "/marketplace-acquisition" },
   { labelKey: "sellerAcquisition.nav.sellers", icon: IconBookmark, disabled: true },
   { labelKey: "sellerAcquisition.nav.invites", icon: IconSend, disabled: true },
   { labelKey: "sellerAcquisition.nav.claims", icon: IconCircleCheck, disabled: true },
@@ -49,10 +50,16 @@ const sellerAcquisitionNavigationItems = [
   { labelKey: "sellerAcquisition.nav.analytics", icon: IconChartBar, disabled: true },
 ] satisfies readonly NavigationItem[];
 
-const businessNavigationItems = [
+const crmNavigationItems = [
   { labelKey: "contacts.title", icon: IconUsers, href: "/contacts" },
   { labelKey: "deals.title", icon: IconBriefcase, href: "/deals" },
+] satisfies readonly NavigationItem[];
+
+const reportsNavigationItems = [
   { labelKey: "reports.title", icon: IconChartBar, href: "/reports" },
+] satisfies readonly NavigationItem[];
+
+const settingsNavigationItems = [
   { labelKey: "settings.title", icon: IconSettings, href: "/settings" },
 ] satisfies readonly NavigationItem[];
 
@@ -114,14 +121,18 @@ function NavigationSectionList({
   readonly onNavigate?: () => void;
 }) {
   const sections: NavigationSection[] = [
-    { labelKey: "navigation.section.workspace", items: workspaceNavigationItems },
+    { labelKey: "navigation.section.dashboard", items: dashboardNavigationItems },
   ];
 
   if (enabledFeatures.includes(SELLER_ACQUISITION_FEATURE)) {
     sections.push({ labelKey: "navigation.section.sellerAcquisition", items: sellerAcquisitionNavigationItems });
   }
 
-  sections.push({ labelKey: "navigation.section.business", items: businessNavigationItems });
+  sections.push(
+    { labelKey: "navigation.section.crm", items: crmNavigationItems },
+    { labelKey: "navigation.section.reports", items: reportsNavigationItems },
+    { labelKey: "navigation.section.settings", items: settingsNavigationItems },
+  );
 
   return (
     <nav aria-label={t("navigation.primary")} className="flex-1 overflow-y-auto px-3 py-2">
