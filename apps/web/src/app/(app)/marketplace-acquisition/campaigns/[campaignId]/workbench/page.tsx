@@ -7,15 +7,16 @@ interface CampaignWorkbenchPageProps {
 }
 
 export default function CampaignWorkbenchPage({ params }: CampaignWorkbenchPageProps) {
-  const recordsPath = `/api/marketplace-acquisition/records?campaignId=${encodeURIComponent(params.campaignId)}`;
+  const campaignId = decodeURIComponent(params.campaignId);
 
   return (
     <AcquisitionWorkbench
       mode="campaign"
-      recordsPath={recordsPath}
+      campaignId={campaignId}
+      recordsPath="/api/marketplace-acquisition/records"
       title="Campaign Workbench"
-      description="Run this campaign from one focused workspace: qualify assigned sellers, repair extracted data, send WhatsApp-first invitations, retry failures, and move sellers through claim and conversion."
-      contextNote="This campaign-scoped workbench preserves the global acquisition workflow while narrowing the queue to sellers assigned to this campaign."
+      description="Run seller acquisition operations for this campaign: review assigned sellers, fix extracted data, approve readiness, send WhatsApp-first invitations, retry failures, and move qualified sellers toward claim and conversion."
+      contextNote="This campaign workbench only shows sellers assigned to this campaign. Use the global Acquisition Workbench for unassigned or cross-campaign seller operations."
     />
   );
 }
