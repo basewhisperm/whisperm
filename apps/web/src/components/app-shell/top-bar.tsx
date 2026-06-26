@@ -8,11 +8,13 @@ import { NewRecordModal } from "@/components/ui/new-record-modal";
 import { t } from "@/lib/i18n";
 
 const ROUTE_META: Record<string, { eyebrow: string; title: string }> = {
-  "/dashboard": { eyebrow: "Overview", title: "Dashboard" },
-  "/contacts":  { eyebrow: "CRM", title: "Contacts" },
-  "/deals":     { eyebrow: "CRM", title: "Pipeline" },
-  "/reports":   { eyebrow: "Analytics", title: "Reports" },
-  "/settings":  { eyebrow: "Workspace", title: "Settings" },
+  "/dashboard": { eyebrow: "Seller Acquisition", title: "Campaign Performance" },
+  "/marketplace-acquisition": { eyebrow: "Seller Acquisition", title: "Acquisition Workbench" },
+  "/marketplace-acquisition/capture": { eyebrow: "Seller Acquisition", title: "Capture Seller" },
+  "/contacts": { eyebrow: "CRM", title: "Contacts" },
+  "/deals": { eyebrow: "CRM", title: "Pipeline" },
+  "/reports": { eyebrow: "Analytics", title: "Reports" },
+  "/settings": { eyebrow: "Workspace", title: "Settings" },
 };
 
 const DEFAULT_META = { eyebrow: t("topBar.eyebrow"), title: t("topBar.title") };
