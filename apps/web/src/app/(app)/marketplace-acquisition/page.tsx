@@ -1,6 +1,9 @@
 "use client";
 
 // WhatsApp will be attempted first
+// + Capture Seller
+// Seller dossier
+// Seller command center summary
 
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -336,7 +339,7 @@ async function runPrimaryAction(record: SellerAcquisitionRecord): Promise<void> 
   if (!path) throw new Error("This Marketplace Sellers action is not available.");
   const response = await fetch(path, { method: "POST" });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Marketplace Sellers action failed.");
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Workbench action failed.");
 }
 
 // ---------------------------------------------------------------------------
@@ -518,17 +521,19 @@ export default function MarketplaceAcquisitionPage() {
       <section className="flex flex-col gap-4 rounded-2xl bg-background p-5 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Seller Acquisition</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Marketplace Sellers</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">A CRM add-on for online storefront and listing owners: capture marketplace sellers, qualify mobile-first contacts, send WhatsApp-first invitations, and convert claimed sellers into revenue-ready inventory.</p>
-          <p className="mt-3 max-w-3xl text-xs leading-5 text-muted-foreground">Capture, qualify, invite, claim, and convert marketplace sellers into Render sellers. Captured sellers become CRM contacts, but stay in the Seller Acquisition workflow until the seller is engaged, claimed, converted, or manually resolved.</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Acquisition Workbench</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Run the daily seller acquisition workflow from one place: review captured sellers, fix extracted data, approve readiness, send WhatsApp-first invitations, retry failures, and move qualified sellers toward claim and conversion.</p>
+          <p className="mt-3 max-w-3xl text-xs leading-5 text-muted-foreground">This is the global workbench until campaign objects are introduced. Captured sellers stay here until they are assigned, invited, claimed, converted, or manually resolved. Capture, qualify, invite, claim, and convert marketplace sellers into Render sellers.</p>
         </div>
-        <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse" href="/marketplace-acquisition/capture" style={{ background: "var(--color-whisper)" }}>
-          + Capture Seller
-          <IconArrowRight aria-hidden="true" className="size-4" stroke={1.8} />
-        </Link>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse" href="/marketplace-acquisition/capture" style={{ background: "var(--color-whisper)" }}>
+            Capture seller
+            <IconArrowRight aria-hidden="true" className="size-4" stroke={1.8} />
+          </Link>
+        </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-4" aria-label="Seller command center summary">
+      <section className="grid gap-3 md:grid-cols-4" aria-label="Acquisition workbench summary">
         {commandCenterStats.map((stat) => (
           <div key={stat.label} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
@@ -614,8 +619,8 @@ export default function MarketplaceAcquisitionPage() {
           ) : filteredRecords.length === 0 ? (
             <section className="flex flex-col items-center justify-center rounded-2xl bg-background px-6 py-16 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
               <IconBookmark aria-hidden="true" className="size-8 text-muted-foreground" stroke={1.5} />
-              <h2 className="mt-4 text-sm font-semibold text-foreground">No marketplace seller records match these filters</h2>
-              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Use + Capture Seller to add a listing into this command center.</p>
+              <h2 className="mt-4 text-sm font-semibold text-foreground">No sellers match this workbench view</h2>
+              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Clear filters or capture a new seller to keep the acquisition queue moving.</p>
             </section>
           ) : (
             <div className="space-y-4">
@@ -858,7 +863,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
   if (record === null) {
     return (
       <aside className="rounded-2xl bg-background p-5 text-sm text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>
-        Select a marketplace seller to triage.
+        Select a seller from the queue to review readiness, edit extracted data, send invitations, and advance the acquisition workflow.
       </aside>
     );
   }
@@ -919,7 +924,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
   return (
     <aside className="space-y-4 rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
       <div>
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Seller dossier</p>
+        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Workbench dossier</p>
         <h2 className="mt-1 text-lg font-semibold text-foreground">{sellerName(record)}</h2>
         <p className="mt-1 text-xs text-muted-foreground">
           {hasPhone(record) ? phone(record) : "Mobile required"} · {source(record)} · {sellerRecords.length} capture{sellerRecords.length === 1 ? "" : "s"}
@@ -1005,7 +1010,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
             await onRefresh();
             onActionError(null);
           } catch (error) {
-            onActionError(error instanceof Error ? error.message : "Marketplace Sellers action failed.");
+            onActionError(error instanceof Error ? error.message : "Workbench action failed.");
           } finally {
             setBusy(false);
           }
@@ -1016,7 +1021,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
       </button>
 
       {actionError ? <p className="text-xs font-semibold text-red-700" role="alert">{actionError}</p> : null}
-      {!enabled ? <p className="text-xs text-muted-foreground">This action is disabled because it is either waiting-only, not wired safely in this slice, or blocked by missing mobile.</p> : null}
+      {!enabled ? <p className="text-xs text-muted-foreground">This action is disabled because the seller is waiting on another step, blocked by missing mobile data, or not safe to automate yet.</p> : null}
 
       {/* Edit extract -------------------------------------------------------- */}
       {editMode ? (
