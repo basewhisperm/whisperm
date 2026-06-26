@@ -92,6 +92,8 @@ export interface PrismaPersistenceClient {
   readonly deal: PrismaDelegate;
   readonly activity: PrismaDelegate;
   readonly marketplaceCapture: PrismaDelegate;
+  readonly sellerAcquisitionCampaign: PrismaDelegate;
+  readonly sellerAcquisitionCampaignMember: PrismaDelegate;
   readonly draftInventory: PrismaDelegate;
   readonly marketplaceSellerInvitation: PrismaDelegate;
   readonly marketplaceClaimToken: PrismaDelegate;
