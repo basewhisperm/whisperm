@@ -126,12 +126,12 @@ test('PATCH route handles ZodError with a 400 response', () => {
 // ---------------------------------------------------------------------------
 
 test('page.tsx renders an Edit extract button', () => {
-  const text = source('src/app/(app)/marketplace-acquisition/page.tsx');
+  const text = source('src/components/marketplace-acquisition/acquisition-workbench.tsx');
   assert.match(text, /Edit extract/u);
 });
 
 test('page.tsx has editMode, openEdit, saveEdit, and editFields state/functions', () => {
-  const text = source('src/app/(app)/marketplace-acquisition/page.tsx');
+  const text = source('src/components/marketplace-acquisition/acquisition-workbench.tsx');
   assert.match(text, /editMode/u);
   assert.match(text, /openEdit/u);
   assert.match(text, /saveEdit/u);
@@ -139,24 +139,24 @@ test('page.tsx has editMode, openEdit, saveEdit, and editFields state/functions'
 });
 
 test('page.tsx sends PATCH to /api/marketplace-acquisition/records/:captureId', () => {
-  const text = source('src/app/(app)/marketplace-acquisition/page.tsx');
+  const text = source('src/components/marketplace-acquisition/acquisition-workbench.tsx');
   assert.match(text, /method.*PATCH/su);
   assert.match(text, /marketplace-acquisition\/records/u);
 });
 
 test('page.tsx updates the record locally on save without a full reload', () => {
-  const text = source('src/app/(app)/marketplace-acquisition/page.tsx');
+  const text = source('src/components/marketplace-acquisition/acquisition-workbench.tsx');
   assert.match(text, /onRecordPatched/u);
   assert.match(text, /patchRecord/u);
 });
 
 test('page.tsx pre-fills edit form from the current record values', () => {
-  const text = source('src/app/(app)/marketplace-acquisition/page.tsx');
+  const text = source('src/components/marketplace-acquisition/acquisition-workbench.tsx');
   assert.match(text, /editFieldsFromRecord/u);
 });
 
 test('page.tsx resets edit mode when the selected capture changes', () => {
-  const text = source('src/app/(app)/marketplace-acquisition/page.tsx');
+  const text = source('src/components/marketplace-acquisition/acquisition-workbench.tsx');
   assert.match(text, /setEditMode\(false\)/u);
   assert.match(text, /record\?\.capture\.id/u);
 });
