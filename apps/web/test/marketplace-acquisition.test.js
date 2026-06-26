@@ -11,15 +11,13 @@ function read(relativePath) {
 }
 
 test("marketplace sellers page uses SellerAcquisitionRecord command center", () => {
-  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  const source = read("components/marketplace-acquisition/acquisition-workbench.tsx");
 
-  assert.match(source, /marketplaceAcquisitionRecordsPath/u);
+  assert.match(source, /recordsPath/u);
   const recordsStore = read("lib/marketplace-acquisition/records-store.ts");
   assert.match(recordsStore, /\/api\/marketplace-acquisition\/records/u);
   assert.doesNotMatch(source, /fetch\("\/api\/deals\?pipelineDefaultKey=marketplace_acquisition"\)/u);
-  assert.match(source, /Marketplace Sellers/u);
-  assert.match(source, /Capture, qualify, invite, claim, and convert marketplace sellers into Render sellers\./u);
-  assert.match(source, /\+ Capture Seller/u);
+  assert.match(source, /Acquisition Workbench/u);
   assert.doesNotMatch(source, /<h1[^>]*>Seller Capture<\/h1>/u);
   for (const label of [
     "Needs Phone Reveal",
@@ -154,7 +152,7 @@ test("seller acquisition records store exposes a minimal SWR-backed data API", (
 });
 
 test("marketplace sellers page filters records client-side", () => {
-  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  const source = read("components/marketplace-acquisition/acquisition-workbench.tsx");
 
   assert.match(source, /const \[searchQuery, setSearchQuery\] = useState\(""\)/u);
   assert.match(source, /const \[queueFilter, setQueueFilter\]/u);
@@ -168,7 +166,7 @@ test("marketplace sellers page filters records client-side", () => {
 });
 
 test("marketplace sellers page renders workbench actions and record inventory preview", () => {
-  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  const source = read("components/marketplace-acquisition/acquisition-workbench.tsx");
 
   for (const label of [
     "Send WhatsApp-first Invite",
