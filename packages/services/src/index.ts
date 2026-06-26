@@ -2177,3 +2177,5 @@ export { RenderConversionRetryService, RenderConversionRetryError, nextRenderCon
 export type { RenderConversionRetryContext, RenderConversionRetryDependencies, RenderConversionRetryResult, RenderInventoryConnector } from "./render-conversion-retry.js";
 
 export { SellerAcquisitionEditService } from "./seller-acquisition-edit.js";
+
+export { evaluateCaptureQuality } from "./seller-acquisition/capture-quality.js";

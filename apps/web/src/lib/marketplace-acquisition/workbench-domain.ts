@@ -5,7 +5,7 @@ import {
   type SellerAcquisitionRecord,
 } from "@/lib/marketplace-acquisition/records-store";
 
-export type QueueBucketId = "all" | "needs-phone" | "needs-invitation" | "invitation-failed" | "waiting-claim" | "convert-seller" | "convert-inventory" | "complete" | "completed" | "expired";
+export type QueueBucketId = "all" | "needs_human_review" | "needs-phone" | "needs-invitation" | "invitation-failed" | "waiting-claim" | "convert-seller" | "convert-inventory" | "complete" | "completed" | "expired";
 
 export interface QueueBucket {
   readonly id: QueueBucketId;
