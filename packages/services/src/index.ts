@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
 import { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
+import { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
 export { SellerAcquisitionAnalyticsService } from "./acquisition-analytics.js";
 export { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
+export { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
 export type { SellerAcquisitionHealthStatus, SellerAcquisitionMissingRequirement, SellerAcquisitionNextAction, SellerAcquisitionRecord, SellerAcquisitionRecordDependencies } from "./seller-acquisition-records.js";
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
