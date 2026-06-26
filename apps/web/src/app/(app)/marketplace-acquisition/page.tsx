@@ -264,23 +264,27 @@ function timelineItems(record: SellerAcquisitionRecord): readonly { readonly lab
   ];
 }
 
-function sellerTimelineItems(records: readonly SellerAcquisitionRecord[]): readonly { readonly label: string; readonly done: boolean }[] {
-  const hasInvitation = records.some((r) => r.latestInvitation !== null);
-  const hasClaim = records.some((r) => r.claimTokenStatus?.status === "CLAIMED" || r.claimTokenStatus?.status === "ACCEPTED");
-  const sellerConverted = records.some((r) => r.sellerConversion !== null);
-  const inventoryConverted = records.some((r) => r.inventoryConversion !== null);
-  const completed = records.some((r) => r.healthStatus === "COMPLETED");
+function sellerTimelineItems(records: readonly SellerAcquisitionRecord[]): readonly { readonly label: string; readonly detail: string; readonly done: boolean }[] {
+  const captureCount = records.length;
+  const contactCount = records.filter((r) => r.contact !== null).length;
+  const dealCount = records.filter((r) => r.deal !== null).length;
+  const draftCount = records.filter((r) => r.draftInventory !== null).length;
+  const invitationCount = records.reduce((count, r) => count + r.invitationHistory.length, 0);
+  const claimCount = records.filter((r) => r.ownershipAttestation !== null || r.claimTokenStatus?.status === "CLAIMED" || r.claimTokenStatus?.status === "ACCEPTED").length;
+  const sellerConversionCount = records.filter((r) => r.sellerConversion !== null).length;
+  const inventoryConversionCount = records.filter((r) => r.inventoryConversion !== null).length;
+  const completedCount = records.filter((r) => r.healthStatus === "COMPLETED").length;
 
   return [
-    { label: "Marketplace captured", done: true },
-    { label: "Contact created", done: records.some((r) => r.contact !== null) },
-    { label: "Deal created", done: records.some((r) => r.deal !== null) },
-    { label: "Draft inventory created", done: records.some((r) => r.draftInventory !== null) },
-    { label: "Invitation sent", done: hasInvitation },
-    { label: "Seller claimed", done: hasClaim },
-    { label: "Seller converted", done: sellerConverted },
-    { label: "Inventory converted", done: inventoryConverted },
-    { label: "Acquisition completed", done: completed },
+    { label: "Marketplace captured", detail: `${captureCount} capture${captureCount === 1 ? "" : "s"}`, done: captureCount > 0 },
+    { label: "CRM contact created", detail: `${contactCount}/${captureCount} linked`, done: contactCount > 0 },
+    { label: "Acquisition deal created", detail: `${dealCount}/${captureCount} linked`, done: dealCount > 0 },
+    { label: "Draft inventory created", detail: `${draftCount}/${captureCount} draft${draftCount === 1 ? "" : "s"}`, done: draftCount > 0 },
+    { label: "Invitation sent", detail: `${invitationCount} attempt${invitationCount === 1 ? "" : "s"}`, done: invitationCount > 0 },
+    { label: "Seller claimed", detail: `${claimCount}/${captureCount} claimed`, done: claimCount > 0 },
+    { label: "Seller converted", detail: `${sellerConversionCount}/${captureCount} converted`, done: sellerConversionCount > 0 },
+    { label: "Inventory converted", detail: `${inventoryConversionCount}/${captureCount} converted`, done: inventoryConversionCount > 0 },
+    { label: "Acquisition completed", detail: `${completedCount}/${captureCount} completed`, done: completedCount > 0 },
   ];
 }
 
@@ -722,10 +726,13 @@ function WorkbenchSection({ title, children }: { readonly title: string; readonl
   );
 }
 
-function CheckLine({ label, passed }: { readonly label: string; readonly passed: boolean }) {
+function CheckLine({ label, passed, detail }: { readonly label: string; readonly passed: boolean; readonly detail?: string }) {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="min-w-0 text-muted-foreground">
+        {label}
+        {detail ? <span className="ml-2 text-xs">· {detail}</span> : null}
+      </span>
       <span className={passed ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{passed ? "✓" : "⚠"}</span>
     </div>
   );
@@ -962,7 +969,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
         <WorkbenchSection title="Seller timeline">
           <div className="space-y-2">
             {sellerTimelineItems(sellerRecords).map((item) => (
-              <CheckLine key={item.label} label={item.label} passed={item.done} />
+              <CheckLine key={item.label} label={item.label} detail={item.detail} passed={item.done} />
             ))}
           </div>
         </WorkbenchSection>
