@@ -15,7 +15,7 @@ test("global workbench uses reusable acquisition workbench component", () => {
 test("campaign workbench mounts a campaign-scoped acquisition workbench", () => {
   assert.match(campaignPage, /Campaign Workbench/u);
   assert.match(campaignPage, /campaignId/u);
-  assert.match(campaignPage, /records\?campaignId=/u);
+  assert.match(campaignPage, /campaignId=\{campaignId\}/u);
   assert.match(campaignPage, /mode="campaign"/u);
 });
 
@@ -41,4 +41,31 @@ test("SellerAcquisitionRecordService lists records by campaign membership", () =
   assert.match(service, /sellerAcquisitionCampaigns\.listMembers/u);
   assert.match(service, /marketplaceCaptures\.findById/u);
   assert.match(service, /member\.marketplaceCaptureId/u);
+});
+
+test("campaign workbench passes campaignId into reusable acquisition workbench", () => {
+  const campaignPage = readFileSync("src/app/(app)/marketplace-acquisition/campaigns/[campaignId]/workbench/page.tsx", "utf8");
+  assert.match(campaignPage, /campaignId=\{campaignId\}/u);
+  assert.match(campaignPage, /mode="campaign"/u);
+});
+
+test("global workbench does not pass campaignId into reusable acquisition workbench", () => {
+  const globalPage = readFileSync("src/app/(app)/marketplace-acquisition/page.tsx", "utf8");
+  assert.doesNotMatch(globalPage, /campaignId=/u);
+  assert.match(globalPage, /mode="global"/u);
+});
+
+test("AcquisitionWorkbench preserves campaignId across record refreshes", () => {
+  const component = readFileSync("src/components/marketplace-acquisition/acquisition-workbench.tsx", "utf8");
+  assert.match(component, /readonly campaignId\?: string \| undefined/u);
+  assert.match(component, /const scopedRecordsPath = useMemo/u);
+  assert.match(component, /encodeURIComponent\(campaignId\)/u);
+  assert.match(component, /fetchSellerAcquisitionRecords\(scopedRecordsPath\)/u);
+  assert.match(component, /\[scopedRecordsPath\]/u);
+});
+
+test("AcquisitionWorkbench keeps global records path unchanged without campaignId", () => {
+  const component = readFileSync("src/components/marketplace-acquisition/acquisition-workbench.tsx", "utf8");
+  assert.match(component, /campaignId === undefined \|\| campaignId\.trim\(\)\.length === 0/u);
+  assert.match(component, /return recordsPath/u);
 });

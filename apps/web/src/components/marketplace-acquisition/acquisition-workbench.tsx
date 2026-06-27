@@ -136,6 +136,7 @@ const EDIT_FIELD_CONFIG: readonly { key: keyof EditFields; label: string; placeh
 export function AcquisitionWorkbench({
   mode,
   recordsPath,
+  campaignId,
   title: pageTitle,
   description,
   contextNote,
@@ -143,6 +144,7 @@ export function AcquisitionWorkbench({
 }: {
   readonly mode: "global" | "campaign";
   readonly recordsPath: string;
+  readonly campaignId?: string | undefined;
   readonly title: string;
   readonly description: string;
   readonly contextNote: string;
@@ -161,15 +163,21 @@ export function AcquisitionWorkbench({
   const [searchQuery, setSearchQuery] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const scopedRecordsPath = useMemo(() => {
+    if (campaignId === undefined || campaignId.trim().length === 0) return recordsPath;
+    const separator = recordsPath.includes("?") ? "&" : "?";
+    return `${recordsPath}${separator}campaignId=${encodeURIComponent(campaignId)}`;
+  }, [recordsPath, campaignId]);
+
   const refreshRecords = useCallback(async () => {
-    const nextRecords = await fetchSellerAcquisitionRecords(recordsPath);
+    const nextRecords = await fetchSellerAcquisitionRecords(scopedRecordsPath);
     setRecords(nextRecords);
     setSelectedCaptureId((current) => current ?? nextRecords[0]?.capture.id ?? null);
-  }, [recordsPath]);
+  }, [scopedRecordsPath]);
 
   useEffect(() => {
     let cancelled = false;
-    fetchSellerAcquisitionRecords(recordsPath)
+    fetchSellerAcquisitionRecords(scopedRecordsPath)
       .then((nextRecords) => {
         if (!cancelled) {
           setRecords(nextRecords);
@@ -184,7 +192,7 @@ export function AcquisitionWorkbench({
         }
       });
     return () => { cancelled = true; };
-  }, [recordsPath]);
+  }, [scopedRecordsPath]);
 
   const filteredRecords = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
