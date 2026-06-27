@@ -29,6 +29,14 @@ interface AcquisitionRecord {
   inventoryConversion: unknown | null;
 }
 
+interface SellerAcquisitionCampaign {
+  id: string;
+  name: string;
+  status: "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED" | "ARCHIVED";
+  goalSellerCount?: number | null;
+  memberCount?: number | null;
+}
+
 async function getDashboardData(): Promise<DashboardData> {
   try {
     const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/dashboard`, {
@@ -56,6 +64,20 @@ async function getAcquisitionRecords(): Promise<readonly AcquisitionRecord[]> {
   }
 }
 
+async function getSellerAcquisitionCampaigns(): Promise<readonly SellerAcquisitionCampaign[]> {
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/marketplace-acquisition/campaigns`, {
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) throw new Error("Failed to fetch acquisition campaigns");
+    const payload = await res.json() as { data?: { campaigns?: SellerAcquisitionCampaign[] } };
+    return payload.data?.campaigns ?? [];
+  } catch {
+    return [];
+  }
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -65,7 +87,16 @@ function formatCurrency(value: number) {
 }
 
 export default async function DashboardPage() {
-  const [dashboard, records] = await Promise.all([getDashboardData(), getAcquisitionRecords()]);
+  const [dashboard, records, campaigns] = await Promise.all([
+    getDashboardData(),
+    getAcquisitionRecords(),
+    getSellerAcquisitionCampaigns(),
+  ]);
+
+  const activeCampaigns = campaigns.filter((campaign) => campaign.status === "ACTIVE").length;
+  const totalCampaigns = campaigns.length;
+  const campaignGoalTotal = campaigns.reduce((sum, campaign) => sum + (campaign.goalSellerCount ?? 0), 0);
+  const campaignAssignedTotal = campaigns.reduce((sum, campaign) => sum + (campaign.memberCount ?? 0), 0);
 
   const sellersCaptured = records.length || dashboard.activeContacts;
   const readyToInvite = records.filter((record) => record.nextAction === "SEND_INVITATION").length;
@@ -77,7 +108,7 @@ export default async function DashboardPage() {
   const completed = records.filter((record) => record.healthStatus === "COMPLETED").length;
 
   const metrics = [
-    { label: "Active Campaigns", value: "0", detail: "Campaign model lands in Slice 4", icon: IconRocket },
+    { label: "Active Campaigns", value: String(activeCampaigns), detail: `${totalCampaigns} total acquisition campaign${totalCampaigns === 1 ? "" : "s"}`, icon: IconRocket },
     { label: "Sellers Captured", value: String(sellersCaptured), detail: "Captured marketplace seller records", icon: IconUsers },
     { label: "Ready to Invite", value: String(readyToInvite), detail: "WhatsApp-first outreach queue", icon: IconSend },
     { label: "Claims Pending", value: String(claimsPending), detail: "Waiting for seller claim", icon: IconClock },
@@ -99,13 +130,16 @@ export default async function DashboardPage() {
               How are seller acquisition campaigns performing today?
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ivory/70">
-              Campaign records arrive in the next infrastructure slices. Until then, this dashboard uses existing seller records,
-              invitations, claims, conversions, and CRM pipeline data to show acquisition performance.
+              Track live campaign activity, seller capture volume, WhatsApp-first outreach readiness, pending claims,
+              conversions, and CRM revenue pipeline from one acquisition-first command center.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row lg:shrink-0">
             <Link className="inline-flex items-center justify-center gap-2 rounded-full bg-ivory px-4 py-2 text-sm font-medium text-midnight" href="/marketplace-acquisition/capture">
               Capture seller <IconArrowRight aria-hidden="true" className="size-4" stroke={1.8} />
+            </Link>
+            <Link className="inline-flex items-center justify-center gap-2 rounded-full bg-ivory/10 px-4 py-2 text-sm font-medium text-ivory" href="/marketplace-acquisition/campaigns">
+              Open campaigns <IconRocket aria-hidden="true" className="size-4" stroke={1.8} />
             </Link>
             <Link className="inline-flex items-center justify-center gap-2 rounded-full bg-ivory/10 px-4 py-2 text-sm font-medium text-ivory" href="/marketplace-acquisition">
               Open workbench <IconInbox aria-hidden="true" className="size-4" stroke={1.8} />
@@ -140,6 +174,59 @@ export default async function DashboardPage() {
         })}
       </div>
 
+      <section className="rounded-2xl border-hairline bg-background p-5">
+        <div className="mb-3 flex items-center justify-between gap-3 border-b-hairline pb-3">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Campaign Progress</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Active seller acquisition campaigns, assigned seller volume, and seller goals.
+            </p>
+          </div>
+          <Link className="text-xs font-medium text-[var(--color-whisper)]" href="/marketplace-acquisition/campaigns">Manage campaigns</Link>
+        </div>
+
+        {campaigns.length === 0 ? (
+          <div className="py-8 text-center">
+            <IconRocket aria-hidden="true" className="mx-auto size-8 text-muted-foreground" stroke={1.6} />
+            <p className="mt-3 text-sm font-medium text-foreground">No seller acquisition campaigns yet.</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+              Create a campaign to organize seller discovery, outreach, claims, and conversion work.
+            </p>
+            <Link className="mt-4 inline-flex rounded-full bg-whisper px-4 py-2 text-sm font-semibold text-white" href="/marketplace-acquisition/campaigns">
+              Create campaign
+            </Link>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-3">
+            {campaigns.slice(0, 3).map((campaign) => (
+              <Link
+                className="rounded-2xl bg-secondary p-4 transition hover:bg-muted"
+                href={`/marketplace-acquisition/campaigns/${campaign.id}/workbench`}
+                key={campaign.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="line-clamp-2 text-sm font-semibold text-foreground">{campaign.name}</p>
+                  <span className="rounded-full bg-background px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    {campaign.status}
+                  </span>
+                </div>
+                <p className="mt-4 text-2xl font-semibold text-foreground">{campaign.memberCount ?? 0}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  assigned seller{(campaign.memberCount ?? 0) === 1 ? "" : "s"}
+                  {campaign.goalSellerCount ? ` · goal ${campaign.goalSellerCount}` : ""}
+                </p>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        {campaignGoalTotal > 0 ? (
+          <p className="mt-4 text-xs text-muted-foreground">
+            Campaign assignment progress: {campaignAssignedTotal} / {campaignGoalTotal} seller goal.
+          </p>
+        ) : null}
+      </section>
+
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <section className="rounded-2xl border-hairline bg-background p-5">
           <div className="mb-3 flex items-center justify-between gap-3 border-b-hairline pb-3">
@@ -172,7 +259,7 @@ export default async function DashboardPage() {
         <section className="rounded-2xl border-hairline bg-background p-5">
           <div className="mb-3 border-b-hairline pb-3">
             <h2 className="text-sm font-semibold text-foreground">Acquisition Activity</h2>
-            <p className="mt-1 text-xs text-muted-foreground">Latest CRM activity while campaign events are being formalized.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Latest CRM and acquisition activity across campaign capture, invitation, claim, and conversion work.</p>
           </div>
 
           {dashboard.activities.length === 0 ? (
