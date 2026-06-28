@@ -48,12 +48,7 @@ export class MetaWhatsAppCloudProvider implements WhatsAppProvider {
           template: {
             name: this.templateName,
             language: { code: this.templateLanguage },
-            components: [
-              {
-                type: "body",
-                parameters: [{ type: "text", text: message.body }],
-              },
-            ],
+            components: [],
           },
         }),
       },
