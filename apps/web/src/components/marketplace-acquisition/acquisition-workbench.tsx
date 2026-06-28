@@ -358,7 +358,7 @@ export function AcquisitionWorkbench({
         })}
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
         <div className="space-y-4">
           <div className="grid gap-2 rounded-2xl bg-background p-4 md:grid-cols-5" style={{ border: "0.5px solid var(--color-border)" }}>
             <input aria-label="Search marketplace sellers" className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse md:col-span-3" placeholder="Search by seller, contact, phone, title, marketplace, or capture id" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
@@ -709,7 +709,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
   };
 
   return (
-    <aside className="space-y-4 rounded-2xl bg-background p-5 sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto" style={{ border: "0.5px solid var(--color-border)" }}>
+    <aside className="space-y-4 rounded-2xl bg-background p-5 sticky top-6 max-h-[calc(100vh-5rem)] overflow-y-auto" style={{ border: "0.5px solid var(--color-border)" }}>
       <div>
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Workbench dossier</p>
         <h2 className="mt-1 text-lg font-semibold text-foreground">{sellerName(record)}</h2>
