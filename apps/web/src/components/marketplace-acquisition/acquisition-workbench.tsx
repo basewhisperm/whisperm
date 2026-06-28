@@ -270,14 +270,17 @@ export function AcquisitionWorkbench({
         body: JSON.stringify({ captureIds: selectedBulkRecords.map((r) => r.capture.id), channel: "WHATSAPP" }),
       });
       const payload = await response.json().catch(() => ({}));
-      const queued = (payload as { data?: { queued?: number } })?.data?.queued ?? 0;
+      const queued = (payload as { data?: { queued?: number; invalid?: string[] } })?.data?.queued ?? 0;
+      const invalidCount = (payload as { data?: { invalid?: string[] } })?.data?.invalid?.length ?? 0;
       setSelectedBulkIds([]);
       await refreshRecords();
       setActionError(null);
-      if (queued > 0) {
-        // Surface success as a brief info message reusing the error slot
-        setActionError(`${queued} invitation${queued === 1 ? "" : "s"} queued for delivery.`);
-        setTimeout(() => setActionError(null), 4_000);
+      const parts: string[] = [];
+      if (queued > 0) parts.push(`${queued} invitation${queued === 1 ? "" : "s"} queued.`);
+      if (invalidCount > 0) parts.push(`${invalidCount} skipped — no valid phone.`);
+      if (parts.length > 0) {
+        setActionError(parts.join(" "));
+        setTimeout(() => setActionError(null), 5_000);
       }
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Bulk invitation failed.");

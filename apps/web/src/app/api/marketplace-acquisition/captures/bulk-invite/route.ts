@@ -7,9 +7,34 @@ import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
 
+// Normalize a phone number to E.164 format.
+// Handles Ghana (+233) numbers by default.
+// Returns undefined if the number cannot be normalized.
+function normalizeToE164(raw: string, defaultCountryCode = "233"): string | undefined {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 0) return undefined;
+
+  // Already has country code starting with +
+  if (raw.trim().startsWith("+")) {
+    if (digits.length >= 7 && digits.length <= 15) return `+${digits}`;
+    return undefined;
+  }
+
+  // Ghana local format: 0XXXXXXXXX (10 digits starting with 0)
+  if (digits.startsWith("0") && digits.length === 10) {
+    return `+${defaultCountryCode}${digits.slice(1)}`;
+  }
+
+  // Already has country code without +
+  if (digits.length >= 10 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+
+  return undefined;
+}
+
 export async function POST(request: NextRequest) {
   const tenantContext = await getTenantContextForCurrentUser();
-  if (!tenantContext) return errorResponse("Unauthorized", 401);
 
   const { tenant } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
@@ -28,44 +53,77 @@ export async function POST(request: NextRequest) {
     channel?: string;
   };
 
-  if (!Array.isArray(captureIds) || captureIds.length === 0) {
     return errorResponse("captureIds must be a non-empty array.", 400);
   }
   if (captureIds.length > 100) {
     return errorResponse("Maximum 100 captures per bulk invite.", 400);
   }
-  if (!["WHATSAPP", "SMS", "EMAIL"].includes(channel)) {
     return errorResponse("channel must be WHATSAPP, SMS, or EMAIL.", 400);
   }
 
-  const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
+  const validIds = captureIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+  if (validIds.length === 0) return errorResponse("No valid captureIds provided.", 400);
 
-  const jobs = captureIds
-    .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
-    .map((captureId) => ({
+  // Fetch captures with their linked contacts to validate phone numbers
+  const captures = await prisma.marketplaceCapture.findMany({
+    where: { tenantId: tenant.id, id: { in: validIds } },
+    select: { id: true, contact: { select: { phone: true } } },
+  });
+
+  const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
+  const now = Date.now();
+
+  const invalid: string[] = [];
+  const jobs: {
+    tenantId: string;
+    queueName: string;
+    jobName: string;
+    jobKey: string;
+    payload: object;
+    maxAttempts: number;
+    correlationId: string;
+  }[] = [];
+
+  for (const capture of captures) {
+    const rawPhone = capture.contact?.phone ?? null;
+    if (rawPhone === null || rawPhone.trim().length === 0) {
+      invalid.push(capture.id);
+      continue;
+    }
+    const normalized = normalizeToE164(rawPhone);
+    if (normalized === undefined) {
+      invalid.push(capture.id);
+      continue;
+    }
+    jobs.push({
       tenantId: tenant.id,
       queueName: "marketplace.invite",
       jobName: "marketplace.invite.send",
-      jobKey: `invite:${tenant.id}:${captureId}:${Date.now()}`,
+      jobKey: `invite:${tenant.id}:${capture.id}:${now}`,
       payload: {
         tenantId: tenant.id,
-        captureId,
+        captureId: capture.id,
         channel,
-        idempotencyKey: `invite:${tenant.id}:${captureId}`,
+        normalizedPhone: normalized,
+        idempotencyKey: `invite:${tenant.id}:${capture.id}`,
         replaySafe: true,
       },
       maxAttempts: 3,
       correlationId,
-    }));
+    });
+  }
 
   if (jobs.length === 0) {
-    return errorResponse("No valid captureIds provided.", 400);
+    return NextResponse.json(
+      { ok: false, error: { message: "No captures with valid phone numbers.", invalid } },
+      { status: 422 },
+    );
   }
 
   await prisma.queueJob.createMany({ data: jobs, skipDuplicates: true });
 
   return NextResponse.json(
-    { ok: true, data: { queued: jobs.length, channel } },
+    { ok: true, data: { queued: jobs.length, invalid, channel } },
     { status: 202 },
   );
 }
