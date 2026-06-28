@@ -1520,7 +1520,7 @@ export class SellerInvitationService {
     let lastProviderFailureMessage: string | undefined;
 
     const trySend = async (channel: SellerInvitationChannel, record: SellerInvitationRecord): Promise<SellerInvitationRecord | null> => {
-      const body = `You are invited to Seller Acquisition: ${record.inviteUrl}`;
+      const body = record.inviteUrl;
       try {
         if (channel === "WHATSAPP") { if (notifications?.whatsapp === undefined) return null; await notifications.whatsapp.send({ to: record.recipient, body }); }
         if (channel === "SMS") { if (notifications?.sms === undefined) return null; await notifications.sms.send({ to: record.recipient, body }); }
