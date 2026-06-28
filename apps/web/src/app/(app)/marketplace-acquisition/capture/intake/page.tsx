@@ -72,7 +72,7 @@ function CaptureResult({ data }: { readonly data: Record<string, unknown> | unde
   );
 }
 
-function CaptureForm({ payload }: { readonly payload: MarketplaceCapturePayload }) {
+function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCapturePayload; readonly campaignId?: string }) {
   const initial = useMemo(() => Object.fromEntries(editableFields.map((field) => [field, String(payload[field] ?? "")])), [payload]);
   const [fields, setFields] = useState<Record<string, string>>(initial);
   const [state, setState] = useState<SubmitState>({ status: "idle" });
@@ -90,6 +90,7 @@ function CaptureForm({ payload }: { readonly payload: MarketplaceCapturePayload 
     const body = {
       ...payload,
       ...cleanedFields,
+      campaignId: campaignId ?? undefined,
       sellerPhone: clean(fields.phone ?? ""),
       price: clean(fields.priceText ?? ""),
       images: payload.images,
@@ -132,7 +133,7 @@ function CaptureForm({ payload }: { readonly payload: MarketplaceCapturePayload 
   );
 }
 
-export default function MarketplaceCaptureIntakePage({ searchParams }: { readonly searchParams: { readonly payload?: string } }) {
+export default function MarketplaceCaptureIntakePage({ searchParams }: { readonly searchParams: { readonly payload?: string; readonly campaignId?: string } }) {
   const result = decodeMarketplaceCapturePayload(searchParams.payload);
 
   return (
@@ -143,7 +144,7 @@ export default function MarketplaceCaptureIntakePage({ searchParams }: { readonl
         <p className="mt-2 text-sm leading-6 text-muted-foreground">Review and correct the seller snapshot before creating the acquisition record.</p>
       </section>
 
-      {result.payload ? <CaptureForm payload={result.payload} /> : (
+      {result.payload ? <CaptureForm payload={result.payload} campaignId={searchParams.campaignId} /> : (
         <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <h2 className="text-sm font-semibold text-red-600">Capture payload could not be loaded</h2>
           <p className="mt-2 text-sm text-muted-foreground">{result.error}</p>

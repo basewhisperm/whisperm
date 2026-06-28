@@ -4,7 +4,8 @@ import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { createPrismaRepositories, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { SellerAcquisitionCampaignService } from "@whisperm/services";
 import { createWhispeRMServices, ServiceError } from "@whisperm/services";
 
 const clean = (value: unknown): string | undefined =>
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
     return errorResponse("Capture request body must be valid JSON.", 400);
   }
 
+  const campaignId = clean(body.campaignId);
   const listingUrl = validUrl(body.listingUrl);
   const sourceUrl = validUrl(body.sourceUrl) ?? listingUrl;
   const pageUrl = validUrl(body.pageUrl);
@@ -164,6 +166,21 @@ export async function POST(request: NextRequest) {
       },
       captureInput,
     );
+
+    // Assign to campaign if provided
+    if (campaignId !== undefined) {
+      try {
+        const campaignRepo = new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient);
+        const campaignSvc = new SellerAcquisitionCampaignService(campaignRepo);
+        await campaignSvc.addSeller(
+          { tenantId: tenant.id },
+          campaignId,
+          { marketplaceCaptureId: result.captureId }
+        );
+      } catch {
+        // Non-fatal: capture succeeded, campaign assignment failed silently
+      }
+    }
 
     return NextResponse.json({ ok: true, data: result });
   } catch (error) {

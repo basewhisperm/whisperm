@@ -302,7 +302,7 @@ export function AcquisitionWorkbench({
           <p className="mt-3 max-w-3xl text-xs leading-5 text-muted-foreground">{contextNote}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse" href="/marketplace-acquisition/capture" style={{ background: "var(--color-whisper)" }}>
+          <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse" href={mode === "campaign" && campaignId ? `/marketplace-acquisition/capture?campaignId=${campaignId}` : "/marketplace-acquisition/capture"} style={{ background: "var(--color-whisper)" }}>
             Capture seller
             <IconArrowRight aria-hidden="true" className="size-4" stroke={1.8} />
           </Link>
@@ -357,7 +357,7 @@ export function AcquisitionWorkbench({
           <div className="grid gap-2 rounded-2xl bg-background p-4 md:grid-cols-5" style={{ border: "0.5px solid var(--color-border)" }}>
             <input aria-label="Search marketplace sellers" className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse md:col-span-3" placeholder="Search by seller, contact, phone, title, marketplace, or capture id" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
                   <button className="h-10 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground disabled:opacity-50" disabled={loading} onClick={() => void refreshRecords()} type="button">Refresh</button>
-                  <Link className="inline-flex h-10 items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white" href="/marketplace-acquisition/capture">Capture</Link>
+                  <Link className="inline-flex h-10 items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white" href={mode === "campaign" && campaignId ? `/marketplace-acquisition/capture?campaignId=${campaignId}` : "/marketplace-acquisition/capture"}>Capture</Link>
             <Filter label="Queue"       value={queueFilter}       onChange={(value) => setQueueFilter(value as QueueBucketId)} options={["all", ...queueBuckets.map((b) => b.id)]} />
             <Filter label="Health"      value={healthFilter}      onChange={setHealthFilter}      options={["all", "READY", "ACTION_REQUIRED", "BLOCKED", "COMPLETED", "EXPIRED"]} />
             <Filter label="Next Action" value={nextActionFilter}  onChange={setNextActionFilter}  options={["all", ...Object.keys(nextActionLabels)]} />
