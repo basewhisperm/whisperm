@@ -23,5 +23,21 @@
   "topBar.title": "Workspace Overview",
   "marketplaceAcquisition.title": "Seller Acquisition",
   "marketplaceSellers.title": "Marketplace Sellers",
-  "marketplaceCapture.title": "Seller Capture"
+  "marketplaceCapture.title": "Seller Capture",
+  "navigation.section.dashboard": "Dashboard",
+  "navigation.section.sellerAcquisition": "Seller Acquisition",
+  "navigation.section.business": "Business",
+  "navigation.section.reports": "Reports",
+  "navigation.section.settings": "Settings",
+  "navigation.status.soon": "Soon",
+  "navigation.mobile.open": "Open navigation menu",
+  "navigation.mobile.close": "Close navigation menu",
+  "navigation.mobile.overlayClose": "Close navigation menu overlay",
+  "sellerAcquisition.nav.campaigns": "Campaigns",
+  "sellerAcquisition.nav.workbench": "Acquisition Workbench",
+  "sellerAcquisition.nav.sellers": "Sellers",
+  "sellerAcquisition.nav.invites": "Invites",
+  "sellerAcquisition.nav.claims": "Claims",
+  "sellerAcquisition.nav.conversions": "Conversions",
+  "sellerAcquisition.nav.analytics": "Analytics"
 }

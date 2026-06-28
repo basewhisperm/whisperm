@@ -11,15 +11,13 @@ function read(relativePath) {
 }
 
 test("marketplace sellers page uses SellerAcquisitionRecord command center", () => {
-  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  const source = read("components/marketplace-acquisition/acquisition-workbench.tsx");
 
-  assert.match(source, /marketplaceAcquisitionRecordsPath/u);
+  assert.match(source, /recordsPath/u);
   const recordsStore = read("lib/marketplace-acquisition/records-store.ts");
   assert.match(recordsStore, /\/api\/marketplace-acquisition\/records/u);
   assert.doesNotMatch(source, /fetch\("\/api\/deals\?pipelineDefaultKey=marketplace_acquisition"\)/u);
-  assert.match(source, /Marketplace Sellers/u);
-  assert.match(source, /Capture, qualify, invite, claim, and convert marketplace sellers into Render sellers\./u);
-  assert.match(source, /\+ Capture Seller/u);
+  assert.match(source, /Acquisition Workbench/u);
   assert.doesNotMatch(source, /<h1[^>]*>Seller Capture<\/h1>/u);
   for (const label of [
     "Needs Phone Reveal",
@@ -36,12 +34,15 @@ test("marketplace sellers page uses SellerAcquisitionRecord command center", () 
   assert.match(source, /WhatsApp will be attempted first/u);
   assert.match(source, /SMS is fallback/u);
   assert.match(source, /Email is optional for non-cellphone-first markets/u);
-  assert.match(source, /Acquisition Score:/u);
-  assert.match(source, /Capture Confidence:/u);
+  assert.match(source, /PHONE READY/u);
+  assert.match(source, /queueBuckets\.find\(\(bucket\) => bucket\.matches\(record\)\)/u);
   assert.match(source, /Captured \$\{captured\}/u);
-  assert.match(source, /Contact Type: Seller/u);
-  assert.match(source, /Source: Marketplace/u);
-  assert.match(source, /Lifecycle: Acquisition Prospect/u);
+  assert.match(source, /Seller dossier/u);
+  assert.match(source, /Seller command center summary/u);
+  assert.match(source, /Total sellers/u);
+  assert.match(source, /Phone-ready/u);
+  assert.match(source, /Seller portfolio/u);
+  assert.match(source, /Phone-ready captures/u);
   assert.doesNotMatch(source, /generic Prospect/u);
 });
 
@@ -151,7 +152,7 @@ test("seller acquisition records store exposes a minimal SWR-backed data API", (
 });
 
 test("marketplace sellers page filters records client-side", () => {
-  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  const source = read("components/marketplace-acquisition/acquisition-workbench.tsx");
 
   assert.match(source, /const \[searchQuery, setSearchQuery\] = useState\(""\)/u);
   assert.match(source, /const \[queueFilter, setQueueFilter\]/u);
@@ -165,7 +166,7 @@ test("marketplace sellers page filters records client-side", () => {
 });
 
 test("marketplace sellers page renders workbench actions and record inventory preview", () => {
-  const source = read("app/(app)/marketplace-acquisition/page.tsx");
+  const source = read("components/marketplace-acquisition/acquisition-workbench.tsx");
 
   for (const label of [
     "Send WhatsApp-first Invite",

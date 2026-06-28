@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import {
   PrismaAuditLogRepository,
@@ -13,7 +14,7 @@ import {
   PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { createHttpSmsProviderFromEnv } from "@whisperm/provider-adapters";
+import { createHttpSmsProviderFromEnv, createMetaWhatsAppCloudProviderFromEnv } from "@whisperm/provider-adapters";
 import { SellerInvitationService, ServiceError, type SellerInvitationProviderPorts } from "@whisperm/services";
 import { sellerInvitationCreateRequestSchema } from "@whisperm/types";
 
@@ -42,11 +43,13 @@ const configuredEmailProvider = (env: NodeJS.ProcessEnv): SellerInvitationProvid
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ from, to: message.to, subject: message.subject, html: message.html }),
+        signal: AbortSignal.timeout(8_000),
       });
       if (!response.ok) throw new Error("Seller invitation email provider failed");
     },
   };
 };
+
 
 const configuredSmsProvider = (env: NodeJS.ProcessEnv): SellerInvitationProviderPorts["sms"] | undefined => {
   const provider = env.SELLER_INVITATION_SMS_PROVIDER?.trim();
@@ -60,12 +63,14 @@ const configuredSmsProvider = (env: NodeJS.ProcessEnv): SellerInvitationProvider
 const sellerInvitationNotifications = (): SellerInvitationProviderPorts => {
   const email = configuredEmailProvider(process.env);
   const sms = configuredSmsProvider(process.env);
+  const whatsapp = createMetaWhatsAppCloudProviderFromEnv(process.env);
   const notifications: SellerInvitationProviderPorts = {
     whatsappEnabled: process.env.SELLER_INVITATION_WHATSAPP_ENABLED !== "false",
     fallbackToSmsWhenWhatsappMissing: process.env.SELLER_INVITATION_FALLBACK_TO_SMS !== "false",
     inviteBaseUrl: process.env.SELLER_INVITATION_BASE_URL,
     ...(email === undefined ? {} : { email }),
     ...(sms === undefined ? {} : { sms }),
+    ...(whatsapp === undefined ? {} : { whatsapp }),
   };
   return notifications;
 };
@@ -77,7 +82,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
-  const parsed = sellerInvitationCreateRequestSchema.safeParse(await request.json().catch(() => ({})));
+  let body: unknown;
+  try {
+    body = await readJsonBody(request, { maxBytes: 16_000 });
+  } catch (error) {
+    if (error instanceof RequestBodyError) return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });
+    body = {};
+  }
+
+  const parsed = sellerInvitationCreateRequestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "A supported preferredChannel is required when provided" }, { status: 400 });
   }
@@ -101,7 +114,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     );
     return NextResponse.json(result);
   } catch (error) {
-    console.error("SELLER_INVITATION_ERROR", error);
 
     if (error instanceof ServiceError) {
       return NextResponse.json(

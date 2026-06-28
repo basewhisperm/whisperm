@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+import { readJsonOrFormBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { createWhispeRMServices, ServiceError } from "@whisperm/services";
@@ -26,11 +27,15 @@ export async function POST(request: NextRequest) {
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
-  const contentType = request.headers.get("content-type") ?? "";
-  const parsed =
-    contentType.toLowerCase().includes("application/json")
-      ? parseRequest(await request.json().catch(() => ({})))
-      : parseRequest(Object.fromEntries((await request.formData()).entries()));
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonOrFormBody(request, { maxBytes: 16_000, allowFormData: true });
+  } catch (error) {
+    if (error instanceof RequestBodyError) return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });
+    return NextResponse.json({ ok: false, error: { message: "Invalid request body." } }, { status: 400 });
+  }
+
+  const parsed = parseRequest(body);
 
   if (parsed === null) return NextResponse.json({ ok: false, error: { message: "A valid listing URL is required." } }, { status: 400 });
 
@@ -47,7 +52,7 @@ export async function POST(request: NextRequest) {
         "user-agent": "WhispeRM Seller Capture/1.0",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(8_000),
     });
 
     if (!response.ok) {
@@ -88,6 +93,9 @@ export async function POST(request: NextRequest) {
       nextAction: missingRequirements.includes("PHONE_REQUIRED") ? "REVEAL_PHONE" : undefined,
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return NextResponse.json({ ok: false, error: { message: "Listing fetch timed out.", code: "EXTERNAL_TIMEOUT" } }, { status: 504 });
+    }
     if (error instanceof ServiceError) {
       return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });
     }

@@ -716,6 +716,7 @@ export {
   createResendEmailProviderFromEnv,
 } from "./email/resend-provider.js";
 export { HttpSmsProvider, createHttpSmsProviderFromEnv } from "./sms/http-sms-provider.js";
+export { MetaWhatsAppCloudProvider, createMetaWhatsAppCloudProviderFromEnv } from "./whatsapp/meta-whatsapp-cloud-provider.js";
 export type {
   EmailMessage,
   EmailProvider,
@@ -726,6 +727,7 @@ export type {
   ResendEmailProviderOptions,
 } from "./email/resend-provider.js";
 export type { HttpSmsProviderOptions } from "./sms/http-sms-provider.js";
+export type { MetaWhatsAppCloudProviderOptions } from "./whatsapp/meta-whatsapp-cloud-provider.js";
 
 export { RenderSellerHttpConnector, RenderSellerConnectorError, createRenderSellerConnectorFromEnv } from "./render-seller.js";
 export type { RenderSellerConnector, RenderSellerPayload, CreateRenderSellerInput, CreateRenderSellerResult } from "./render-seller.js";

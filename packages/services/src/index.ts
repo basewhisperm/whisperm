@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
 import { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
+import { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
 export { SellerAcquisitionAnalyticsService } from "./acquisition-analytics.js";
 export { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
+export { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
 export type { SellerAcquisitionHealthStatus, SellerAcquisitionMissingRequirement, SellerAcquisitionNextAction, SellerAcquisitionRecord, SellerAcquisitionRecordDependencies } from "./seller-acquisition-records.js";
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
@@ -1344,7 +1346,7 @@ const marketplacePriceForDecimal = (input: MarketplaceCaptureServiceInput): stri
   return /^\d+(\.\d+)?$/u.test(decimal) ? decimal : undefined;
 };
 const listingUrlForCapture = (input: MarketplaceCaptureServiceInput): string => input.listingUrl ?? input.sourceUrl ?? "";
-const externalIdForCapture = (input: MarketplaceCaptureServiceInput): string | undefined => input.externalId ?? input.marketplaceListingId ?? input.marketplaceIdentifier ?? undefined;
+const externalIdForCapture = (input: MarketplaceCaptureServiceInput): string | undefined => input.externalId ?? input.marketplaceListingId ?? undefined;
 const marketplaceSourceForDraft = (input: MarketplaceCaptureServiceInput): string | undefined => input.marketplaceSource ?? input.sourceMarketplace ?? input.marketplaceSourceId ?? sourceHost(listingUrlForCapture(input));
 
 const marketplaceImagesForDraft = (input: MarketplaceCaptureServiceInput): readonly string[] | undefined =>
@@ -1401,6 +1403,14 @@ const hasDeliveryProvider = (channel: SellerInvitationChannel, notifications: Se
   if (channel === "SMS") return notifications?.sms !== undefined;
   return notifications?.email !== undefined;
 };
+
+
+const redactProviderFailure = (message: string): string =>
+  message
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/giu, "Bearer [REDACTED]")
+    .replace(/access[_-]?token["'=:\s]+[^\s"',}]+/giu, "accessToken=[REDACTED]")
+    .replace(/api[_-]?key["'=:\s]+[^\s"',}]+/giu, "apiKey=[REDACTED]")
+    .slice(0, 300);
 
 const canDeliverInvitation = (channel: SellerInvitationChannel, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined): boolean =>
   hasDeliveryProvider(channel, notifications) ||
@@ -1506,13 +1516,41 @@ export class SellerInvitationService {
   }
 
   private async sendOrFallback(context: ServiceContext, scope: TenantScoped, repositories: ServiceRepositories, invitation: SellerInvitationRecord, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined): Promise<SellerInvitationRecord> {
+    let lastProviderFailureChannel: SellerInvitationChannel | undefined;
+    let lastProviderFailureMessage: string | undefined;
+
     const trySend = async (channel: SellerInvitationChannel, record: SellerInvitationRecord): Promise<SellerInvitationRecord | null> => {
       const body = `You are invited to Seller Acquisition: ${record.inviteUrl}`;
       try {
         if (channel === "WHATSAPP") { if (notifications?.whatsapp === undefined) return null; await notifications.whatsapp.send({ to: record.recipient, body }); }
         if (channel === "SMS") { if (notifications?.sms === undefined) return null; await notifications.sms.send({ to: record.recipient, body }); }
         if (channel === "EMAIL") { if (notifications?.email === undefined) return null; await notifications.email.send({ to: record.recipient, subject: "Seller Acquisition invitation", html: `<p>${body}</p>` }); }
-      } catch {
+      } catch (error) {
+        const failureMessage = error instanceof Error ? error.message : "Invitation provider failed";
+        lastProviderFailureChannel = channel;
+        lastProviderFailureMessage = failureMessage;
+
+        await this.deps.sellerInvitations!.update(scope, record.id, {
+          status: "PENDING",
+          metadata: {
+            ...(record.metadata ?? {}),
+            providerOutcome: "PROVIDER_FAILED",
+            providerFailureChannel: channel,
+            providerFailureMessage: redactProviderFailure(failureMessage),
+          },
+        });
+
+        await appendAudit(repositories, context, {
+          action: "INVITATION_PROVIDER_FAILED",
+          targetType: "SELLER_INVITATION",
+          targetId: record.id,
+          metadata: {
+            captureId: record.marketplaceCaptureId,
+            channel,
+            failureMessage: redactProviderFailure(failureMessage),
+          },
+        });
+
         return null;
       }
       const sentAt = new Date().toISOString();
@@ -1547,6 +1585,8 @@ export class SellerInvitationService {
         ...(invitation.metadata ?? {}),
         providerOutcome: "MANUAL_DELIVERY_REQUIRED",
         failureReason: "INVITATION_PROVIDER_UNAVAILABLE",
+        providerFailureChannel: lastProviderFailureChannel,
+        providerFailureMessage: lastProviderFailureMessage?.slice(0, 500),
       },
     });
 
@@ -1590,43 +1630,51 @@ export class MarketplaceAcquisitionCaptureService {
     }
 
     return runWrite(this.deps, context, async (repositories) => {
-      if (sellerPhoneForInput(data) === undefined) {
-        return this.captureUnqualifiedListing(repositories, context, tenantScope, data);
-      }
-
       const contactResult = await this.resolveContact(repositories, context, data);
       const listingInputs = this.listingInputs(data);
       const firstInput = listingInputs[0] ?? data;
       const firstCapture = await this.createOrMatchCapture(repositories, context, tenantScope, firstInput, contactResult.contact.id);
       const dealResult = await this.resolveDeal(repositories, context, data, firstCapture.capture, contactResult.contact.id, capturedStage.id, listingInputs.length);
-      const captures: MarketplaceCaptureRecord[] = [];
-      const createdCaptureIds: string[] = [];
-      const matchedCaptureIds: string[] = [];
+      const finalCapture = firstCapture.capture.dealId === dealResult.deal.id
+        ? firstCapture.capture
+        : await repositories.marketplaceCaptures.update(tenantScope, firstCapture.capture.id, { dealId: dealResult.deal.id });
+      const createdCaptureIds = firstCapture.created ? [finalCapture.id] : [];
+      const matchedCaptureIds = firstCapture.created ? [] : [finalCapture.id];
       const draftInventoryIds: string[] = [];
-      for (const listingInput of listingInputs) {
-        const captured = listingInput === firstInput ? firstCapture : await this.createOrMatchCapture(repositories, context, tenantScope, listingInput, contactResult.contact.id);
-        if (captured.created) createdCaptureIds.push(captured.capture.id); else matchedCaptureIds.push(captured.capture.id);
-        const finalCapture = captured.capture.dealId === dealResult.deal.id ? captured.capture : await repositories.marketplaceCaptures.update(tenantScope, captured.capture.id, { dealId: dealResult.deal.id });
-        captures.push(finalCapture);
+
+      for (const [index, listingInput] of listingInputs.entries()) {
+        const listingCapture =
+          index === 0
+            ? finalCapture
+            : (await this.createOrMatchCapture(repositories, context, tenantScope, listingInput, contactResult.contact.id)).capture;
+
+        if (index > 0) {
+          if (listingCapture.dealId !== dealResult.deal.id) {
+            await repositories.marketplaceCaptures.update(tenantScope, listingCapture.id, { dealId: dealResult.deal.id });
+          }
+          if (!createdCaptureIds.includes(listingCapture.id) && !matchedCaptureIds.includes(listingCapture.id)) {
+            matchedCaptureIds.push(listingCapture.id);
+          }
+        }
+
         const draftInventory = await repositories.draftInventories.upsertForCapture(tenantScope, {
           tenantId: context.tenantId,
-          marketplaceCaptureId: finalCapture.id,
+          marketplaceCaptureId: listingCapture.id,
           contactId: contactResult.contact.id,
           dealId: dealResult.deal.id,
-          title: finalCapture.title,
-          description: finalCapture.description,
+          title: listingInput.title,
+          description: listingInput.description,
           price: marketplacePriceForDecimal(listingInput),
-          currency: finalCapture.currency,
+          currency: listingInput.currency,
           category: marketplaceCategoryForDraft(listingInput),
           images: marketplaceImagesForDraft(listingInput),
-          listingUrl: finalCapture.listingUrl,
+          listingUrl: listingUrlForCapture(listingInput),
           marketplaceSource: marketplaceSourceForDraft(listingInput),
-          marketplaceListingId: finalCapture.externalId ?? undefined,
+          marketplaceListingId: externalIdForCapture(listingInput),
           status: "DRAFT",
         });
         draftInventoryIds.push(draftInventory.id);
       }
-      const finalCapture = captures[0] ?? firstCapture.capture;
       const draftInventoryId = draftInventoryIds[0] ?? "";
       const sellerNameCleaned = cleanSellerIdentity(data.sellerName).cleaned;
       const sellerPortfolioValue = listingInputs.reduce((sum, item) => sum + Number(marketplacePriceForDecimal(item) ?? 0), 0);
@@ -1646,12 +1694,12 @@ export class MarketplaceAcquisitionCaptureService {
         captureId: finalCapture.id,
         contactId: contactResult.contact.id,
         dealId: dealResult.deal.id,
-        contactMatchStrategy: contactResult.strategy,
+        contactMatchStrategy: sellerPhoneForInput(data) === undefined ? "unqualified" : contactResult.strategy,
         dealCreated: dealResult.created,
         dealMatched: !dealResult.created,
         draftInventoryId,
         status: finalCapture.status,
-        sellerIdentityStrategy: contactResult.strategy,
+        sellerIdentityStrategy: sellerPhoneForInput(data) === undefined ? "unqualified" : contactResult.strategy,
         portfolioCaptureCount: listingInputs.length,
         createdCaptureIds,
         matchedCaptureIds,
@@ -1767,7 +1815,13 @@ export class MarketplaceAcquisitionCaptureService {
       status: "CAPTURED",
       metadata: { ...mergedCaptureMetadata(data), sellerListingCount: 1, sourceMarketplace: data.marketplaceSource ?? data.sourceMarketplace ?? undefined }
     });
-    const linkedCapture = contactId === undefined || capture.contactId === contactId ? capture : await repositories.marketplaceCaptures.update(tenantScope, capture.id, { contactId });
+    const linkedCapture =
+      contactId === undefined || capture.contactId === contactId
+        ? capture
+        : await repositories.marketplaceCaptures.update(tenantScope, capture.id, {
+            contactId,
+            metadata: { ...(capture.metadata ?? {}), ...mergedCaptureMetadata(data) },
+          });
     return { capture: linkedCapture, created: existingCapture === null };
   }
 
@@ -2123,3 +2177,7 @@ export type {
 } from "./marketplace-acquisition/capture-service.js";
 export { RenderConversionRetryService, RenderConversionRetryError, nextRenderConversionRetryAt } from "./render-conversion-retry.js";
 export type { RenderConversionRetryContext, RenderConversionRetryDependencies, RenderConversionRetryResult, RenderInventoryConnector } from "./render-conversion-retry.js";
+
+export { SellerAcquisitionEditService } from "./seller-acquisition-edit.js";
+
+export { evaluateCaptureQuality } from "./seller-acquisition/capture-quality.js";

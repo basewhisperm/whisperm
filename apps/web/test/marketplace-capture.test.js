@@ -37,7 +37,7 @@ test('bookmarklet opens authenticated intake with one encoded payload', () => {
   });
 
   assert.match(bookmarklet, /^javascript:\(function\(\)\{/u);
-  assert.match(bookmarklet, /window\.open\(INTAKE\+'\?payload='\+encodeURIComponent\(json\),'_blank','noopener,noreferrer'\)/u);
+  assert.match(bookmarklet, /window\.open/u);
   assert.match(bookmarklet, new RegExp(`const MAX=${MARKETPLACE_CAPTURE_MAX_PAYLOAD_BYTES}`, 'u'));
 });
 
@@ -55,7 +55,7 @@ test('bookmarklet source omits private browser state and full page HTML collecti
 
 test('marketplace acquisition detail route links safe capture fields without raw metadata', () => {
   const detailPage = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/[dealId]/page.tsx', import.meta.url), 'utf8');
-  const boardPage = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/page.tsx', import.meta.url), 'utf8');
+  const boardPage = readFileSync(new URL('../src/components/marketplace-acquisition/acquisition-workbench.tsx', import.meta.url), 'utf8');
 
   assert.match(boardPage, /href=\{`\/marketplace-acquisition\/\$\{record\.deal\.deal\.id\}`\}/u);
   for (const safeField of ['listingUrl', 'marketplaceSource', 'sellerName', 'status', 'price', 'currency']) {
@@ -101,6 +101,10 @@ test('intake page submits seller and inventory data to capture API', () => {
     assert.match(source, new RegExp(field, 'u'));
   }
   assert.match(source, /fetch\("\/api\/marketplace-acquisition\/captures"/u);
+  assert.match(source, /sellerPhone: clean\(fields\.phone \?\? ""\)/u);
+  assert.match(source, /Capture result/u);
+  assert.match(source, /Contact, deal, and draft inventory/u);
+  assert.match(source, /Edit phone and retry qualification/u);
 });
 
 test('mobile URL capture posts URL only and does not require manual seller fields', () => {

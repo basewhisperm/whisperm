@@ -97,7 +97,10 @@ test("WhatsApp provider failure falls back to SMS and records deterministic audi
 
   assert.equal(r.result.channel, "SMS");
   assert.equal(r.result.status, "SENT");
+  assert.equal(r.store.audits.some((a) => a.action === "INVITATION_PROVIDER_FAILED"), true);
   assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FALLBACK_USED"), true);
+  assert.equal(r.store.invitations[0].metadata.providerOutcome, "PROVIDER_FAILED");
+  assert.equal(r.store.invitations[0].metadata.providerFailureChannel, "WHATSAPP");
   assert.equal(r.store.invitations[1].metadata.fallbackFrom, "WHATSAPP");
   assert.equal(r.store.invitations[1].metadata.providerOutcome, "DELIVERED");
 });

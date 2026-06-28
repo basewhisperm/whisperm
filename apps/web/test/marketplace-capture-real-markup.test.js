@@ -156,3 +156,66 @@ test('generated bookmarklet uses canonical extractor output for the same documen
 
   assert.deepEqual(capturedPayload, directPayload);
 });
+
+test('extractor captures phone from revealed contact button text', () => {
+  const document = createMockDocument({
+    selectors: {
+      '[data-testid*="phone" i]': node({ textContent: 'Call seller +233 55 123 4567' }),
+    },
+  });
+
+  const payload = extractMarketplaceCapturePayload(document, listingUrl, 'test-agent');
+
+  assert.equal(payload.phone, '+233 55 123 4567');
+});
+
+test('extractor infers GHS currency from Ghana cedi price text', () => {
+  const document = createMockDocument({
+    selectors: {
+      '.qa-advert-price-view-value': node({ textContent: 'GH₵ 250,000' }),
+    },
+  });
+
+  const payload = extractMarketplaceCapturePayload(document, listingUrl, 'test-agent');
+
+  assert.equal(payload.priceText, 'GH₵ 250,000');
+  assert.equal(payload.currency, 'GHS');
+});
+
+test('extractor captures portfolio listing cards when present', () => {
+  const document = createMockDocument({
+    selectorAll: {
+      'a[href]': [
+        node({
+          textContent: 'Toyota Corolla GH₵ 120,000',
+          attributes: {
+            href: '/accra/cars/toyota-corolla-abc.html',
+          },
+        }),
+        node({
+          textContent: 'Honda Civic GH₵ 95,000',
+          attributes: {
+            href: '/accra/cars/honda-civic-def.html',
+          },
+        }),
+      ],
+    },
+  });
+
+  const payload = extractMarketplaceCapturePayload(document, listingUrl, 'test-agent');
+
+  assert.ok(Array.isArray(payload.portfolioListings));
+  assert.ok(payload.portfolioListings.length >= 2);
+});
+
+
+test('phone extraction captures compact Ghana mobile numbers revealed in Jiji body text', () => {
+  const document = createMockDocument({
+    bodyText: 'Show contact 0540320112 Copy 0558368943 Copy',
+  });
+
+  const payload = extractMarketplaceCapturePayload(document, listingUrl, 'test-agent');
+
+  assert.equal(payload.phone, '0540320112');
+});
+

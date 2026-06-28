@@ -47,7 +47,6 @@ enum IncidentSeverity {
   CRITICAL
 }
 
-
 enum WorkflowExecutionState {
   PENDING
   SCHEDULED
@@ -132,6 +131,7 @@ enum TraceSpanStatus {
   ERROR
   UNSET
 }
+
 enum ContactStage {
   PROSPECT
   QUALIFIED
@@ -179,63 +179,62 @@ enum DraftInventoryStatus {
   EXPIRED
 }
 
-
-
 model Tenant {
-  id         String   @id @default(uuid()) @db.Uuid
-  slug       String   @unique
-  name       String
-  externalId          String?  @unique
+  id                 String   @id @default(uuid()) @db.Uuid
+  slug               String   @unique
+  name               String
+  externalId         String?  @unique
   alertDigestEnabled Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  users                  TenantUser[]
-  features               TenantFeature[]
-  contacts               Contact[]
-  contentItems           ContentItem[]
-  contentVariants        ContentVariant[]
-  inboundEvents          InboundEvent[]
-  leadEvents             LeadEvent[]
-  marketMoments          MarketMoment[]
-  tenantSLOs             TenantSLO[]
-  sloSnapshots           SloSnapshot[]
-  reliabilityIncidents   ReliabilityIncident[]
-  promptLibraryEntries   PromptLibraryEntry[]
-  publishJobs            PublishJob[]
-  auditLogs              AuditLog[]
-  workflowExecutions     WorkflowExecution[]
-  workflowStepExecutions WorkflowStepExecution[]
-  aiExecutions           AiExecution[]
-  eventIngestions        EventIngestion[]
-  idempotencyKeys        IdempotencyKey[]
-  vectorDocuments        VectorDocument[]
-  executionTraces        ExecutionTrace[]
-  executionTraceSpans    ExecutionTraceSpan[]
-  queueJobs              QueueJob[]
-  deadLetterJobs         DeadLetterJob[]
-  scheduledJobs          ScheduledJob[]
-  executionLeases        ExecutionLease[]
-  distributedLocks       DistributedLock[]
-  outboxEvents           OutboxEvent[]
-  inboxEvents            InboxEvent[]
-  deals                  Deal[]
-  activities             Activity[]
-  pipelines              Pipeline[]
-  pipelineStages         PipelineStage[]
-  subscriptions          Subscription[]
-  marketplaceSources     MarketplaceSource[]
-  marketplaceCaptures    MarketplaceCapture[]
-  draftInventories       DraftInventory[]
-  marketplaceClaimTokens MarketplaceClaimToken[]
-  ownershipAttestations MarketplaceOwnershipAttestation[]
-  sellerInvitations   MarketplaceSellerInvitation[]
-  sellerVerifications    MarketplaceSellerVerification[]
-  renderConversions      RenderConversion[]
-  providerConnections    ProviderConnection[]
-  notificationLogs       NotificationDeliveryLog[]
+  users                            TenantUser[]
+  features                         TenantFeature[]
+  contacts                         Contact[]
+  contentItems                     ContentItem[]
+  contentVariants                  ContentVariant[]
+  inboundEvents                    InboundEvent[]
+  leadEvents                       LeadEvent[]
+  marketMoments                    MarketMoment[]
+  tenantSLOs                       TenantSLO[]
+  sloSnapshots                     SloSnapshot[]
+  reliabilityIncidents             ReliabilityIncident[]
+  promptLibraryEntries             PromptLibraryEntry[]
+  publishJobs                      PublishJob[]
+  auditLogs                        AuditLog[]
+  workflowExecutions               WorkflowExecution[]
+  workflowStepExecutions           WorkflowStepExecution[]
+  aiExecutions                     AiExecution[]
+  eventIngestions                  EventIngestion[]
+  idempotencyKeys                  IdempotencyKey[]
+  vectorDocuments                  VectorDocument[]
+  executionTraces                  ExecutionTrace[]
+  executionTraceSpans              ExecutionTraceSpan[]
+  queueJobs                        QueueJob[]
+  deadLetterJobs                   DeadLetterJob[]
+  scheduledJobs                    ScheduledJob[]
+  executionLeases                  ExecutionLease[]
+  distributedLocks                 DistributedLock[]
+  outboxEvents                     OutboxEvent[]
+  inboxEvents                      InboxEvent[]
+  deals                            Deal[]
+  activities                       Activity[]
+  pipelines                        Pipeline[]
+  pipelineStages                   PipelineStage[]
+  subscriptions                    Subscription[]
+  marketplaceSources               MarketplaceSource[]
+  marketplaceCaptures              MarketplaceCapture[]
+  draftInventories                 DraftInventory[]
+  marketplaceClaimTokens           MarketplaceClaimToken[]
+  ownershipAttestations            MarketplaceOwnershipAttestation[]
+  sellerInvitations                MarketplaceSellerInvitation[]
+  sellerVerifications              MarketplaceSellerVerification[]
+  renderConversions                RenderConversion[]
+  providerConnections              ProviderConnection[]
+  notificationLogs                 NotificationDeliveryLog[]
+  sellerAcquisitionCampaigns       SellerAcquisitionCampaign[]
+  sellerAcquisitionCampaignMembers SellerAcquisitionCampaignMember[]
 }
-
 
 model TenantFeature {
   id         String   @id @default(uuid()) @db.Uuid
@@ -263,11 +262,11 @@ model TenantUser {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contentItems    ContentItem[]
-  ownedContacts   Contact[]     @relation("ContactOwner")
-  ownedDeals      Deal[]        @relation("DealOwner")
-  activities      Activity[]
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contentItems  ContentItem[]
+  ownedContacts Contact[]     @relation("ContactOwner")
+  ownedDeals    Deal[]        @relation("DealOwner")
+  activities    Activity[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, email])
@@ -293,17 +292,18 @@ model Contact {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  owner         TenantUser?    @relation("ContactOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
-  contentItems  ContentItem[]
-  inboundEvents InboundEvent[]
-  leadEvents    LeadEvent[]
-  deals         Deal[]
-  activities    Activity[]
-  marketplaceCaptures MarketplaceCapture[]
-  draftInventories    DraftInventory[]
-  sellerVerifications MarketplaceSellerVerification[]
-  renderConversions RenderConversion[]
+  tenant                           Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner                            TenantUser?                       @relation("ContactOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
+  contentItems                     ContentItem[]
+  inboundEvents                    InboundEvent[]
+  leadEvents                       LeadEvent[]
+  deals                            Deal[]
+  activities                       Activity[]
+  marketplaceCaptures              MarketplaceCapture[]
+  draftInventories                 DraftInventory[]
+  sellerVerifications              MarketplaceSellerVerification[]
+  renderConversions                RenderConversion[]
+  sellerAcquisitionCampaignMembers SellerAcquisitionCampaignMember[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, externalId])
@@ -455,9 +455,9 @@ model TenantSLO {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  snapshots   SloSnapshot[]
-  incidents   ReliabilityIncident[]
+  tenant    Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  snapshots SloSnapshot[]
+  incidents ReliabilityIncident[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, name])
@@ -566,8 +566,6 @@ model PublishJob {
   @@index([tenantId, state, scheduledAt])
 }
 
-
-
 // CRM product models — expand-only, tenant-scoped, rollback-safe.
 // No migration generation from this file.
 
@@ -614,31 +612,33 @@ model PipelineStage {
 }
 
 model Deal {
-  id              String   @id @default(uuid()) @db.Uuid
-  tenantId        String   @db.Uuid
-  contactId       String?  @db.Uuid
-  pipelineId      String   @db.Uuid
-  pipelineStageId String   @db.Uuid
-  ownerId         String?  @db.Uuid
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @db.Uuid
+  contactId       String?   @db.Uuid
+  pipelineId      String    @db.Uuid
+  pipelineStageId String    @db.Uuid
+  ownerId         String?   @db.Uuid
   externalId      String?
   title           String
-  value           Decimal? @db.Decimal(18, 4)
-  currency        String   @default("USD")
+  value           Decimal?  @db.Decimal(18, 4)
+  currency        String    @default("USD")
   probability     Int?
   closedAt        DateTime?
   metadata        Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contact       Contact?      @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
-  pipeline      Pipeline      @relation(fields: [tenantId, pipelineId], references: [tenantId, id], onDelete: Restrict)
-  pipelineStage PipelineStage @relation(fields: [tenantId, pipelineId, pipelineStageId], references: [tenantId, pipelineId, id], onDelete: Restrict)
-  owner         TenantUser?   @relation("DealOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
-  activities    Activity[]
-  marketplaceCaptures MarketplaceCapture[]
-  draftInventories    DraftInventory[]
-  renderConversions RenderConversion[]
+  tenant                          Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact                         Contact?                          @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  pipeline                        Pipeline                          @relation(fields: [tenantId, pipelineId], references: [tenantId, id], onDelete: Restrict)
+  pipelineStage                   PipelineStage                     @relation(fields: [tenantId, pipelineId, pipelineStageId], references: [tenantId, pipelineId, id], onDelete: Restrict)
+  owner                           TenantUser?                       @relation("DealOwner", fields: [tenantId, ownerId], references: [tenantId, id], onDelete: Restrict)
+  activities                      Activity[]
+  marketplaceCaptures             MarketplaceCapture[]
+  draftInventories                DraftInventory[]
+  renderConversions               RenderConversion[]
+  SellerAcquisitionCampaignMember SellerAcquisitionCampaignMember[]
+
   @@unique([tenantId, id])
   @@unique([tenantId, externalId])
   @@index([tenantId])
@@ -666,10 +666,10 @@ model Activity {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contact   Contact?    @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
-  deal      Deal?       @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
-  createdBy TenantUser  @relation(fields: [tenantId, createdById], references: [tenantId, id], onDelete: Restrict)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact   Contact?   @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  deal      Deal?      @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+  createdBy TenantUser @relation(fields: [tenantId, createdById], references: [tenantId, id], onDelete: Restrict)
 
   @@unique([tenantId, id])
   @@index([tenantId])
@@ -824,19 +824,19 @@ model AiExecution {
 }
 
 model EventIngestion {
-  id             String                @id @default(uuid()) @db.Uuid
-  tenantId       String                @db.Uuid
-  provider       String
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @db.Uuid
+  provider        String
   providerEventId String
-  eventType      String
-  idempotencyKey String
-  state          EventPersistenceState @default(RECEIVED)
-  occurredAt     DateTime
-  receivedAt     DateTime              @default(now())
-  processedAt    DateTime?
-  payload        Json
-  error          Json?
-  correlationId  String
+  eventType       String
+  idempotencyKey  String
+  state           EventPersistenceState @default(RECEIVED)
+  occurredAt      DateTime
+  receivedAt      DateTime              @default(now())
+  processedAt     DateTime?
+  payload         Json
+  error           Json?
+  correlationId   String
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -849,17 +849,17 @@ model EventIngestion {
 }
 
 model IdempotencyKey {
-  id             String              @id @default(uuid()) @db.Uuid
-  tenantId       String              @db.Uuid
-  scope          String
-  key            String
-  requestHash    String
-  state          IdempotencyKeyState  @default(IN_PROGRESS)
-  response       Json?
-  lockedUntil    DateTime?
-  expiresAt      DateTime
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  id          String              @id @default(uuid()) @db.Uuid
+  tenantId    String              @db.Uuid
+  scope       String
+  key         String
+  requestHash String
+  state       IdempotencyKeyState @default(IN_PROGRESS)
+  response    Json?
+  lockedUntil DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -870,18 +870,18 @@ model IdempotencyKey {
 }
 
 model VectorDocument {
-  id                 String   @id @default(uuid()) @db.Uuid
-  tenantId           String   @db.Uuid
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @db.Uuid
   sourceType         String
   sourceId           String
   chunkId            String
   embeddingModel     String?
   embeddingDimension Int?
   contentHash        String
-  metadata           Json     @default("{}")
+  metadata           Json      @default("{}")
   indexedAt          DateTime?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -893,14 +893,14 @@ model VectorDocument {
 }
 
 model ExecutionTrace {
-  id            String   @id @default(uuid()) @db.Uuid
-  tenantId      String   @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @db.Uuid
   traceId       String
   rootSpanId    String?
   correlationId String
   startedAt     DateTime
   endedAt       DateTime?
-  attributes    Json     @default("{}")
+  attributes    Json      @default("{}")
 
   tenant Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   spans  ExecutionTraceSpan[]
@@ -933,22 +933,22 @@ model ExecutionTraceSpan {
 }
 
 model QueueJob {
-  id             String        @id @default(uuid()) @db.Uuid
-  tenantId       String        @db.Uuid
-  queueName      String
-  jobName        String
-  jobKey         String
-  state          QueueJobState @default(WAITING)
-  payload        Json
-  attemptsMade   Int           @default(0)
-  maxAttempts    Int           @default(1)
-  scheduledAt    DateTime?
-  availableAt    DateTime      @default(now())
-  lockedUntil    DateTime?
-  lastError      Json?
-  correlationId  String
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id            String        @id @default(uuid()) @db.Uuid
+  tenantId      String        @db.Uuid
+  queueName     String
+  jobName       String
+  jobKey        String
+  state         QueueJobState @default(WAITING)
+  payload       Json
+  attemptsMade  Int           @default(0)
+  maxAttempts   Int           @default(1)
+  scheduledAt   DateTime?
+  availableAt   DateTime      @default(now())
+  lockedUntil   DateTime?
+  lastError     Json?
+  correlationId String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -1074,19 +1074,19 @@ model OutboxEvent {
 }
 
 model InboxEvent {
-  id             String             @id @default(uuid()) @db.Uuid
-  tenantId       String             @db.Uuid
-  source         String
-  messageId      String
-  eventType      String
-  payload        Json
-  headers        Json               @default("{}")
-  state          EventDeliveryState @default(PENDING)
-  receivedAt     DateTime           @default(now())
-  processedAt    DateTime?
-  attemptsMade   Int                @default(0)
-  correlationId  String
-  error          Json?
+  id            String             @id @default(uuid()) @db.Uuid
+  tenantId      String             @db.Uuid
+  source        String
+  messageId     String
+  eventType     String
+  payload       Json
+  headers       Json               @default("{}")
+  state         EventDeliveryState @default(PENDING)
+  receivedAt    DateTime           @default(now())
+  processedAt   DateTime?
+  attemptsMade  Int                @default(0)
+  correlationId String
+  error         Json?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -1097,10 +1097,83 @@ model InboxEvent {
   @@index([tenantId, correlationId])
 }
 
-
 // Marketplace acquisition foundation models — additive and tenant-scoped.
 // Claim-token persistence stores only token hashes; raw activation tokens must
 // remain outside durable storage.
+
+enum SellerAcquisitionCampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum SellerAcquisitionCampaignMemberStatus {
+  ADDED
+  QUALIFIED
+  INVITED
+  CLAIMED
+  CONVERTED
+  COMPLETED
+  REMOVED
+}
+
+model SellerAcquisitionCampaign {
+  id              String                          @id @default(uuid()) @db.Uuid
+  tenantId        String                          @db.Uuid
+  name            String
+  description     String?
+  status          SellerAcquisitionCampaignStatus @default(DRAFT)
+  ownerId         String?                         @db.Uuid
+  goalSellerCount Int?
+  goalRevenue     Decimal?                        @db.Decimal(18, 4)
+  currency        String?
+  startsAt        DateTime?
+  endsAt          DateTime?
+  metadata        Json?
+  createdAt       DateTime                        @default(now())
+  updatedAt       DateTime                        @updatedAt
+
+  tenant  Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members SellerAcquisitionCampaignMember[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, startsAt])
+}
+
+model SellerAcquisitionCampaignMember {
+  id                   String                                @id @default(uuid()) @db.Uuid
+  tenantId             String                                @db.Uuid
+  campaignId           String                                @db.Uuid
+  marketplaceCaptureId String                                @db.Uuid
+  contactId            String?                               @db.Uuid
+  dealId               String?                               @db.Uuid
+  status               SellerAcquisitionCampaignMemberStatus @default(ADDED)
+  assignedAt           DateTime                              @default(now())
+  removedAt            DateTime?
+  metadata             Json?
+  createdAt            DateTime                              @default(now())
+  updatedAt            DateTime                              @updatedAt
+
+  tenant             Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaign           SellerAcquisitionCampaign @relation(fields: [tenantId, campaignId], references: [tenantId, id], onDelete: Cascade)
+  marketplaceCapture MarketplaceCapture        @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+  contact            Contact?                  @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  deal               Deal?                     @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, campaignId, marketplaceCaptureId])
+  @@index([tenantId])
+  @@index([tenantId, campaignId])
+  @@index([tenantId, marketplaceCaptureId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, dealId])
+  @@index([tenantId, status, assignedAt])
+}
 
 model MarketplaceSource {
   id        String   @id @default(uuid()) @db.Uuid
@@ -1143,17 +1216,18 @@ model MarketplaceCapture {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  tenant              Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  marketplaceSource   MarketplaceSource?              @relation(fields: [tenantId, marketplaceSourceId], references: [tenantId, id], onDelete: Restrict)
-  contact             Contact?                        @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
-  deal                Deal?                           @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
-  claimTokens         MarketplaceClaimToken[]
-  sellerInvitations   MarketplaceSellerInvitation[]
-  sellerVerifications MarketplaceSellerVerification[]
-  renderConversions   RenderConversion[]
-  notificationLogs    NotificationDeliveryLog[]
-  draftInventories    DraftInventory[]
+  tenant                Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceSource     MarketplaceSource?                @relation(fields: [tenantId, marketplaceSourceId], references: [tenantId, id], onDelete: Restrict)
+  contact               Contact?                          @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  deal                  Deal?                             @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+  claimTokens           MarketplaceClaimToken[]
+  sellerInvitations     MarketplaceSellerInvitation[]
+  sellerVerifications   MarketplaceSellerVerification[]
+  renderConversions     RenderConversion[]
+  notificationLogs      NotificationDeliveryLog[]
+  draftInventories      DraftInventory[]
   ownershipAttestations MarketplaceOwnershipAttestation[]
+  campaignMemberships   SellerAcquisitionCampaignMember[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, marketplaceSourceId, externalId])
@@ -1185,10 +1259,10 @@ model DraftInventory {
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 
-  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  marketplaceCapture MarketplaceCapture @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
-  contact            Contact?           @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
-  deal               Deal?              @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
+  tenant                Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture    MarketplaceCapture                @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+  contact               Contact?                          @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Restrict)
+  deal                  Deal?                             @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Restrict)
   ownershipAttestations MarketplaceOwnershipAttestation[]
 
   @@unique([tenantId, id])
@@ -1200,7 +1274,6 @@ model DraftInventory {
   @@index([tenantId, status])
   @@index([tenantId, marketplaceSource, marketplaceListingId])
 }
-
 
 model MarketplaceSellerInvitation {
   id                   String   @id @default(uuid()) @db.Uuid
@@ -1241,9 +1314,9 @@ model MarketplaceClaimToken {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  tenant             Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  marketplaceCapture MarketplaceCapture        @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
-  notificationLogs   NotificationDeliveryLog[]
+  tenant                Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceCapture    MarketplaceCapture                @relation(fields: [tenantId, marketplaceCaptureId], references: [tenantId, id], onDelete: Cascade)
+  notificationLogs      NotificationDeliveryLog[]
   ownershipAttestations MarketplaceOwnershipAttestation[]
 
   @@unique([tenantId, id])
@@ -1252,7 +1325,6 @@ model MarketplaceClaimToken {
   @@index([tenantId, marketplaceCaptureId])
   @@index([tenantId, status, expiresAt])
 }
-
 
 model MarketplaceOwnershipAttestation {
   id                   String   @id @default(uuid()) @db.Uuid

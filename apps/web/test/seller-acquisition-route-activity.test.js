@@ -20,7 +20,7 @@ const makeState = () => ({
   capture: { id: captureId, tenantId, contactId: 'contact-1', dealId: 'deal-1', externalId: 'listing-1', listingUrl: 'https://market.test/listing/1', title: 'Bike', description: 'Fast bike', price: '100', currency: 'USD', sellerName: 'Sam Seller', sellerProfileUrl: 'https://market.test/seller/sam', status: 'CLAIM_STARTED', capturedAt: now, createdAt: now, updatedAt: now, metadata: { sellerPhone: '+15555550123', sellerEmail: 'sam@example.com', sellerLocation: 'Austin', marketplaceSource: 'MARKET_TEST' } },
   draft: { id: 'draft-1', tenantId, marketplaceCaptureId: captureId, contactId: 'contact-1', dealId: 'deal-1', title: 'Bike', description: 'Fast bike', price: '100', currency: 'USD', category: 'Bicycles', images: ['https://cdn.test/bike.jpg'], listingUrl: 'https://market.test/listing/1', marketplaceSource: 'MARKET_TEST', marketplaceListingId: 'listing-1', status: 'DRAFT', createdAt: now, updatedAt: now },
   contact: { id: 'contact-1', tenantId, firstName: 'Sam', lastName: 'Seller', email: 'sam@example.com', phone: '+15555550123', stage: 'PROSPECT', createdAt: now, updatedAt: now },
-  attestations: [], conversions: [], activities: [], audits: [], stageUpdates: [],
+  attestations: [], conversions: [], invitations: [], claimTokens: [], activities: [], audits: [], stageUpdates: [],
 });
 
 const activityRepo = (state) => ({
@@ -34,6 +34,45 @@ const repositories = (state) => ({
   pipelines: { async findByDefaultKey(id, key) { assert.equal(id, tenantId); assert.equal(key, 'marketplace_acquisition'); return { id: 'pipeline-1', tenantId, stages: [{ id: 'stage-started', name: 'Claim Started' }, { id: 'stage-claimed', name: 'Claimed' }, { id: 'stage-converted', name: 'Converted' }] }; } },
   deals: { async updateStage(id, dealId, stageId) { state.stageUpdates.push({ tenantId: id, dealId, stageId }); return { id: dealId, tenantId: id, pipelineStageId: stageId, updatedAt: now }; } },
   contacts: { async findById(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.contact.id ? state.contact : null; } },
+  marketplaceClaimTokens: {
+    async create(scope, input) {
+      assert.equal(scope.tenantId, tenantId);
+      const row = { id: `token-${state.claimTokens.length + 1}`, createdAt: now, updatedAt: now, ...input };
+      state.claimTokens.push(row);
+      state.token = row;
+      return row;
+    },
+    async findByTokenHash(scope, tokenHash) {
+      assert.equal(scope.tenantId, tenantId);
+      return state.claimTokens.find((row) => row.tokenHash === tokenHash) ?? (state.token.tokenHash === tokenHash ? state.token : null);
+    },
+    async update(scope, id, input) {
+      assert.equal(scope.tenantId, tenantId);
+      const index = state.claimTokens.findIndex((row) => row.id === id);
+      const current = index === -1 ? state.token : state.claimTokens[index];
+      const row = { ...current, ...input, updatedAt: now };
+      if (index === -1) state.token = row;
+      else state.claimTokens[index] = row;
+      if (state.token.id === id) state.token = row;
+      return row;
+    },
+  },
+  sellerInvitations: {
+    async create(scope, input) {
+      assert.equal(scope.tenantId, tenantId);
+      const row = { id: `invite-${state.invitations.length + 1}`, createdAt: now, updatedAt: now, ...input };
+      state.invitations.push(row);
+      return row;
+    },
+    async update(scope, id, input) {
+      assert.equal(scope.tenantId, tenantId);
+      const index = state.invitations.findIndex((row) => row.id === id);
+      assert.notEqual(index, -1);
+      const row = { ...state.invitations[index], ...input, updatedAt: now };
+      state.invitations[index] = row;
+      return row;
+    },
+  },
   renderConversions: {
     async findSuccessfulSellerConversion() { return state.conversions.find((row) => row.conversionKind === 'SELLER' && row.status === 'SUCCESS') ?? null; },
     async findSuccessfulInventoryConversion() { return state.conversions.find((row) => row.conversionKind === 'INVENTORY' && row.status === 'SUCCESS') ?? null; },
@@ -51,6 +90,7 @@ const claimService = (state) => new SellerClaimPortalService({
 });
 
 const servicesUrl = import.meta.resolve('@whisperm/services');
+const typesUrl = import.meta.resolve('@whisperm/types');
 
 const transpileRoute = (routePath, tempDir) => {
   let source = readFileSync(routePath, 'utf8')
@@ -59,6 +99,9 @@ const transpileRoute = (routePath, tempDir) => {
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
     .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
     .replace(/from "@\/lib\/claims\/seller-claim-service"/gu, `from "${join(tempDir, 'claim-service.mjs')}"`)
+    .replace(/from "@\/lib\/api\/request-body"/gu, `from "${join(tempDir, 'request-body.mjs')}"`)
+    .replaceAll('from "@whisperm/provider-adapters"', `from "${join(tempDir, 'provider-adapters.mjs')}"`)
+    .replaceAll('from "@whisperm/types"', `from "${typesUrl}"`)
     .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
     .replaceAll('from "@whisperm/services"', `from "${servicesUrl}"`);
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -83,14 +126,29 @@ const createHarness = async (state, options = {}) => {
     'export const requireSellerAcquisitionFeatureForApi = async () => (await isProtectedTenantFeatureEnabled()) ? null : featureNotEnabledResponse();',
     '',
   ].join('\n'));
-  writeFileSync(join(tempDir, 'repositories.mjs'), 'export const createPrismaRepositories = () => globalThis.__routeRepositories;\n');
+  writeFileSync(join(tempDir, 'repositories.mjs'), [
+    'export class PrismaAuditLogRepository { constructor() { return globalThis.__routeRepositories.auditLogs; } }',
+    'export class PrismaContactRepository { constructor() { return globalThis.__routeRepositories.contacts; } }',
+    'export class PrismaDealsRepository { constructor() { return globalThis.__routeRepositories.deals; } }',
+    'export class PrismaMarketplaceCaptureRepository { constructor() { return globalThis.__routeRepositories.marketplaceCaptures; } }',
+    'export class PrismaMarketplaceClaimTokenRepository { constructor() { return globalThis.__routeRepositories.marketplaceClaimTokens; } }',
+    'export class PrismaPipelineRepository { constructor() { return globalThis.__routeRepositories.pipelines; } }',
+    'export class PrismaSellerInvitationRepository { constructor() { return globalThis.__routeRepositories.sellerInvitations; } }',
+    'export const createPrismaRepositories = () => globalThis.__routeRepositories;',
+    '',
+  ].join('\n'));
   writeFileSync(join(tempDir, 'claim-service.mjs'), 'export const createSellerClaimService = () => globalThis.__routeClaimService;\n');
+  writeFileSync(join(tempDir, 'request-body.mjs'), 'export class RequestBodyError extends Error { constructor(message, code = "REQUEST_BODY_INVALID", status = 400) { super(message); this.code = code; this.status = status; } }\nexport const readJsonBody = async (request) => request.json();\n');
+  writeFileSync(join(tempDir, 'provider-adapters.mjs'), 'export const createHttpSmsProviderFromEnv = () => globalThis.__routeSmsProvider;\nexport const createMetaWhatsAppCloudProviderFromEnv = () => globalThis.__routeWhatsappProvider;\n');
   globalThis.__routeState = state;
   globalThis.__routeRepositories = repositories(state);
   globalThis.__routeClaimService = claimService(state);
+  globalThis.__routeSmsProvider = options.smsProvider;
+  globalThis.__routeWhatsappProvider = options.whatsappProvider;
   const base = new URL('../src/app/api/marketplace-acquisition/', import.meta.url).pathname;
   return {
-    cleanup: () => { delete globalThis.__routeState; delete globalThis.__routeRepositories; delete globalThis.__routeClaimService; rmSync(tempDir, { recursive: true, force: true }); },
+    cleanup: () => { delete globalThis.__routeState; delete globalThis.__routeRepositories; delete globalThis.__routeClaimService; delete globalThis.__routeSmsProvider; delete globalThis.__routeWhatsappProvider; rmSync(tempDir, { recursive: true, force: true }); },
+    invite: await transpileRoute(join(base, 'captures/[id]/invite/route.ts'), tempDir),
     accept: await transpileRoute(join(base, 'claims/[token]/accept/route.ts'), tempDir),
     seller: await transpileRoute(join(base, 'captures/[id]/convert/render-seller/route.ts'), tempDir),
     inventory: await transpileRoute(join(base, 'captures/[id]/convert/render-inventory/route.ts'), tempDir),
@@ -143,6 +201,88 @@ test('seller acquisition route handlers create authenticated CRM activities for 
   assert.equal(state.conversions.find((row) => row.conversionKind === 'SELLER')?.renderSellerId, 'render-seller-1');
   assert.equal(state.conversions.find((row) => row.conversionKind === 'INVENTORY')?.metadata.renderInventoryId, 'render-inventory-1');
   assert.equal(state.capture.status, 'CONVERTED');
+});
+
+
+test('seller acquisition invite-to-completion route E2E creates claim token and completes conversion lifecycle', async () => {
+  const state = makeState();
+  state.capture.status = 'CAPTURED';
+  state.draft.status = 'DRAFT';
+
+  const sentMessages = [];
+  const harness = await createHarness(state, {
+    smsProvider: { async send(message) { sentMessages.push(message); } },
+  });
+
+  const originalFetch = globalThis.fetch;
+  const originalEnv = {
+    SELLER_INVITATION_SMS_PROVIDER: process.env.SELLER_INVITATION_SMS_PROVIDER,
+    SELLER_INVITATION_SMS_API_URL: process.env.SELLER_INVITATION_SMS_API_URL,
+    SELLER_INVITATION_SMS_API_KEY: process.env.SELLER_INVITATION_SMS_API_KEY,
+    SELLER_INVITATION_SMS_SENDER_ID: process.env.SELLER_INVITATION_SMS_SENDER_ID,
+    SELLER_INVITATION_WHATSAPP_ENABLED: process.env.SELLER_INVITATION_WHATSAPP_ENABLED,
+    SELLER_INVITATION_BASE_URL: process.env.SELLER_INVITATION_BASE_URL,
+    RENDER_API_BASE_URL: process.env.RENDER_API_BASE_URL,
+    RENDER_API_KEY: process.env.RENDER_API_KEY,
+    RENDER_INTERNAL_API_KEY: process.env.RENDER_INTERNAL_API_KEY,
+  };
+
+  process.env.SELLER_INVITATION_SMS_PROVIDER = 'test';
+  process.env.SELLER_INVITATION_SMS_API_URL = 'https://sms.test/send';
+  process.env.SELLER_INVITATION_SMS_API_KEY = 'sms-key';
+  process.env.SELLER_INVITATION_SMS_SENDER_ID = 'WhispeRM';
+  process.env.SELLER_INVITATION_WHATSAPP_ENABLED = 'false';
+  process.env.SELLER_INVITATION_BASE_URL = 'https://app.example/claim';
+  process.env.RENDER_API_BASE_URL = 'https://render.test';
+  process.env.RENDER_API_KEY = 'test-key';
+  process.env.RENDER_INTERNAL_API_KEY = 'test-internal-key';
+
+  globalThis.fetch = async (url) => Response.json(
+    url.toString().includes('/seller-accounts')
+      ? { renderSellerId: 'render-seller-1' }
+      : { listing: { id: 'render-inventory-1' } },
+    { status: 201 },
+  );
+
+  try {
+    const inviteResponse = await harness.invite.POST(makeRequest({ preferredChannel: 'SMS' }), { params: { id: captureId } });
+    const inviteText = await inviteResponse.text();
+    assert.equal(inviteResponse.status, 200, inviteText);
+    const inviteJson = JSON.parse(inviteText);
+    const rawToken = new URL(inviteJson.inviteUrl).pathname.split('/').at(-1);
+
+    assert.ok(rawToken);
+    assert.equal(inviteJson.status, 'SENT');
+    assert.equal(inviteJson.channel, 'SMS');
+    assert.equal(sentMessages.length, 1);
+    assert.equal(state.token.tokenHash, hashClaimToken(rawToken));
+    assert.equal(state.token.status, 'SENT');
+    assert.equal(state.capture.status, 'INVITED');
+
+    for (const [route, body] of [
+      [harness.accept, { acceptedTerms: true, claimantName: 'Sam Seller' }],
+      [harness.seller],
+      [harness.inventory],
+      [harness.complete],
+    ]) {
+      const response = await route.POST(makeRequest(body), { params: route === harness.accept ? { token: rawToken } : { id: captureId } });
+      assert.equal(response.status, 200, await response.text());
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    harness.cleanup();
+  }
+
+  assert.equal(state.capture.status, 'CONVERTED');
+  assert.equal(state.conversions.find((row) => row.conversionKind === 'SELLER')?.renderSellerId, 'render-seller-1');
+  assert.equal(state.conversions.find((row) => row.conversionKind === 'INVENTORY')?.metadata.renderInventoryId, 'render-inventory-1');
+  assert.equal(state.activities.some((activity) => activity.metadata.eventType === 'RENDER_SELLER_CONVERSION_SUCCEEDED'), true);
+  assert.equal(state.activities.some((activity) => activity.metadata.eventType === 'RENDER_INVENTORY_CONVERSION_SUCCEEDED'), true);
+  assert.equal(state.activities.some((activity) => activity.metadata.eventType === 'MARKETPLACE_CAPTURE_COMPLETED'), true);
 });
 
 test('seller acquisition route handlers create failure activities when conversion providers fail', async () => {
