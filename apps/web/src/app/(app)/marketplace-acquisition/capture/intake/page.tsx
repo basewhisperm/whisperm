@@ -88,7 +88,7 @@ function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCap
       .then((payload) => {
         const list = (payload?.data?.campaigns ?? []) as CampaignOption[];
         setCampaigns(list);
-        if (list.length === 1) setSelectedCampaignId(list[0].id);
+        if (list.length === 1 && list[0] !== undefined) setSelectedCampaignId(list[0].id);
       })
       .catch(() => {});
   }, [campaignId]);
