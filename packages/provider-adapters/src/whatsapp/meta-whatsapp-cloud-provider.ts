@@ -30,7 +30,7 @@ export class MetaWhatsAppCloudProvider implements WhatsAppProvider {
   }
 
   async send(message: WhatsAppMessage): Promise<void> {
-    const to = message.to.replace(/[^\d]/gu, "");
+    const to = message.to.startsWith("+") ? message.to.replace(/[^\d+]/gu, "") : message.to.replace(/[^\d]/gu, "");
     if (to.length === 0) throw new Error("WhatsApp recipient phone is required");
 
     const response = await this.fetchImpl(
