@@ -709,7 +709,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
   };
 
   return (
-    <aside className="space-y-4 rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }}>
+    <aside className="space-y-4 rounded-2xl bg-background p-5 sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto" style={{ border: "0.5px solid var(--color-border)" }}>
       <div>
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Workbench dossier</p>
         <h2 className="mt-1 text-lg font-semibold text-foreground">{sellerName(record)}</h2>
