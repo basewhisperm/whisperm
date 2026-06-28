@@ -29,12 +29,31 @@ function stringArray(value: unknown): string[] {
   return [...new Set(value.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim()))];
 }
 
-function formatValue(value?: { toString(): string } | number | string | null, currency?: string | null) {
+function extractNumeric(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") { const n = Number(value); return Number.isFinite(n) ? n : null; }
+  // Prisma Decimal serialized as JSON object: { d: number[], e: number, s: number }
+  if (typeof value === "object" && value !== null) {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.d === "object" && Array.isArray(obj.d) && typeof obj.e === "number") {
+      const str = (obj.s === -1 ? "-" : "") + obj.d.join("").slice(0, obj.e + 1) + "." + (obj.d.join("").slice(obj.e + 1) || "0");
+      const n = Number(str);
+      return Number.isFinite(n) ? n : null;
+    }
+    if (typeof (value as { toString(): string }).toString === "function") {
+      const str = (value as { toString(): string }).toString();
+      if (str !== "[object Object]") { const n = Number(str); return Number.isFinite(n) ? n : null; }
+    }
+  }
+  return null;
+}
+
+function formatValue(value?: unknown, currency?: string | null) {
   if (value === undefined || value === null) return "Not provided";
-  const stringValue = typeof value === "object" && value !== null ? value.toString() : value;
-  const numericValue = typeof stringValue === "string" ? Number(stringValue) : stringValue;
-  if (!Number.isFinite(numericValue)) return `${currency ?? ""} ${String(value)}`.trim();
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency ?? "USD", maximumFractionDigits: 0 }).format(numericValue);
+  const numeric = extractNumeric(value);
+  if (numeric === null) return "Not provided";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency ?? "GHS", maximumFractionDigits: 0 }).format(numeric);
 }
 
 function formatDate(value: Date | string | null | undefined) {
