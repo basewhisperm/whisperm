@@ -1844,6 +1844,7 @@ export interface PrismaRepositories {
   readonly followUpDigest: FollowUpDigestRepository;
   readonly reports: ReportsRepository;
   readonly marketplaceAcquisition: MarketplaceAcquisitionRepository;
+  readonly sellerInvitations: SellerInvitationRepository;
   readonly marketplaceClaimTokens: MarketplaceClaimTokenRepository;
   readonly ownershipAttestations: MarketplaceOwnershipAttestationRepository;
   readonly scheduledJobs: ScheduledJobRepository;
@@ -1872,6 +1873,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     events: new PrismaEventRepository(prisma),
     billing: new PrismaBillingRepository(auditLogs),
     marketplaceAcquisition: new PrismaMarketplaceAcquisitionRepository(prisma),
+    sellerInvitations: new PrismaSellerInvitationRepository(prisma),
     marketplaceClaimTokens: new PrismaMarketplaceClaimTokenRepository(prisma),
     ownershipAttestations: new PrismaMarketplaceOwnershipAttestationRepository(prisma),
     scheduledJobs: new PrismaScheduledJobRepository(prisma),
