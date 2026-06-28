@@ -263,25 +263,24 @@ export function AcquisitionWorkbench({
     if (selectedBulkRecords.length === 0) return;
     setBulkBusy(true);
     setActionError(null);
-    const failures: string[] = [];
-
     try {
-      for (const record of selectedBulkRecords) {
-        try {
-          await runPrimaryAction(record);
-        } catch (error) {
-          failures.push(`${sellerName(record)}: ${error instanceof Error ? error.message : "Invite failed"}`);
-        }
-      }
-
-      await refreshRecords();
+      const response = await fetch("/api/marketplace-acquisition/captures/bulk-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captureIds: selectedBulkRecords.map((r) => r.capture.id), channel: "WHATSAPP" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      const queued = (payload as { data?: { queued?: number } })?.data?.queued ?? 0;
       setSelectedBulkIds([]);
-
-      if (failures.length > 0) {
-        setActionError(`${failures.length} invite${failures.length === 1 ? "" : "s"} failed. ${failures.slice(0, 3).join(" · ")}`);
+      await refreshRecords();
+      setActionError(null);
+      if (queued > 0) {
+        // Surface success as a brief info message reusing the error slot
+        setActionError(`${queued} invitation${queued === 1 ? "" : "s"} queued for delivery.`);
+        setTimeout(() => setActionError(null), 4_000);
       }
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Bulk invitation refresh failed.");
+      setActionError(error instanceof Error ? error.message : "Bulk invitation failed.");
     } finally {
       setBulkBusy(false);
     }
