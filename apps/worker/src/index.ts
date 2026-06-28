@@ -136,12 +136,20 @@ export interface ClaimLifecycleServicePort {
 
 export interface RenderConversionRetryServicePort { retryRenderConversion(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly conversionId: string }): Promise<{ readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }> | { readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }; }
 
+
+export interface SellerInvitationServicePort {
+  sendInvitation(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly tenantId: string; readonly captureId: string; readonly channel: string },
+  ): Promise<{ readonly invitationId: string; readonly status: string }> | { readonly invitationId: string; readonly status: string };
+}
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
   readonly scoring?: ScoreRecomputationServicePort | undefined;
   readonly notifications?: NotificationServicePort | undefined;
   readonly claimLifecycle?: ClaimLifecycleServicePort | undefined;
   readonly renderConversionRetry?: RenderConversionRetryServicePort | undefined;
+  readonly sellerInvitation?: SellerInvitationServicePort | undefined;
 }
 
 export interface QueueRegistration {
@@ -551,6 +559,48 @@ export const createScoreRecomputationHandler = (services: WorkerServices): Worke
   },
 });
 
+
+const sellerInvitationJobPayloadSchema = z.object({
+  tenantId: z.string().min(1),
+  captureId: z.string().min(1),
+  channel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).default('WHATSAPP'),
+}).strict();
+
+export const createSellerInvitationHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.sellerInvitation === undefined) {
+      throw new WorkerRuntimeError({
+        code: 'WORKER_RUNTIME_VALIDATION_FAILED',
+        message: 'Seller invitation service port is not configured',
+        status: 503,
+        retryable: true,
+        correlation: context.correlation,
+      });
+    }
+    const payload = sellerInvitationJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({
+        code: 'WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION',
+        message: 'Seller invitation job tenantId must match execution context',
+        status: 403,
+        correlation: context.correlation,
+      });
+    }
+    const result = await services.sellerInvitation.sendInvitation(
+      { tenantId: payload.tenantId, correlation: context.correlation },
+      { tenantId: payload.tenantId, captureId: payload.captureId, channel: payload.channel },
+    );
+    return workerRuntimeMetadataSchema.parse({
+      tenantId: payload.tenantId,
+      captureId: payload.captureId,
+      invitationId: result.invitationId,
+      status: result.status,
+      channel: payload.channel,
+      correlationId: context.correlation.correlationId,
+    });
+  },
+});
+
 export const createWorkerDefinitions = (input: {
   readonly tenantId: string;
   readonly services: WorkerServices;
@@ -586,6 +636,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "render.conversion.retry", deadLetterQueueName: "render.conversion.retry.dlq" }),
       jobTypes: ["render.conversion.retry"],
       handler: createRenderConversionRetryHandler(input.services),
+    },
+    {
+      name: "marketplace-invite-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.invite", deadLetterQueueName: "marketplace.invite.dlq" }),
+      jobTypes: ["marketplace.invite.send"],
+      handler: createSellerInvitationHandler(input.services),
     },
     {
       name: "publish-worker",
