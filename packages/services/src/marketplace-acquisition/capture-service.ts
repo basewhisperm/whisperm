@@ -132,6 +132,13 @@ const parsePriceText = (priceText: string | undefined): { readonly price?: strin
     return { price, currency: symbol === "₵" ? currencyGhs : currencyUsd };
   }
 
+  // Handle GH₵ prefix (Ghana cedis with country code)
+  if (normalized.startsWith("GH₵")) {
+    const price = parseAmount(normalized.slice(3));
+    if (price === undefined) return { warning: "PRICE_UNPARSED" };
+    return { price, currency: currencyGhs };
+  }
+
   const [maybeCurrency, ...amountParts] = normalized.split(/\s+/u);
   const upperCurrency = maybeCurrency?.toUpperCase();
 
