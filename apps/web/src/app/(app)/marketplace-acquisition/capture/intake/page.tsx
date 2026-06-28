@@ -178,7 +178,7 @@ export default function MarketplaceCaptureIntakePage({ searchParams }: { readonl
         <p className="mt-2 text-sm leading-6 text-muted-foreground">Review and correct the seller snapshot before creating the acquisition record.</p>
       </section>
 
-      {result.payload ? <CaptureForm payload={result.payload} campaignId={searchParams.campaignId} /> : (
+      {result.payload ? <CaptureForm payload={result.payload} {...(searchParams.campaignId !== undefined ? { campaignId: searchParams.campaignId } : {})} /> : (
         <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <h2 className="text-sm font-semibold text-red-600">Capture payload could not be loaded</h2>
           <p className="mt-2 text-sm text-muted-foreground">{result.error}</p>
