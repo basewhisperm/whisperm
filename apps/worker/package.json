@@ -15,6 +15,9 @@
     "@whisperm/types": "workspace:*",
     "@whisperm/worker-runtime": "workspace:*",
     "zod": "3.25.76",
-    "@whisperm/notification-runtime": "workspace:*"
+    "@whisperm/notification-runtime": "workspace:*",
+    "@whisperm/repositories": "workspace:*",
+    "@whisperm/services": "workspace:*",
+    "@whisperm/provider-adapters": "workspace:*"
   }
 }

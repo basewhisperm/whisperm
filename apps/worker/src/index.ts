@@ -1,4 +1,6 @@
 import { pathToFileURL } from "node:url";
+import { PrismaClient } from "@prisma/client";
+import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
@@ -947,7 +949,15 @@ if (isMainModule()) {
   const logger = createConsoleLogger();
   try {
     const config = createWorkerBootstrapConfigFromEnv();
-    await runWorkerFromEnv(createBootstrapOnlyWorkerDependencies(config));
+    const prisma = new PrismaClient();
+    const sellerInvitation = createSellerInvitationServicePort(prisma as unknown as import("@whisperm/repositories").PrismaPersistenceClient);
+    await runWorkerFromEnv({
+      ...createBootstrapOnlyWorkerDependencies(config),
+      services: {
+        ...createBootstrapOnlyWorkerServices(),
+        sellerInvitation,
+      },
+    });
     await new Promise<void>((resolve) => {
       process.once("SIGINT", () => resolve());
       process.once("SIGTERM", () => resolve());

@@ -133,6 +133,15 @@ importers:
       '@whisperm/notification-runtime':
         specifier: workspace:*
         version: link:../../packages/notification-runtime
+      '@whisperm/provider-adapters':
+        specifier: workspace:*
+        version: link:../../packages/provider-adapters
+      '@whisperm/repositories':
+        specifier: workspace:*
+        version: link:../../packages/repositories
+      '@whisperm/services':
+        specifier: workspace:*
+        version: link:../../packages/services
       '@whisperm/types':
         specifier: workspace:*
         version: link:../../packages/types
