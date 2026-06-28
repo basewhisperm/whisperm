@@ -85,7 +85,11 @@ async function runPrimaryAction(record: SellerAcquisitionRecord): Promise<void> 
   };
   const path = paths[record.nextAction];
   if (!path) throw new Error("This Acquisition Workbench action is not available.");
-  const response = await fetch(path, { method: "POST" });
+  const needsBody = ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction);
+  const response = await fetch(path, {
+    method: "POST",
+    ...(needsBody ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferredChannel: "WHATSAPP" }) } : {}),
+  });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Workbench action failed.");
 }
