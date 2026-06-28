@@ -272,7 +272,7 @@ export default function SellerAcquisitionCampaignsPage() {
               </dl>
 
               <div className="mt-5 flex flex-wrap gap-2">
-                <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={`/marketplace-acquisition/campaigns/${campaign.id}`}>
+                <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={`/marketplace-acquisition/campaigns/${campaign.id}/workbench`}>
                   Open
                 </Link>
                 <button className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" onClick={() => openEdit(campaign)} type="button">
