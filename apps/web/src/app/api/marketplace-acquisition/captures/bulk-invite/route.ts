@@ -7,34 +7,24 @@ import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
 
-// Normalize a phone number to E.164 format.
-// Handles Ghana (+233) numbers by default.
-// Returns undefined if the number cannot be normalized.
 function normalizeToE164(raw: string, defaultCountryCode = "233"): string | undefined {
   const digits = raw.replace(/\D/g, "");
   if (digits.length === 0) return undefined;
-
-  // Already has country code starting with +
   if (raw.trim().startsWith("+")) {
-    if (digits.length >= 7 && digits.length <= 15) return `+${digits}`;
-    return undefined;
+    return digits.length >= 7 && digits.length <= 15 ? `+${digits}` : undefined;
   }
-
-  // Ghana local format: 0XXXXXXXXX (10 digits starting with 0)
   if (digits.startsWith("0") && digits.length === 10) {
     return `+${defaultCountryCode}${digits.slice(1)}`;
   }
-
-  // Already has country code without +
   if (digits.length >= 10 && digits.length <= 15) {
     return `+${digits}`;
   }
-
   return undefined;
 }
 
 export async function POST(request: NextRequest) {
   const tenantContext = await getTenantContextForCurrentUser();
+  if (!tenantContext) return errorResponse("Unauthorized", 401);
 
   const { tenant } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
@@ -48,23 +38,21 @@ export async function POST(request: NextRequest) {
     body = {};
   }
 
-  const { captureIds, channel = "WHATSAPP" } = body as {
-    captureIds?: unknown;
-    channel?: string;
-  };
+  const { captureIds, channel = "WHATSAPP" } = body as { captureIds?: unknown; channel?: string };
 
+  if (!Array.isArray(captureIds) || captureIds.length === 0) {
     return errorResponse("captureIds must be a non-empty array.", 400);
   }
   if (captureIds.length > 100) {
     return errorResponse("Maximum 100 captures per bulk invite.", 400);
   }
+  if (!["WHATSAPP", "SMS", "EMAIL"].includes(channel)) {
     return errorResponse("channel must be WHATSAPP, SMS, or EMAIL.", 400);
   }
 
   const validIds = captureIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
   if (validIds.length === 0) return errorResponse("No valid captureIds provided.", 400);
 
-  // Fetch captures with their linked contacts to validate phone numbers
   const captures = await prisma.marketplaceCapture.findMany({
     where: { tenantId: tenant.id, id: { in: validIds } },
     select: { id: true, contact: { select: { phone: true } } },
@@ -72,7 +60,6 @@ export async function POST(request: NextRequest) {
 
   const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
   const now = Date.now();
-
   const invalid: string[] = [];
   const jobs: {
     tenantId: string;
