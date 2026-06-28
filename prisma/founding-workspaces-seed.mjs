@@ -176,6 +176,13 @@ const seedWorkspace = async (prisma, workspace, options) => {
   const subscription = await ensureSubscription(prisma, tenant, workspace, options);
   logger.log(`[seed] Subscription ensured: ${workspace.name}`);
 
+  await prisma.tenantFeature.upsert({
+    where: { tenantId_featureKey: { tenantId: tenant.id, featureKey: 'SELLER_ACQUISITION' } },
+    create: { tenantId: tenant.id, featureKey: 'SELLER_ACQUISITION', enabled: true },
+    update: { enabled: true },
+  });
+  logger.log(`[seed] Feature SELLER_ACQUISITION ensured: ${workspace.name}`);
+
   return { tenant, owner, pipeline, subscription };
 };
 
