@@ -164,3 +164,16 @@ All contributors and agents must optimize for safety, determinism, tenant isolat
 - Schema parsing validates the configured delegation-concurrency contract; it does not enforce active delegation count at runtime.
 - The coordination/delegation executor is responsible for runtime enforcement of active delegation counts before claiming or starting delegated work.
 - Schema-time assertions are not a substitute for executor-level coordination, persistence locks, idempotency, and tenant-scoped active-count checks.
+
+## WhatsApp Architecture Constraint (v1)
+
+WhispeRM v1 uses a single shared WhatsApp Business Account (WABA) owned by the WhispeRM operator.
+
+- All tenants send invitations through the shared WABA and phone number
+- The invitation template (`seller_invitation_v1`) is fixed and Meta-approved at the platform level
+- Tenants cannot customize the template structure in v1
+- Template variables (seller name, claim URL) are populated per-capture automatically
+
+**v2 design target:** Per-tenant WABA — each tenant connects their own Meta Business Account, phone number, and approved templates via workspace settings. The `SellerInvitationService` will route through tenant-specific credentials stored in `WorkspaceWhatsAppConfig`.
+
+Do not build tenant-level WhatsApp credential storage in v1. Flag any work that assumes per-tenant WABA as a v2 item.
