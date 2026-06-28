@@ -1554,11 +1554,23 @@ export class PrismaDraftInventoryRepository implements DraftInventoryRepository 
     if (input.marketplaceSource !== undefined && input.marketplaceSource !== null && input.marketplaceListingId !== undefined && input.marketplaceListingId !== null) {
       const existingByListing = await this.findByMarketplaceListing(context, input.marketplaceSource, input.marketplaceListingId);
       if (existingByListing !== null) return this.update(context, existingByListing.id, input);
-      return this.create(context, input);
+      try { return await this.create(context, input); } catch (error) {
+        if ((error as { code?: string }).code === 'P2002' || (error instanceof PersistenceError && error.code === 'PERSISTENCE_CONFLICT')) {
+          const existing = await this.findByMarketplaceListing(context, input.marketplaceSource, input.marketplaceListingId);
+          if (existing !== null) return existing;
+        }
+        throw error;
+      }
     }
     const existingByCapture = await this.findByMarketplaceCaptureId(context, input.marketplaceCaptureId);
-    if (existingByCapture !== null) return existingByCapture;
-    return this.create(context, input);
+    if (existingByCapture !== null) return this.update(context, existingByCapture.id, input);
+    try { return await this.create(context, input); } catch (error) {
+      if ((error as { code?: string }).code === 'P2002' || (error instanceof PersistenceError && error.code === 'PERSISTENCE_CONFLICT')) {
+        const existing = await this.findByMarketplaceCaptureId(context, input.marketplaceCaptureId);
+        if (existing !== null) return existing;
+      }
+      throw error;
+    }
   }
 
   async update(context: TenantScoped, draftInventoryId: string, input: UpdateDraftInventoryInput): Promise<DraftInventoryRecord> {
