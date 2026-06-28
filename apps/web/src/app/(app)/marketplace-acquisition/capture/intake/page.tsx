@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { decodeMarketplaceCapturePayload, type MarketplaceCapturePayload } from "@/lib/marketplace-capture/payload";
 
@@ -72,14 +72,34 @@ function CaptureResult({ data }: { readonly data: Record<string, unknown> | unde
   );
 }
 
+interface CampaignOption { readonly id: string; readonly name: string; }
+
 function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCapturePayload; readonly campaignId?: string }) {
   const initial = useMemo(() => Object.fromEntries(editableFields.map((field) => [field, String(payload[field] ?? "")])), [payload]);
   const [fields, setFields] = useState<Record<string, string>>(initial);
   const [state, setState] = useState<SubmitState>({ status: "idle" });
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(campaignId ?? "");
+  const [campaigns, setCampaigns] = useState<readonly CampaignOption[]>([]);
+
+  useEffect(() => {
+    if (campaignId) return; // already set from URL
+    fetch("/api/marketplace-acquisition/campaigns?status=ACTIVE,DRAFT")
+      .then((r) => r.json())
+      .then((payload) => {
+        const list = (payload?.data?.campaigns ?? []) as CampaignOption[];
+        setCampaigns(list);
+        if (list.length === 1) setSelectedCampaignId(list[0].id);
+      })
+      .catch(() => {});
+  }, [campaignId]);
 
   const update = (name: string, value: string) => setFields((current) => ({ ...current, [name]: value }));
 
   const submit = async () => {
+    if (selectedCampaignId.trim().length === 0) {
+      setState({ status: "error", error: "A campaign is required. All captures must belong to a campaign." });
+      return;
+    }
     setState({ status: "submitting" });
     const clean = (value: string) => {
       const trimmed = value.trim();
@@ -90,7 +110,7 @@ function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCap
     const body = {
       ...payload,
       ...cleanedFields,
-      campaignId: campaignId ?? undefined,
+      campaignId: selectedCampaignId.trim().length > 0 ? selectedCampaignId : undefined,
       sellerPhone: clean(fields.phone ?? ""),
       price: clean(fields.priceText ?? ""),
       images: payload.images,
@@ -123,7 +143,21 @@ function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCap
         <div className="mt-3 grid gap-3 md:grid-cols-2">{editableFields.slice(5).map((field) => <Field key={field} name={field} value={fields[field] ?? ""} onChange={update} />)}</div>
       </section>
 
-      <button className="rounded-full bg-whisper px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={state.status === "submitting"} onClick={submit} type="button">
+      {!campaignId && campaigns.length > 0 ? (
+        <label className="block rounded-xl bg-secondary p-3 text-sm" style={{ border: "0.5px solid hsl(var(--border))" }}>
+          <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Assign to campaign <span className="text-red-600">*</span></span>
+          <select
+            className="mt-2 w-full rounded-md bg-background px-3 py-2 text-foreground"
+            value={selectedCampaignId}
+            onChange={(e) => setSelectedCampaignId(e.target.value)}
+          >
+            <option value="" disabled>Select a campaign…</option>
+            {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
+      ) : null}
+
+      <button className="rounded-full bg-whisper px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={state.status === "submitting" || selectedCampaignId.trim().length === 0} onClick={submit} type="button">
         {state.status === "submitting" ? "Saving capture…" : "Submit capture"}
       </button>
 
