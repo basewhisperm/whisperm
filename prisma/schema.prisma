@@ -234,6 +234,8 @@ model Tenant {
   notificationLogs                 NotificationDeliveryLog[]
   sellerAcquisitionCampaigns       SellerAcquisitionCampaign[]
   sellerAcquisitionCampaignMembers SellerAcquisitionCampaignMember[]
+  marketplaceDiscoveryRuns         MarketplaceDiscoveryRun[]
+  discoveredMarketplaceSellers     DiscoveredMarketplaceSeller[]
 }
 
 model TenantFeature {
@@ -1136,7 +1138,9 @@ model SellerAcquisitionCampaign {
   updatedAt       DateTime                        @updatedAt
 
   tenant  Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  members SellerAcquisitionCampaignMember[]
+  members             SellerAcquisitionCampaignMember[]
+  discoveryRuns       MarketplaceDiscoveryRun[]
+  discoveredSellers   DiscoveredMarketplaceSeller[]
 
   @@unique([tenantId, id])
   @@index([tenantId])
@@ -1189,11 +1193,88 @@ model MarketplaceSource {
   tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   captures            MarketplaceCapture[]
   providerConnections ProviderConnection[]
+  discoveryRuns       MarketplaceDiscoveryRun[]
+  discoveredSellers   DiscoveredMarketplaceSeller[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, key])
   @@index([tenantId])
   @@index([tenantId, isActive])
+}
+
+
+model MarketplaceDiscoveryRun {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid
+  campaignId          String   @db.Uuid
+  marketplaceSourceId String   @db.Uuid
+  status              String   @default("PENDING")
+  mode                String   @default("MANUAL_SEED")
+  sellersFound        Int      @default(0)
+  sellersQualified    Int      @default(0)
+  sellersRejected     Int      @default(0)
+  sellersDuplicate    Int      @default(0)
+  startedAt           DateTime?
+  completedAt         DateTime?
+  errorMessage        String?
+  config              Json?
+  metadata            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant            Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaign          SellerAcquisitionCampaign   @relation(fields: [tenantId, campaignId], references: [tenantId, id], onDelete: Cascade)
+  marketplaceSource MarketplaceSource           @relation(fields: [tenantId, marketplaceSourceId], references: [tenantId, id], onDelete: Restrict)
+  discoveredSellers DiscoveredMarketplaceSeller[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId])
+  @@index([tenantId, campaignId])
+  @@index([tenantId, status])
+}
+
+model DiscoveredMarketplaceSeller {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid
+  discoveryRunId      String   @db.Uuid
+  campaignId          String   @db.Uuid
+  marketplaceSourceId String   @db.Uuid
+  sellerIdentityKey   String?
+  status              String   @default("PENDING")
+  qualificationScore  Int      @default(0)
+  qualificationPolicy Json?
+  sellerName          String?
+  phone               String?
+  email               String?
+  sellerProfileUrl    String?
+  listingUrl          String
+  title               String?
+  description         String?
+  price               Decimal? @db.Decimal(18, 4)
+  currency            String?
+  category            String?
+  location            String?
+  images              Json?
+  rawData             Json?
+  duplicateOfId       String?  @db.Uuid
+  promotedCaptureId   String?  @db.Uuid
+  reviewedAt          DateTime?
+  reviewedBy          String?
+  metadata            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant            Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  discoveryRun      MarketplaceDiscoveryRun     @relation(fields: [tenantId, discoveryRunId], references: [tenantId, id], onDelete: Cascade)
+  campaign          SellerAcquisitionCampaign   @relation(fields: [tenantId, campaignId], references: [tenantId, id], onDelete: Cascade)
+  marketplaceSource MarketplaceSource           @relation(fields: [tenantId, marketplaceSourceId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, discoveryRunId, listingUrl])
+  @@index([tenantId])
+  @@index([tenantId, campaignId])
+  @@index([tenantId, campaignId, status])
+  @@index([tenantId, sellerIdentityKey])
 }
 
 model MarketplaceCapture {
