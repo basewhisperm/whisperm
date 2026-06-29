@@ -1890,3 +1890,5 @@ export const prismaTenantWhere = {
 } as const;
 
 export * from "./marketplace-acquisition.js";
+
+export * from "./marketplace-discovery.js";
