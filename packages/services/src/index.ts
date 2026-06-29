@@ -140,6 +140,12 @@ import {
 } from "@whisperm/types";
 import { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
 export { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
+export { MarketplaceDiscoveryService } from './marketplace-acquisition/discovery-service.js';
+export type { DiscoveryServiceContext, DiscoveryServiceDependencies, DiscoveryRunResult, ManualSeedEntry, StartDiscoveryRunInput } from './marketplace-acquisition/discovery-service.js';
+export { SellerQualificationService, DEFAULT_QUALIFICATION_POLICY } from './marketplace-acquisition/qualification-service.js';
+export type { QualificationPolicy, QualificationResult, SellerDataForQualification } from './marketplace-acquisition/qualification-service.js';
+export { SellerDedupeService, computeSellerIdentityKey } from './marketplace-acquisition/dedupe-service.js';
+
 export { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 
 const metadataSchema = z.record(z.string(), z.unknown());

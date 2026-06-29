@@ -6,7 +6,7 @@ import {
   PrismaMarketplaceDiscoveryRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { MarketplaceDiscoveryService } from "@whisperm/services/src/marketplace-acquisition/discovery-service.js";
+import { MarketplaceDiscoveryService } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
