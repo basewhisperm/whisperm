@@ -55,8 +55,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return errorResponse("Discovery is a Pro feature. Upgrade to access automated seller discovery.", 403);
   }
 
-  const creditsRemaining = (discoveryFeature.discoveryCredits ?? DISCOVERY_CREDITS_DEFAULT) -
-    (discoveryFeature.discoveryCreditsUsed ?? 0);
+  const feature = discoveryFeature as unknown as { discoveryCredits?: number; discoveryCreditsUsed?: number; enabled: boolean };
+  const creditsRemaining = (feature.discoveryCredits ?? DISCOVERY_CREDITS_DEFAULT) -
+    (feature.discoveryCreditsUsed ?? 0);
 
   if (creditsRemaining <= 0) {
     return errorResponse("Discovery credits exhausted. Purchase more credits to continue.", 402);
@@ -104,10 +105,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   );
 
   // Deduct credits used
-  await prisma.tenantFeature.update({
-    where: { tenantId_featureKey: { tenantId: tenant.id, featureKey: DISCOVERY_FEATURE } },
-    data: { discoveryCreditsUsed: { increment: result.creditsConsumed } },
-  });
+  await prisma.$executeRaw`UPDATE "TenantFeature" SET "discoveryCreditsUsed" = COALESCE("discoveryCreditsUsed", 0) + ${result.creditsConsumed}, "updatedAt" = NOW() WHERE "tenantId" = ${tenant.id}::uuid AND "featureKey" = ${DISCOVERY_FEATURE}`;
 
   return NextResponse.json({ ok: true, data: result }, { status: 201 });
 }
