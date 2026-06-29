@@ -77,7 +77,8 @@ export class MarketplaceDiscoveryService {
     }
 
     // Create the run record
-    const run = await this.deps.discoveryRepo.createDiscoveryRun(context, {
+    const repoContext = { tenantId: context.tenantId };
+    const run = await this.deps.discoveryRepo.createDiscoveryRun(repoContext, {
       tenantId: context.tenantId,
       campaignId: input.campaignId,
       marketplaceSourceId: input.marketplaceSourceId,
@@ -86,7 +87,7 @@ export class MarketplaceDiscoveryService {
     });
 
     // Mark as running
-    await this.deps.discoveryRepo.updateDiscoveryRun(context, run.id, {
+    await this.deps.discoveryRepo.updateDiscoveryRun(repoContext, run.id, {
       status: "RUNNING",
       startedAt: new Date().toISOString(),
     });
@@ -107,7 +108,7 @@ export class MarketplaceDiscoveryService {
 
         // Skip already-seen listing URLs in this run
         const existingByUrl = await this.deps.discoveryRepo.findDiscoveredSellerByListingUrl(
-          context,
+          repoContext,
           run.id,
           entry.listingUrl,
         );
@@ -125,14 +126,14 @@ export class MarketplaceDiscoveryService {
 
         // Check for duplicates within this campaign
         const dedupResult = await this.dedupeService.checkDuplicate(
-          context,
+          repoContext,
           input.campaignId,
           sellerIdentityKey,
         );
 
         if (dedupResult.isDuplicate) {
           sellersDuplicate++;
-          await this.deps.discoveryRepo.createDiscoveredSeller(context, {
+          await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, {
             tenantId: context.tenantId,
             discoveryRunId: run.id,
             campaignId: input.campaignId,
@@ -194,11 +195,11 @@ export class MarketplaceDiscoveryService {
           rawData: entry as unknown as Readonly<Record<string, unknown>>,
         };
 
-        await this.deps.discoveryRepo.createDiscoveredSeller(context, sellerInput);
+        await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, sellerInput);
       }
 
       // Mark run complete
-      const completedRun = await this.deps.discoveryRepo.updateDiscoveryRun(context, run.id, {
+      const completedRun = await this.deps.discoveryRepo.updateDiscoveryRun(repoContext, run.id, {
         status: "COMPLETED",
         completedAt: new Date().toISOString(),
         sellersFound,
@@ -217,7 +218,7 @@ export class MarketplaceDiscoveryService {
       };
     } catch (error) {
       // Mark run failed
-      await this.deps.discoveryRepo.updateDiscoveryRun(context, run.id, {
+      await this.deps.discoveryRepo.updateDiscoveryRun(repoContext, run.id, {
         status: "FAILED",
         completedAt: new Date().toISOString(),
         errorMessage: error instanceof Error ? error.message : "Unknown error",
