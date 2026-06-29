@@ -167,6 +167,135 @@ function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCap
   );
 }
 
+
+interface GridPageDiscoveryFormProps {
+  readonly payload: import('@/lib/marketplace-capture/payload').MarketplaceCapturePayload;
+  readonly campaignId?: string;
+}
+
+function GridPageDiscoveryForm({ payload, campaignId: initialCampaignId }: GridPageDiscoveryFormProps) {
+  const listings = payload.portfolioListings ?? [];
+  const validListings = listings.filter((l) => l.listingUrl && l.listingUrl.trim().length > 0);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(initialCampaignId ?? '');
+  const [campaigns, setCampaigns] = useState<readonly { id: string; name: string }[]>([]);
+  const [sourceId] = useState<string>('');
+  const [customSourceId, setCustomSourceId] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ queued: number; qualified: number; rejected: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/marketplace-acquisition/campaigns?status=ACTIVE,DRAFT')
+      .then((r) => r.json())
+      .then((p) => {
+        const list = (p?.data?.campaigns ?? []) as { id: string; name: string }[];
+        setCampaigns(list);
+      })
+      .catch(() => {});
+  }, [initialCampaignId]);
+
+  const runDiscovery = async () => {
+    const srcId = customSourceId.trim();
+    if (validListings.length === 0) { setError('No valid listing URLs found on this page.'); return; }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const entries = validListings.map((l) => ({
+        title: l.title,
+        price: l.price,
+        currency: l.currency,
+        category: l.category,
+        location: l.location,
+      }));
+
+      const res = await fetch(`/api/marketplace-acquisition/campaigns/${selectedCampaignId}/discovery/runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          marketplaceSourceId: srcId,
+          marketplaceSourceKey: payload.marketplaceSource ?? 'jiji',
+          mode: 'MANUAL_SEED',
+          entries,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const run = data?.data?.run ?? {};
+      setResult({ queued: run.sellersFound ?? 0, qualified: run.sellersQualified ?? 0, rejected: run.sellersRejected ?? 0 });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className='space-y-5'>
+      <section className='rounded-2xl bg-secondary p-4' style={{ border: '0.5px solid hsl(var(--border))' }}>
+        <p className='text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground'>Category page detected</p>
+        <h2 className='mt-2 text-lg font-semibold text-foreground'>Run bulk discovery</h2>
+        <p className='mt-1 text-sm text-muted-foreground'>
+          {validListings.length} listings found on this page. Feed them into a discovery run to qualify sellers automatically.
+        </p>
+      </section>
+
+      <div className='space-y-3'>
+        <label className='block rounded-xl bg-secondary p-3 text-sm' style={{ border: '0.5px solid hsl(var(--border))' }}>
+          <span className='text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground'>Marketplace Source ID <span className='text-red-600'>*</span></span>
+          <input
+            className='mt-2 w-full rounded-md bg-background px-3 py-2 text-foreground'
+            placeholder='UUID of the marketplace source'
+            value={customSourceId}
+            onChange={(e) => setCustomSourceId(e.target.value)}
+          />
+        </label>
+
+          <label className='block rounded-xl bg-secondary p-3 text-sm' style={{ border: '0.5px solid hsl(var(--border))' }}>
+            <span className='text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground'>Campaign <span className='text-red-600'>*</span></span>
+            <select
+              className='mt-2 w-full rounded-md bg-background px-3 py-2 text-foreground'
+              value={selectedCampaignId}
+              onChange={(e) => setSelectedCampaignId(e.target.value)}
+            >
+              <option value='' disabled>Select a campaign…</option>
+              {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+        ) : null}
+      </div>
+
+      <div className='rounded-xl bg-secondary p-3' style={{ border: '0.5px solid hsl(var(--border))' }}>
+        <p className='text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground'>Listings to discover</p>
+        <div className='mt-2 max-h-40 overflow-y-auto space-y-1'>
+          {validListings.slice(0, 10).map((l, i) => (
+            <p key={i} className='text-xs text-muted-foreground truncate'>{l.title || l.listingUrl}</p>
+          ))}
+          {validListings.length > 10 ? <p className='text-xs text-muted-foreground'>+{validListings.length - 10} more</p> : null}
+        </div>
+      </div>
+
+      {error ? <p className='rounded-xl bg-red-50 p-3 text-sm text-red-700'>{error}</p> : null}
+
+      {result ? (
+        <div className='rounded-2xl bg-secondary p-4 space-y-2' style={{ border: '0.5px solid hsl(var(--border))' }}>
+          <p className='text-sm font-semibold text-foreground'>Discovery run complete</p>
+          <p className='text-sm text-muted-foreground'>{result.queued} sellers found · {result.qualified} qualified · {result.rejected} rejected</p>
+          <p className='text-xs text-muted-foreground'>Go to the campaign Discovery tab to review and promote qualified sellers.</p>
+        </div>
+      ) : (
+        <button
+          className='rounded-full bg-whisper px-5 py-2 text-sm font-semibold text-white disabled:opacity-60'
+          disabled={busy || selectedCampaignId.trim().length === 0 || customSourceId.trim().length === 0}
+          onClick={() => void runDiscovery()}
+          type='button'
+        >
+          {busy ? 'Running discovery…' : `Run discovery on ${validListings.length} listings`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function MarketplaceCaptureIntakePage({ searchParams }: { readonly searchParams: { readonly payload?: string; readonly campaignId?: string } }) {
   const result = decodeMarketplaceCapturePayload(searchParams.payload);
 
@@ -178,7 +307,7 @@ export default function MarketplaceCaptureIntakePage({ searchParams }: { readonl
         <p className="mt-2 text-sm leading-6 text-muted-foreground">Review and correct the seller snapshot before creating the acquisition record.</p>
       </section>
 
-      {result.payload ? <CaptureForm payload={result.payload} {...(searchParams.campaignId !== undefined ? { campaignId: searchParams.campaignId } : {})} /> : (
+      {result.payload ? (result.payload.looksLikeGridPage ? <GridPageDiscoveryForm payload={result.payload} {...(searchParams.campaignId !== undefined ? { campaignId: searchParams.campaignId } : {})} /> : <CaptureForm payload={result.payload} {...(searchParams.campaignId !== undefined ? { campaignId: searchParams.campaignId } : {})} />) : (
         <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <h2 className="text-sm font-semibold text-red-600">Capture payload could not be loaded</h2>
           <p className="mt-2 text-sm text-muted-foreground">{result.error}</p>
