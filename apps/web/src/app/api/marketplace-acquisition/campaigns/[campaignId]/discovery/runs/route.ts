@@ -92,7 +92,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const clampedEntries = entries.slice(0, creditsRemaining);
 
   const service = makeDiscoveryService();
-  const result = await service.runDiscovery(
+  let result;
+  try {
+    result = await service.runDiscovery(
     { tenantId: tenant.id, actorId: tenant.id },
     {
       campaignId,
@@ -103,6 +105,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       discoveryCreditsRemaining: creditsRemaining,
     },
   );
+  } catch (err) {
+    console.error("[discovery/runs] runDiscovery failed:", err);
+    return errorResponse(err instanceof Error ? err.message : "Discovery run failed internally.", 500);
+  }
 
   // Deduct credits used
   await prisma.$executeRaw`UPDATE "TenantFeature" SET "discoveryCreditsUsed" = COALESCE("discoveryCreditsUsed", 0) + ${result.creditsConsumed}, "updatedAt" = NOW() WHERE "tenantId" = ${tenant.id}::uuid AND "featureKey" = ${DISCOVERY_FEATURE}`;
