@@ -1,5 +1,5 @@
--- CreateTable
-CREATE TABLE "MarketplaceDiscoveryRun" (
+-- CreateTable (idempotent)
+CREATE TABLE IF NOT EXISTS "MarketplaceDiscoveryRun" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "tenantId" UUID NOT NULL,
     "campaignId" UUID NOT NULL,
@@ -20,8 +20,7 @@ CREATE TABLE "MarketplaceDiscoveryRun" (
     CONSTRAINT "MarketplaceDiscoveryRun_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "DiscoveredMarketplaceSeller" (
+CREATE TABLE IF NOT EXISTS "DiscoveredMarketplaceSeller" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "tenantId" UUID NOT NULL,
     "discoveryRunId" UUID NOT NULL,
@@ -54,29 +53,48 @@ CREATE TABLE "DiscoveredMarketplaceSeller" (
     CONSTRAINT "DiscoveredMarketplaceSeller_pkey" PRIMARY KEY ("id")
 );
 
--- AlterTable TenantFeature
+-- AlterTable
 ALTER TABLE "TenantFeature" ADD COLUMN IF NOT EXISTS "discoveryCredits" INTEGER DEFAULT 0;
 ALTER TABLE "TenantFeature" ADD COLUMN IF NOT EXISTS "discoveryCreditsUsed" INTEGER DEFAULT 0;
 
--- CreateIndex
-CREATE UNIQUE INDEX "MarketplaceDiscoveryRun_tenantId_id_key" ON "MarketplaceDiscoveryRun"("tenantId", "id");
-CREATE INDEX "MarketplaceDiscoveryRun_tenantId_idx" ON "MarketplaceDiscoveryRun"("tenantId");
-CREATE INDEX "MarketplaceDiscoveryRun_tenantId_campaignId_idx" ON "MarketplaceDiscoveryRun"("tenantId", "campaignId");
-CREATE INDEX "MarketplaceDiscoveryRun_tenantId_status_idx" ON "MarketplaceDiscoveryRun"("tenantId", "status");
+-- CreateIndex (idempotent)
+CREATE UNIQUE INDEX IF NOT EXISTS "MarketplaceDiscoveryRun_tenantId_id_key" ON "MarketplaceDiscoveryRun"("tenantId", "id");
+CREATE INDEX IF NOT EXISTS "MarketplaceDiscoveryRun_tenantId_idx" ON "MarketplaceDiscoveryRun"("tenantId");
+CREATE INDEX IF NOT EXISTS "MarketplaceDiscoveryRun_tenantId_campaignId_idx" ON "MarketplaceDiscoveryRun"("tenantId", "campaignId");
+CREATE INDEX IF NOT EXISTS "MarketplaceDiscoveryRun_tenantId_status_idx" ON "MarketplaceDiscoveryRun"("tenantId", "status");
 
-CREATE UNIQUE INDEX "DiscoveredMarketplaceSeller_tenantId_id_key" ON "DiscoveredMarketplaceSeller"("tenantId", "id");
-CREATE UNIQUE INDEX "DiscoveredMarketplaceSeller_tenantId_discoveryRunId_listingUrl_key" ON "DiscoveredMarketplaceSeller"("tenantId", "discoveryRunId", "listingUrl");
-CREATE INDEX "DiscoveredMarketplaceSeller_tenantId_idx" ON "DiscoveredMarketplaceSeller"("tenantId");
-CREATE INDEX "DiscoveredMarketplaceSeller_tenantId_campaignId_idx" ON "DiscoveredMarketplaceSeller"("tenantId", "campaignId");
-CREATE INDEX "DiscoveredMarketplaceSeller_tenantId_campaignId_status_idx" ON "DiscoveredMarketplaceSeller"("tenantId", "campaignId", "status");
-CREATE INDEX "DiscoveredMarketplaceSeller_tenantId_sellerIdentityKey_idx" ON "DiscoveredMarketplaceSeller"("tenantId", "sellerIdentityKey");
+CREATE UNIQUE INDEX IF NOT EXISTS "DiscoveredMarketplaceSeller_tenantId_id_key" ON "DiscoveredMarketplaceSeller"("tenantId", "id");
+CREATE UNIQUE INDEX IF NOT EXISTS "DiscoveredMarketplaceSeller_tenantId_discoveryRunId_listingUrl_key" ON "DiscoveredMarketplaceSeller"("tenantId", "discoveryRunId", "listingUrl");
+CREATE INDEX IF NOT EXISTS "DiscoveredMarketplaceSeller_tenantId_idx" ON "DiscoveredMarketplaceSeller"("tenantId");
+CREATE INDEX IF NOT EXISTS "DiscoveredMarketplaceSeller_tenantId_campaignId_idx" ON "DiscoveredMarketplaceSeller"("tenantId", "campaignId");
+CREATE INDEX IF NOT EXISTS "DiscoveredMarketplaceSeller_tenantId_campaignId_status_idx" ON "DiscoveredMarketplaceSeller"("tenantId", "campaignId", "status");
+CREATE INDEX IF NOT EXISTS "DiscoveredMarketplaceSeller_tenantId_sellerIdentityKey_idx" ON "DiscoveredMarketplaceSeller"("tenantId", "sellerIdentityKey");
 
--- AddForeignKey
-ALTER TABLE "MarketplaceDiscoveryRun" ADD CONSTRAINT "MarketplaceDiscoveryRun_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "MarketplaceDiscoveryRun" ADD CONSTRAINT "MarketplaceDiscoveryRun_tenantId_campaignId_fkey" FOREIGN KEY ("tenantId", "campaignId") REFERENCES "SellerAcquisitionCampaign"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "MarketplaceDiscoveryRun" ADD CONSTRAINT "MarketplaceDiscoveryRun_tenantId_marketplaceSourceId_fkey" FOREIGN KEY ("tenantId", "marketplaceSourceId") REFERENCES "MarketplaceSource"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
+-- AddForeignKey (idempotent via DO blocks)
+DO $$ BEGIN
+  ALTER TABLE "MarketplaceDiscoveryRun" ADD CONSTRAINT "MarketplaceDiscoveryRun_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-ALTER TABLE "DiscoveredMarketplaceSeller" ADD CONSTRAINT "DiscoveredMarketplaceSeller_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "DiscoveredMarketplaceSeller" ADD CONSTRAINT "DiscoveredMarketplaceSeller_tenantId_discoveryRunId_fkey" FOREIGN KEY ("tenantId", "discoveryRunId") REFERENCES "MarketplaceDiscoveryRun"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "DiscoveredMarketplaceSeller" ADD CONSTRAINT "DiscoveredMarketplaceSeller_tenantId_campaignId_fkey" FOREIGN KEY ("tenantId", "campaignId") REFERENCES "SellerAcquisitionCampaign"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "DiscoveredMarketplaceSeller" ADD CONSTRAINT "DiscoveredMarketplaceSeller_tenantId_marketplaceSourceId_fkey" FOREIGN KEY ("tenantId", "marketplaceSourceId") REFERENCES "MarketplaceSource"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "MarketplaceDiscoveryRun" ADD CONSTRAINT "MarketplaceDiscoveryRun_tenantId_campaignId_fkey" FOREIGN KEY ("tenantId", "campaignId") REFERENCES "SellerAcquisitionCampaign"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "MarketplaceDiscoveryRun" ADD CONSTRAINT "MarketplaceDiscoveryRun_tenantId_marketplaceSourceId_fkey" FOREIGN KEY ("tenantId", "marketplaceSourceId") REFERENCES "MarketplaceSource"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "DiscoveredMarketplaceSeller" ADD CONSTRAINT "DiscoveredMarketplaceSeller_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "DiscoveredMarketplaceSeller" ADD CONSTRAINT "DiscoveredMarketplaceSeller_tenantId_discoveryRunId_fkey" FOREIGN KEY ("tenantId", "discoveryRunId") REFERENCES "MarketplaceDiscoveryRun"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "DiscoveredMarketplaceSeller" ADD CONSTRAINT "DiscoveredMarketplaceSeller_tenantId_campaignId_fkey" FOREIGN KEY ("tenantId", "campaignId") REFERENCES "SellerAcquisitionCampaign"("tenantId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "DiscoveredMarketplaceSeller" ADD CONSTRAINT "DiscoveredMarketplaceSeller_tenantId_marketplaceSourceId_fkey" FOREIGN KEY ("tenantId", "marketplaceSourceId") REFERENCES "MarketplaceSource"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
