@@ -38,14 +38,14 @@ export const DEFAULT_QUALIFICATION_POLICY: QualificationPolicy = {
 // ---------------------------------------------------------------------------
 
 export interface SellerDataForQualification {
-  readonly phone?: string | null;
-  readonly email?: string | null;
-  readonly sellerName?: string | null;
-  readonly sellerProfileUrl?: string | null;
-  readonly images?: readonly string[] | null;
-  readonly price?: string | number | null;
-  readonly location?: string | null;
-  readonly portfolioListingCount?: number;
+  readonly phone?: string | null | undefined;
+  readonly email?: string | null | undefined;
+  readonly sellerName?: string | null | undefined;
+  readonly sellerProfileUrl?: string | null | undefined;
+  readonly images?: readonly string[] | null | undefined;
+  readonly price?: string | number | null | undefined;
+  readonly location?: string | null | undefined;
+  readonly portfolioListingCount?: number | undefined;
 }
 
 export interface QualificationResult {
