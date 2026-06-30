@@ -422,21 +422,21 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
                 <div className="grid grid-cols-3 gap-1 text-center">
                   <div>
                     <p className="text-sm font-semibold text-foreground">{run.sellersFound}</p>
-                    <p className="text-[10px] text-muted-foreground">Found</p>
+                    <p className="text-[11px] text-muted-foreground">Found</p>
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-green-600">{run.sellersQualified}</p>
-                    <p className="text-[10px] text-muted-foreground">Qualified</p>
+                    <p className="text-[11px] text-muted-foreground">Qualified</p>
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-muted-foreground">{run.sellersRejected}</p>
-                    <p className="text-[10px] text-muted-foreground">Rejected</p>
+                    <p className="text-[11px] text-muted-foreground">Rejected</p>
                   </div>
                 </div>
                 {run.errorMessage ? (
                   <p className="text-xs text-red-600 truncate">{run.errorMessage}</p>
                 ) : null}
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-[11px] text-muted-foreground">
                   {new Date(run.createdAt).toLocaleString()}
                 </p>
               </div>
