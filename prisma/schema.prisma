@@ -234,6 +234,7 @@ model Tenant {
   notificationLogs                 NotificationDeliveryLog[]
   sellerAcquisitionCampaigns       SellerAcquisitionCampaign[]
   sellerAcquisitionCampaignMembers SellerAcquisitionCampaignMember[]
+  campaignRuntimeExecutions        CampaignRuntimeExecution[]
   marketplaceDiscoveryRuns         MarketplaceDiscoveryRun[]
   discoveredMarketplaceSellers     DiscoveredMarketplaceSeller[]
 }
@@ -1121,6 +1122,20 @@ enum SellerAcquisitionCampaignMemberStatus {
   REMOVED
 }
 
+enum CampaignRuntimeExecutionStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum CampaignRuntimeExecutionTrigger {
+  MANUAL
+  SCHEDULED
+  SYSTEM
+}
+
 model SellerAcquisitionCampaign {
   id              String                          @id @default(uuid()) @db.Uuid
   tenantId        String                          @db.Uuid
@@ -1141,12 +1156,37 @@ model SellerAcquisitionCampaign {
   members             SellerAcquisitionCampaignMember[]
   discoveryRuns       MarketplaceDiscoveryRun[]
   discoveredSellers   DiscoveredMarketplaceSeller[]
+  runtimeExecutions   CampaignRuntimeExecution[]
 
   @@unique([tenantId, id])
   @@index([tenantId])
   @@index([tenantId, status, createdAt])
   @@index([tenantId, ownerId])
   @@index([tenantId, startsAt])
+}
+
+model CampaignRuntimeExecution {
+  id           String                         @id @default(uuid()) @db.Uuid
+  tenantId     String                         @db.Uuid
+  campaignId   String                         @db.Uuid
+  status       CampaignRuntimeExecutionStatus @default(QUEUED)
+  trigger      CampaignRuntimeExecutionTrigger
+  startedAt    DateTime?
+  completedAt  DateTime?
+  failedAt     DateTime?
+  errorCode    String?
+  errorMessage String?
+  metrics      Json?
+  createdAt    DateTime                       @default(now())
+  updatedAt    DateTime                       @updatedAt
+
+  tenant   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaign SellerAcquisitionCampaign @relation(fields: [tenantId, campaignId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, campaignId])
+  @@index([tenantId, campaignId, status])
+  @@index([tenantId, status, createdAt])
 }
 
 model SellerAcquisitionCampaignMember {
