@@ -16,6 +16,7 @@ const createDatabase = () => ({
   pipelines: [],
   pipelineStages: [],
   subscriptions: [],
+  tenantFeatures: [],
   contacts: [],
 });
 
@@ -88,6 +89,19 @@ const createFoundingSeedClient = (database = createDatabase()) => ({
       return row;
     },
   },
+  tenantFeature: {
+    upsert: async ({ where, create, update }) => {
+      const key = where.tenantId_featureKey;
+      const existing = database.tenantFeatures.find((row) => row.tenantId === key.tenantId && row.featureKey === key.featureKey);
+      if (existing !== undefined) {
+        Object.assign(existing, update, { updatedAt: now });
+        return existing;
+      }
+      const row = { id: nextId("tenant-feature", database.tenantFeatures), createdAt: now, updatedAt: now, ...create };
+      database.tenantFeatures.push(row);
+      return row;
+    },
+  },
   contact: {
     create: async ({ data }) => {
       assert.ok(database.tenants.some((tenant) => tenant.id === data.tenantId), "contact tenant relation must exist");
@@ -131,6 +145,7 @@ test("founding workspace seed re-run creates no duplicates", async () => {
   assert.equal(prisma.database.tenants.length, 4);
   assert.equal(prisma.database.tenantUsers.length, 4);
   assert.equal(prisma.database.subscriptions.length, 4);
+  assert.equal(prisma.database.tenantFeatures.length, 4);
   assert.equal(prisma.database.pipelines.length, 4);
   assert.equal(prisma.database.pipelineStages.length, 20);
 });

@@ -8,8 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --test test/*.test.js test/smoke.test.js"
+    "typecheck": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/worker-runtime build && pnpm --filter @whisperm/notification-runtime build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build && pnpm run build && node --test test/*.test.js test/smoke.test.js"
   },
   "dependencies": {
     "@whisperm/types": "workspace:*",

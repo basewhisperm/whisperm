@@ -104,8 +104,8 @@ test('registers event ingestion, score recomputation, notification, claim lifecy
 
   const registrations = await app.start();
 
-  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'render.conversion.retry', 'publish', 'scheduler']);
-  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'render.conversion.retry', 'publish.dispatch', 'scheduler.tick']);
+  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'render.conversion.retry', 'marketplace.invite', 'publish', 'scheduler']);
+  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'render.conversion.retry', 'marketplace.invite.send', 'publish.dispatch', 'scheduler.tick']);
   assert.equal(app.getReadiness().status, 'HEALTHY');
   assert.equal(queues.isWorkerActive('event-ingestion-worker'), true);
   assert.equal(queues.isWorkerActive('score-recomputation-worker'), true);
