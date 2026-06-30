@@ -250,6 +250,7 @@ function GridPageDiscoveryForm({ payload, campaignId: initialCampaignId }: GridP
           />
         </label>
 
+        {!initialCampaignId && campaigns.length > 0 ? (
           <label className='block rounded-xl bg-secondary p-3 text-sm' style={{ border: '0.5px solid hsl(var(--border))' }}>
             <span className='text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground'>Campaign <span className='text-red-600'>*</span></span>
             <select
