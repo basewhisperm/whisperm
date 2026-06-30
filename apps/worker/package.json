@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build && tsc -p tsconfig.json --noEmit",
     "test": "pnpm run build && node --test test/*.test.js test/smoke.test.js"
   },
   "dependencies": {
