@@ -24,8 +24,12 @@ const activeStatuses = new Set(["QUEUED", "RUNNING"]);
 
 const sanitizeErrorMessage = (error: unknown): string => {
   const message = error instanceof Error ? error.message : "Campaign runtime worker failed";
-  return message.replace(/(token|secret|password|authorization|api[_-]?key)=[^\s&]+/giu, "$1=[REDACTED]").slice(0, 500);
-};
+  return message
+  .replace(
+    /(token|secret|password|authorization|api[_-]?key)=[^\s&]+/giu,
+    (_match, key) => `${key}=[REDACTED]`,
+  )
+  .slice(0, 500);};
 
 const errorCode = (error: unknown): string => {
   if (typeof error === "object" && error !== null && "code" in error) {
