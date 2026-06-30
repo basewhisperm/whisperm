@@ -1,242 +1,338 @@
-# Campaign Implementation Discovery Report
+CONSTITUTIONAL SLICE 001 — CAMPAIGN IMPLEMENTATION DISCOVERY RECONCILIATION
 
-This document records current implementation state.
-It is descriptive, not normative.
-Where implementation differs from the Constitution or Architecture, the Constitution and Architecture remain authoritative.
+Objective:
+Reconcile the existing Campaign implementation with the WhispeRM Constitution and architecture documents by producing a descriptive implementation discovery report.
 
-## Constitutional references
+This PR must document current reality. It must not introduce new production behavior unless explicitly authorized after discovery.
 
-Authoritative architecture remains in:
+Architecture references:
+- docs/architecture/00_AUTONOMOUS_ACQUISITION_PLATFORM.md
+- docs/architecture/business-growth-opportunity-engine.md
+- docs/architecture/canonical-domain-model.md
+- docs/architecture/campaign-aggregate.md, if present
+- docs/architecture/campaign-runtime.md, if present
+- existing campaign implementation in apps, packages, and prisma
 
-- `docs/architecture/00_AUTONOMOUS_ACQUISITION_PLATFORM.md`
-- `docs/architecture/business-growth-opportunity-engine.md`
-- `docs/architecture/canonical-domain-model.md`
-
-Constitutional alignment used for this discovery:
-
+Constitutional principles:
 - Campaign is the primary business object.
 - Business Growth Opportunity is the primary economic object.
-- Campaign owns strategy; workers execute strategy.
-- The existing `@whisperm/campaign-runtime` package is the reusable campaign runtime seam. Do not create another campaign runtime package.
+- Campaign owns strategy.
+- Workers execute strategy.
+- Growth Opportunity. Every Day.
 
-## Phase 1: PR #298 triage
+Important:
+This slice is descriptive, not normative.
 
-Requested PR title: `docs: sync campaign architecture after grid discovery intake`.
+The Constitution and Architecture are authoritative.
+The implementation discovery report records what exists today.
+Where implementation differs from architecture, document the gap.
+Do not redefine architecture from implementation.
 
-Triage result in this workspace:
+------------------------------------------------------------
+PHASE 1 — PR TRIAGE
+------------------------------------------------------------
 
-- The GitHub CLI is not installed in the container (`gh: command not found`).
-- The local checkout does not expose a configured remote through `git remote -v`.
-- `docs/CAMPAIGN_ARCHITECTURE.md` is not present in this checkout.
-- No PR #298 branch or diff is available locally to inspect or close from this environment.
+Inspect the current PR #299.
 
-Operational conclusion:
+Determine changed files.
 
-- No production-code changes from PR #298 are visible in this checkout.
-- No duplicate normative campaign architecture document is present in this checkout.
-- This file is the descriptive implementation discovery report that should supersede any standalone `docs/CAMPAIGN_ARCHITECTURE.md` content if PR #298 only introduced that document.
-- If PR #298 contains production code outside this checkout, those changes still require separate build/test triage before merge.
+If PR #299 only changes documentation:
+- Continue.
+- Ensure the document is placed at:
 
-## Phase 2: existing implementation discovery
+  docs/discovery/campaign-implementation-discovery.md
 
-### 1. Existing Campaign model/table
+If the PR currently modifies production code:
+- Stop.
+- List every production file changed.
+- Explain why each production change was included.
+- Do not add more production code in this slice.
 
-There are two campaign-related persistence concepts in the repository:
+If the PR creates or modifies docs/CAMPAIGN_ARCHITECTURE.md:
+- Do not treat that file as authoritative architecture.
+- Move/convert the content into:
 
-1. `SellerAcquisitionCampaign` is the existing marketplace acquisition campaign table. It is tenant-scoped and stores name, description, status, owner, goal fields, date bounds, metadata, members, discovery runs, and discovered sellers.
-2. The older/generic CRM/content `Campaign` repository interface and Prisma repository also exists in `packages/repositories/src/index.ts`, but it is not the marketplace acquisition campaign implementation inspected for this slice.
+  docs/discovery/campaign-implementation-discovery.md
 
-Current marketplace acquisition status enum values in Prisma are `DRAFT`, `ACTIVE`, `PAUSED`, and `ARCHIVED`. This is narrower than the runtime lifecycle states in `@whisperm/campaign-runtime`.
+- The authoritative architecture remains under:
 
-Tenant isolation observations:
+  docs/architecture/
 
-- `SellerAcquisitionCampaign` has tenant-scoped unique/index definitions.
-- Members, discovery runs, and discovered sellers relate back through `(tenantId, id)` compound relations.
-- This is compatible with the constitutional rule that every acquisition workflow belongs to a Campaign, but the schema does not yet model Business Growth Opportunity as a first-class economic object.
+------------------------------------------------------------
+PHASE 2 — REQUIRED DOCUMENT HEADER
+------------------------------------------------------------
 
-### 2. Existing Campaign service
+The discovery report must begin with:
 
-`SellerAcquisitionCampaignService` is a thin application service around `SellerAcquisitionCampaignRepository`.
+# Campaign Implementation Discovery
 
-Capabilities discovered:
+Status: Descriptive Implementation Discovery Report
 
-- List campaigns.
-- Create campaigns with `tenantId` copied from context.
-- Find by campaign ID within tenant context.
-- Update campaigns.
-- Archive campaigns by setting `status: "ARCHIVED"`.
-- Add/remove sellers.
-- List campaign members.
+This document records the current implementation state of Campaign-related seller acquisition and discovery flows.
 
-Gap:
+It is descriptive, not normative.
 
-- The service does not yet translate a seller acquisition campaign into a `CampaignExecutionContract` from `@whisperm/campaign-runtime`.
-- The service does not yet expose an execution command such as `executeCampaign`, `dispatchCampaign`, or `startRuntimeExecution`.
+Where implementation differs from the WhispeRM Constitution or architecture documents, the Constitution and architecture remain authoritative.
 
-### 3. Existing Campaign repository
+This document exists to help future Constitutional Slices reconcile implementation toward the architecture without duplicating existing Campaign, discovery, runtime, or UI concepts.
 
-The existing marketplace acquisition campaign repository is `PrismaSellerAcquisitionCampaignRepository` in `packages/repositories/src/index.ts`.
+------------------------------------------------------------
+PHASE 3 — IMPLEMENTATION SCAN
+------------------------------------------------------------
 
-Capabilities discovered:
+Before editing the report, inspect:
 
-- Tenant-scoped create/list/find/update for seller acquisition campaigns.
-- Tenant-scoped campaign member add/remove/list operations.
-- Pagination through shared page request helpers.
-- Tenant assertions on create/member input paths.
+- apps/web/src/app/(app)/marketplace-acquisition/campaigns
+- apps/web/src/components/marketplace-acquisition
+- apps/web/src/app/api/marketplace-acquisition/campaigns
+- apps/web/src/app/api/marketplace-acquisition/campaigns/[campaignId]/discovery
+- packages/services/src/seller-acquisition-campaigns.ts
+- packages/services/src/marketplace-acquisition/discovery-service.ts
+- packages/services/src/marketplace-acquisition/qualification-service.ts
+- packages/repositories/src/marketplace-discovery.ts
+- packages/repositories/src/marketplace-acquisition.ts
+- packages/campaign-runtime/src/index.ts, if present
+- prisma/schema.prisma
 
-Gap:
+Run searches:
 
-- No persistence contract for campaign runtime execution records is present in the marketplace acquisition campaign repository.
-- There is no repository adapter that claims runtime idempotency for a campaign execution before dispatch.
-- Runtime idempotency may need to use an existing generic idempotency/event repository rather than adding a new campaign table.
+grep -R "Campaign\|campaignId\|MarketplaceAcquisitionCampaign\|SellerAcquisitionCampaign" -n \
+  apps packages prisma \
+  --exclude-dir=node_modules \
+  --exclude-dir=dist \
+  --exclude-dir=.next
 
-### 4. Existing Campaign UI routes
+grep -R "discovery/runs\|MarketplaceDiscoveryRun\|DiscoveredMarketplaceSeller\|MANUAL_SEED\|sellersFound\|sellersQualified\|sellersRejected" -n \
+  apps packages prisma \
+  --exclude-dir=node_modules \
+  --exclude-dir=dist \
+  --exclude-dir=.next
 
-Existing marketplace acquisition campaign UI routes:
+grep -R "campaign-runtime\|CampaignRuntime\|Execution\|Worker\|dispatcher\|schedule" -n \
+  apps packages prisma \
+  --exclude-dir=node_modules \
+  --exclude-dir=dist \
+  --exclude-dir=.next
 
-- `apps/web/src/app/(app)/marketplace-acquisition/campaigns/page.tsx` lists, filters, creates, edits, archives, and links campaigns to the workbench.
-- `apps/web/src/app/(app)/marketplace-acquisition/campaigns/[campaignId]/layout.tsx` provides campaign tabs for Workbench and Discovery.
-- `apps/web/src/app/(app)/marketplace-acquisition/campaigns/[campaignId]/workbench/page.tsx` renders the existing acquisition workbench in campaign-scoped mode.
-- `apps/web/src/app/(app)/marketplace-acquisition/campaigns/[campaignId]/discovery/page.tsx` provides campaign-scoped discovery run and seller review UI.
+------------------------------------------------------------
+PHASE 4 — REQUIRED REPORT STRUCTURE
+------------------------------------------------------------
 
-Gap:
+Update/create:
 
-- No new UI should be created for this slice.
-- There is no runtime execution button/view in the UI, and this slice should not add duplicate campaign UI.
+docs/discovery/campaign-implementation-discovery.md
 
-### 5. Existing Campaign API routes
+Use this structure:
 
-Existing marketplace acquisition campaign API routes:
+# Campaign Implementation Discovery
 
-- `GET/POST /api/marketplace-acquisition/campaigns`
-- `GET/PATCH/DELETE /api/marketplace-acquisition/campaigns/[campaignId]`
-- `GET/POST /api/marketplace-acquisition/campaigns/[campaignId]/members`
-- `DELETE /api/marketplace-acquisition/campaigns/[campaignId]/members/[memberId]`
-- `GET/POST /api/marketplace-acquisition/campaigns/[campaignId]/discovery/runs`
-- `GET /api/marketplace-acquisition/campaigns/[campaignId]/discovery/sellers`
-- `POST /api/marketplace-acquisition/campaigns/[campaignId]/discovery/sellers/[sellerId]/promote`
-- `POST /api/marketplace-acquisition/campaigns/[campaignId]/discovery/sellers/[sellerId]/reject`
+## 1. Purpose
 
-Gap:
+Explain that this report records current implementation reality and exists to support future reconciliation.
 
-- There is no `POST /api/marketplace-acquisition/campaigns/[campaignId]/runtime/executions` endpoint in this checkout.
-- Add that endpoint only when a runtime adapter exists and a caller is ready to dispatch safely through `@whisperm/campaign-runtime`.
+## 2. Constitutional Alignment
 
-### 6. Existing discovery run model
+Reference:
+- Campaign is the primary business object.
+- Business Growth Opportunity is the primary economic object.
+- Campaign owns strategy.
+- Workers execute strategy.
+- Growth Opportunity. Every Day.
 
-Existing discovery persistence:
+## 3. Current Implementation Inventory
 
-- `MarketplaceDiscoveryRun` stores tenant, campaign, marketplace source, status, mode, counts, timestamps, error, config, metadata.
-- `DiscoveredMarketplaceSeller` stores tenant, discovery run, campaign, marketplace source, identity key, status, qualification score/policy, seller/listing details, duplicate/promoted references, reviewer metadata, raw data, and timestamps.
+Create these subsections:
 
-Existing discovery service:
+### Campaign Model / Table
+Document the actual Prisma model/table and fields.
 
-- `MarketplaceDiscoveryService` creates discovery runs, records discovered sellers from manual seed input, applies qualification, records duplicates, completes/fails runs, and summarizes counts.
-- Discovery service depends on `MarketplaceDiscoveryRepository` and `SellerQualificationService`.
+### Campaign Service
+Document existing service files and responsibilities.
 
-Existing qualification service:
+### Campaign Repository
+Document existing repository files and responsibilities.
 
-- `SellerQualificationService` evaluates seller/listing fields against a policy and returns a deterministic status, score, reasons, and matched policy.
+### Campaign UI
+Document existing pages/components:
+- campaigns list
+- campaign card
+- open/edit/archive
+- campaign workbench
+- discovery tab if present
 
-Gap:
+### Campaign API Routes
+Document existing routes and methods.
 
-- Discovery output is a discovered/promoted seller/capture, not yet a canonical Business Growth Opportunity.
-- There is no explicit Potential Opportunity or Business Growth Opportunity table/model.
-- Promotion currently feeds captures/campaign members rather than an opportunity lifecycle.
+### Discovery Runs
+Document existing campaign-scoped discovery run behavior.
 
-### 7. Existing campaign-runtime package capabilities
+### Discovered Sellers
+Document existing discovered seller behavior.
 
-`packages/campaign-runtime/src/index.ts` is the existing runtime package and must be reused/adapted.
+### Grid Page Bulk Discovery Intake
+Document:
+- looksLikeGridPage
+- GridPageDiscoveryForm
+- portfolioListings
+- MANUAL_SEED
+- POST /api/marketplace-acquisition/campaigns/:campaignId/discovery/runs
+- sellersFound / sellersQualified / sellersRejected
 
-Reusable capabilities:
+### Existing campaign-runtime Package
+If packages/campaign-runtime exists, document:
+- purpose
+- exported types/functions
+- lifecycle concepts
+- execution concepts
+- reusable seams
+- mismatch with WhispeRM constitutional Campaign model
 
-- Lifecycle contracts: `CampaignLifecycleSnapshot`, lifecycle state enum, transition guard, terminal-state helper.
-- Execution contracts: `CampaignExecutionContract`, `createCampaignExecutionContract`, replay-safe execution contract, targeting, journey, sequence, channel, content, asset, quota, budget, approval, billing, schedule, telemetry, observability, audit, attribution, analytics, enrollment, pause/resume/archive/cancel contracts.
-- Dispatch seam: `dispatchCampaignExecution(execution, ports)` with injectable ports for idempotency, scheduler, approval, billing, telemetry, observability, and enqueue.
-- Idempotency: `buildCampaignIdempotencyKey`, replay-safe contract, idempotency `claim`/`complete` port.
-- Retry policy: `CampaignRetryPolicy` and `calculateCampaignRetryDelayMs`.
-- Tenant isolation: tenant context schema and `assertCampaignTenantIsolation` before dispatch.
-- Scheduling contracts: `CampaignScheduleIntegrationContract` and scheduler port.
-- Telemetry/audit contracts: telemetry and observability/audit integration contracts emitted during dispatch.
+If it does not exist, state that clearly.
 
-Mapping to constitutional WhispeRM model:
+## 4. Current Runtime Flow
 
-- Existing Seller Acquisition Campaign = current implementation of the constitutional Campaign for marketplace acquisition.
-- Campaign strategy currently lives mostly in fields like status/goals/date bounds/metadata and in discovery configuration, not in a normalized strategy model.
-- Existing discovery runs/discovered sellers are worker outputs toward Potential Opportunities.
-- Existing captures/campaign members are the current operational bridge toward acquisition workflows.
-- Business Growth Opportunity is not yet explicitly implemented; promoted/qualified sellers are the closest current approximation.
-- The runtime package is generic outbound-campaign infrastructure, but its lifecycle, execution, dispatch, idempotency, retry, tenant, scheduling, telemetry, and audit seams are directly reusable for WhispeRM campaign execution.
+Document current actual flow:
 
-### 8. Gaps against Canonical Domain Model
+Campaign
+→ grid/category page detected
+→ portfolio listings extracted
+→ GridPageDiscoveryForm
+→ campaign discovery run
+→ seeded seller qualification
+→ campaign workbench review
 
-Primary gaps:
+Also document the single-listing capture path and whether campaign ownership is verified.
 
-1. Campaign strategy is not fully explicit. Current seller acquisition campaigns have metadata and goal fields, but no strongly typed marketplace strategy, qualification policy, acquisition policy, automation policy, scheduling, or success metric contract at the service/API boundary.
-2. Campaign lifecycle mismatch. Current persistence status is `DRAFT | ACTIVE | PAUSED | ARCHIVED`; runtime lifecycle includes validation, approval, scheduled/running/completed/failed/cancelled states.
-3. Business Growth Opportunity is not first-class. Current implementation has discovered sellers, captures, members, deals, invitations, claims, and conversions, but no canonical Business Growth Opportunity object/lifecycle.
-4. Runtime execution is not wired. `@whisperm/campaign-runtime` exists, but seller acquisition campaigns do not yet adapt into `CampaignExecutionContract` or dispatch via runtime ports.
-5. Discovery is campaign-scoped and tenant-safe, but discovery run output is descriptive implementation data rather than canonical Potential Opportunity/Business Growth Opportunity data.
-6. No runtime API endpoint exists for campaign executions.
-7. No executor-level active delegation/concurrency enforcement for campaign runtime execution is visible in marketplace acquisition code; schema-time/runtime-contract validation must not be treated as sufficient executor coordination.
-8. Audit/telemetry contracts exist in runtime, but marketplace acquisition campaign execution does not yet emit through them because execution is not wired.
+## 5. Current vs Constitutional Target
 
-Non-gaps / constraints to preserve:
+Create this table:
 
-- Do not create a second Campaign model.
-- Do not create another campaign runtime package.
-- Do not create a second discovery service.
-- Do not create duplicate campaign UI.
-- Do not add v1 tenant-level WhatsApp credential storage; per-tenant WABA remains a v2 design target.
+| Area | Current Implementation | Constitutional Target | Status | Reconciliation Need |
+|---|---|---|---|---|
 
-### 9. Smallest safe reconciliation plan
+Include at minimum:
 
-Recommended smallest non-breaking sequence:
+- Campaign
+- Campaign lifecycle
+- Discovery runs
+- Grid intake
+- Marketplace source selection
+- Runtime execution
+- Worker dispatcher
+- Business Growth Opportunity
+- Potential Opportunity
+- Seller Intelligence
+- Learning Event
+- Revenue Event
+- CRM conversion
+- Billing/credits
+
+Use status:
+- Aligned
+- Partial
+- Missing
+- Drift Risk
 
-1. Keep this file as the descriptive implementation discovery report and avoid treating any `docs/CAMPAIGN_ARCHITECTURE.md` as normative architecture.
-2. Add a narrow adapter in `packages/services` that maps an existing `SellerAcquisitionCampaignRecord` plus tenant/correlation context into `CampaignExecutionContract` from `@whisperm/campaign-runtime`.
-3. Map current campaign statuses conservatively:
-   - `DRAFT` -> runtime `DRAFT`
-   - `ACTIVE` -> runtime `RUNNING` only at dispatch time
-   - `PAUSED` -> runtime `PAUSED`
-   - `ARCHIVED` -> runtime `ARCHIVED`
-4. Keep strategy sourcing minimal and explicit: read only already-existing typed fields and metadata keys; do not invent new business strategy semantics.
-5. Use runtime ports instead of direct side effects:
-   - idempotency port backed by existing generic idempotency/event persistence if available
-   - enqueue port for workers when a worker executor is ready
-   - telemetry/audit ports for structured records
-6. Add unit tests for tenant isolation and idempotent dispatch using mocked ports before exposing an API route.
-7. Add `POST /api/marketplace-acquisition/campaigns/[campaignId]/runtime/executions` only after the adapter and tests exist. The endpoint must resolve tenant/auth using the existing route helpers, load the tenant-scoped campaign, validate input with Zod, create a runtime execution contract, and dispatch through runtime ports.
-8. Do not introduce Business Growth Opportunity persistence in this slice. Document that as a follow-up canonical-domain migration requiring explicit data model design and rollout plan.
+## 6. Do Not Rebuild Principle
 
-## Phase 3: key audit rule
+Include:
 
-The existing `@whisperm/campaign-runtime` package is reusable and should be adapted. A duplicate campaign runtime package would violate this slice.
+Existing Campaign functionality must be reconciled and extended.
 
-Runtime adapter target shape:
+Do not introduce parallel Campaign models, duplicate Campaign APIs, duplicate runtime packages, duplicate discovery services, or replacement UI unless an explicit architecture decision requires it.
 
-- Input: tenant context, campaign ID, correlation metadata, execution ID/idempotency key, and optional dispatch mode.
-- Load: existing `SellerAcquisitionCampaign` by tenant and ID.
-- Validate: fail closed if tenant mismatch, campaign missing, archived, or paused when execution requires active state.
-- Convert: construct `CampaignLifecycleSnapshot`, `CampaignTargetingContract`, optional schedule/quota/budget metadata, and `CampaignExecutionContract`.
-- Dispatch: call `dispatchCampaignExecution` with tenant-safe ports.
-- Persist/observe: use idempotency, telemetry, audit, and queue ports rather than direct worker side effects.
+Prefer evolutionary reconciliation over replacement.
 
-## Phase 4: minimal implementation scope applied in this slice
+## 7. Safe Extension Points
 
-This slice intentionally implements documentation reconciliation only.
+List files that are safe to extend in future implementation slices.
 
-Rationale:
+## 8. Drift Risks
 
-- PR #298 contents are not accessible in this environment.
-- No `docs/CAMPAIGN_ARCHITECTURE.md` exists locally to rename.
-- Existing production campaign/discovery/runtime code already exists but is not wired for execution.
-- Adding a runtime adapter and API endpoint would be production behavior change and requires tests plus design of idempotency/queue ports; that is the next safe implementation slice.
+List:
+- raw marketplaceSourceId input
+- global/non-campaign acquisition flows
+- discovery counters used as billing truth
+- direct CRM creation before acquisition qualification
+- duplicate runtime concepts
+- campaign-runtime package mismatch if applicable
 
-## Phase 5: acceptance notes
+## 9. Constitutional Reconciliation Roadmap
 
-- No duplicate architecture source of truth is introduced by this file.
-- This report is descriptive and defers normative meaning to the constitutional architecture docs.
-- Existing `@whisperm/campaign-runtime` package has been audited as reusable.
-- Campaign runtime reconciliation is documented as an adapter-first plan.
-- No production code is changed in this slice.
+Replace old “Recommended Future Slice Order” with:
+
+1. Campaign Runtime Foundation
+2. Runtime Worker Dispatcher
+3. Marketplace Intelligence Worker
+4. Seller Intelligence Worker
+5. Business Growth Opportunity Pipeline
+6. Autonomous Acquisition Worker
+7. Learning Engine
+8. Revenue Attribution
+9. Daily Growth Opportunity Dashboard
+
+## 10. Acceptance Summary
+
+End with:
+- What exists today.
+- What is missing.
+- What must not be rebuilt.
+- What the next implementation slice should be.
+
+------------------------------------------------------------
+PHASE 5 — STRICT SCOPE
+------------------------------------------------------------
+
+Allowed:
+- Create or update docs/discovery/campaign-implementation-discovery.md
+- Move old docs/CAMPAIGN_ARCHITECTURE.md content into docs/discovery if needed
+- Add links to architecture documents
+- Clarify current vs target state
+
+Not allowed:
+- No Prisma changes
+- No API behavior changes
+- No React UI changes
+- No service changes
+- No repository changes
+- No package exports
+- No runtime implementation
+- No discovery worker implementation
+- No WhatsApp
+- No CRM conversion
+- No billing changes
+
+If code changes already exist in PR #299:
+- Isolate them.
+- Report them.
+- Do not expand them.
+
+------------------------------------------------------------
+PHASE 6 — ACCEPTANCE CRITERIA
+------------------------------------------------------------
+
+PR #299 is acceptable when:
+
+- The report lives at docs/discovery/campaign-implementation-discovery.md
+- It is clearly marked descriptive, not normative
+- It references the Constitution and architecture documents
+- It documents current Campaign implementation accurately
+- It documents existing discovery/grid intake behavior
+- It documents existing campaign-runtime package if present
+- It includes Current vs Constitutional Target table
+- It includes Do Not Rebuild principle
+- It includes Constitutional Reconciliation Roadmap
+- It does not introduce duplicate architecture source of truth
+- It does not introduce production code changes unless separately justified
+
+Verification:
+
+git diff --stat
+
+Expected:
+- docs/discovery/campaign-implementation-discovery.md added or modified
+- optionally old docs/CAMPAIGN_ARCHITECTURE.md removed/renamed
+- no production files changed
+
+Commit message:
+docs: reconcile campaign implementation discovery with constitution
