@@ -179,6 +179,17 @@ enum DraftInventoryStatus {
   EXPIRED
 }
 
+enum BusinessGrowthOpportunityStatus {
+  IDENTIFIED
+  QUALIFIED
+  NEEDS_REVIEW
+  REJECTED
+  INVITED
+  CLAIMED
+  CONVERTED
+  ARCHIVED
+}
+
 model Tenant {
   id                 String   @id @default(uuid()) @db.Uuid
   slug               String   @unique
@@ -237,6 +248,7 @@ model Tenant {
   campaignRuntimeExecutions        CampaignRuntimeExecution[]
   marketplaceDiscoveryRuns         MarketplaceDiscoveryRun[]
   discoveredMarketplaceSellers     DiscoveredMarketplaceSeller[]
+  businessGrowthOpportunities       BusinessGrowthOpportunity[]
 }
 
 model TenantFeature {
@@ -1315,6 +1327,39 @@ model DiscoveredMarketplaceSeller {
   @@index([tenantId, campaignId])
   @@index([tenantId, campaignId, status])
   @@index([tenantId, sellerIdentityKey])
+}
+
+
+model BusinessGrowthOpportunity {
+  id                   String                          @id @default(uuid()) @db.Uuid
+  tenantId             String                          @db.Uuid
+  marketplaceCaptureId String?                         @db.Uuid
+  discoveredSellerId   String?                         @db.Uuid
+  campaignId           String?                         @db.Uuid
+  contactId            String?                         @db.Uuid
+  dealId               String?                         @db.Uuid
+  draftInventoryId     String?                         @db.Uuid
+  status               BusinessGrowthOpportunityStatus @default(IDENTIFIED)
+  qualificationStatus  String?
+  qualificationScore   Decimal?                        @db.Decimal(5, 4)
+  qualificationReasons Json?
+  sourceType           String?
+  sourceUrl            String?
+  sourceKey            String?
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, marketplaceCaptureId])
+  @@unique([tenantId, discoveredSellerId])
+  @@index([tenantId])
+  @@index([tenantId, campaignId])
+  @@index([tenantId, marketplaceCaptureId])
+  @@index([tenantId, discoveredSellerId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, dealId])
 }
 
 model MarketplaceCapture {

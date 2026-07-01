@@ -5,6 +5,7 @@ import type {
   DiscoveredSellerRecord,
   CreateDiscoveredSellerInput,
 } from "@whisperm/repositories";
+import type { BusinessGrowthOpportunityService } from "../business-growth-opportunity.js";
 import { SellerQualificationService, type QualificationPolicy } from "./qualification-service.js";
 import { SellerDedupeService, computeSellerIdentityKey } from "./dedupe-service.js";
 
@@ -54,6 +55,7 @@ export interface DiscoveryRunResult {
 
 export interface DiscoveryServiceDependencies {
   readonly discoveryRepo: MarketplaceDiscoveryRepository;
+  readonly businessGrowthOpportunities?: BusinessGrowthOpportunityService | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +229,11 @@ export class MarketplaceDiscoveryService {
           metadata: { reasons: qualification.reasons, confidence: qualification.confidence },
         };
 
-        await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, sellerInput);
+        const seller = await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, sellerInput);
+        const opportunity = await this.deps.businessGrowthOpportunities?.createFromDiscoveredSeller(repoContext, seller);
+        if (opportunity !== undefined) {
+          await this.deps.businessGrowthOpportunities?.attachQualificationOutput(repoContext, opportunity.id, qualification);
+        }
       }
 
       // Mark run complete
@@ -295,12 +301,14 @@ export class MarketplaceDiscoveryService {
     sellerId: string,
     captureId: string,
   ): Promise<DiscoveredSellerRecord> {
-    return this.deps.discoveryRepo.updateDiscoveredSellerStatus(
+    const seller = await this.deps.discoveryRepo.updateDiscoveredSellerStatus(
       context,
       sellerId,
       "PROMOTED",
       { promotedCaptureId: captureId, reviewedBy: context.actorId },
     );
+    await this.deps.businessGrowthOpportunities?.createFromDiscoveredSeller({ tenantId: context.tenantId }, seller);
+    return seller;
   }
 
   async rejectSeller(
