@@ -24,13 +24,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (featureDenied) return featureDenied;
 
   const campaignId = decodeURIComponent(context.params.campaignId);
-  const statusParam = request.nextUrl.searchParams.get("status") as DiscoveredSellerRecord["status"] | null;
+  const rawStatus = request.nextUrl.searchParams.get("status");
+  const allowedStatuses: readonly DiscoveredSellerRecord["status"][] = ["NEW", "QUALIFYING", "PENDING", "QUALIFIED", "NEEDS_REVIEW", "REJECTED", "DUPLICATE", "PROMOTED"];
+  const statusParam = rawStatus !== null && allowedStatuses.includes(rawStatus as DiscoveredSellerRecord["status"])
+    ? rawStatus as DiscoveredSellerRecord["status"]
+    : undefined;
 
   const repo = new PrismaMarketplaceDiscoveryRepository(prisma as unknown as PrismaPersistenceClient);
   const sellers = await repo.listDiscoveredSellersByCampaign(
     { tenantId: tenant.id },
     campaignId,
-    statusParam ?? undefined,
+    statusParam,
   );
 
   return NextResponse.json({ ok: true, data: { sellers, total: sellers.length } });

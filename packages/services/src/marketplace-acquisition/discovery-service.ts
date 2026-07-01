@@ -47,6 +47,7 @@ export interface DiscoveryRunResult {
   readonly sellersFound: number;
   readonly sellersQualified: number;
   readonly sellersRejected: number;
+  readonly sellersNeedsReview: number;
   readonly sellersDuplicate: number;
   readonly creditsConsumed: number;
 }
@@ -86,16 +87,20 @@ export class MarketplaceDiscoveryService {
       config: { marketplaceSourceKey: input.marketplaceSourceKey },
     });
 
+    const startedAtMs = Date.now();
+
     // Mark as running
     await this.deps.discoveryRepo.updateDiscoveryRun(repoContext, run.id, {
       status: "RUNNING",
-      startedAt: new Date().toISOString(),
+      startedAt: new Date(startedAtMs).toISOString(),
     });
 
     let sellersFound = 0;
     let sellersQualified = 0;
     let sellersRejected = 0;
+    let sellersNeedsReview = 0;
     let sellersDuplicate = 0;
+    let confidenceTotal = 0;
     let creditsConsumed = 0;
 
     try {
@@ -106,13 +111,30 @@ export class MarketplaceDiscoveryService {
         // Skip empty listing URLs
         if (!entry.listingUrl || entry.listingUrl.trim().length === 0) continue;
 
-        // Skip already-seen listing URLs in this run
+        // Record already-seen listing URLs in this run as explicit duplicates.
         const existingByUrl = await this.deps.discoveryRepo.findDiscoveredSellerByListingUrl(
           repoContext,
           run.id,
           entry.listingUrl,
         );
-        if (existingByUrl !== null) continue;
+        if (existingByUrl !== null) {
+          sellersFound++;
+          sellersDuplicate++;
+          sellersRejected++;
+          await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, {
+            tenantId: context.tenantId,
+            discoveryRunId: run.id,
+            campaignId: input.campaignId,
+            marketplaceSourceId: input.marketplaceSourceId,
+            listingUrl: `${entry.listingUrl}#duplicate-${sellersDuplicate}`,
+            status: "DUPLICATE",
+            duplicateOfId: existingByUrl.id,
+            qualificationPolicy: { reasons: ["DUPLICATE_LISTING"], duplicateReason: "LISTING_URL_MATCH" },
+            rawData: entry as unknown as Readonly<Record<string, unknown>>,
+            metadata: { reasons: ["DUPLICATE_LISTING"], duplicateReason: "LISTING_URL_MATCH", originalListingUrl: entry.listingUrl },
+          });
+          continue;
+        }
 
         sellersFound++;
         creditsConsumed++;
@@ -142,10 +164,12 @@ export class MarketplaceDiscoveryService {
             ...(sellerIdentityKey !== undefined ? { sellerIdentityKey } : {}),
             status: "DUPLICATE",
             duplicateOfId: dedupResult.duplicateOfId,
+            qualificationPolicy: { reasons: ["DUPLICATE_LISTING"], duplicateReason: dedupResult.reason },
             ...(entry.sellerName !== undefined ? { sellerName: entry.sellerName } : {}),
-          ...(entry.phone !== undefined ? { phone: entry.phone } : {}),
-          ...(entry.sellerProfileUrl !== undefined ? { sellerProfileUrl: entry.sellerProfileUrl } : {}),
+            ...(entry.phone !== undefined ? { phone: entry.phone } : {}),
+            ...(entry.sellerProfileUrl !== undefined ? { sellerProfileUrl: entry.sellerProfileUrl } : {}),
             rawData: entry as unknown as Readonly<Record<string, unknown>>,
+            metadata: { reasons: ["DUPLICATE_LISTING"], duplicateReason: dedupResult.reason },
           });
           continue;
         }
@@ -153,10 +177,14 @@ export class MarketplaceDiscoveryService {
         // Qualify the seller
         const qualification = this.qualificationService.qualify(
           {
+            listingUrl: entry.listingUrl,
+            marketplaceSourceKey: input.marketplaceSourceKey,
             phone: entry.phone ?? null,
             email: entry.email ?? null,
             sellerName: entry.sellerName ?? null,
             sellerProfileUrl: entry.sellerProfileUrl ?? null,
+            title: entry.title ?? null,
+            category: entry.category ?? null,
             images: entry.images ?? null,
             price: entry.price ?? null,
             location: entry.location ?? null,
@@ -165,8 +193,11 @@ export class MarketplaceDiscoveryService {
           input.qualificationPolicy,
         );
 
+        confidenceTotal += qualification.confidence.overallConfidence;
         if (qualification.status === "QUALIFIED") {
           sellersQualified++;
+        } else if (qualification.status === "NEEDS_REVIEW") {
+          sellersNeedsReview++;
         } else {
           sellersRejected++;
         }
@@ -193,6 +224,7 @@ export class MarketplaceDiscoveryService {
           ...(entry.location !== undefined ? { location: entry.location } : {}),
           ...(entry.images !== undefined ? { images: [...entry.images] } : {}),
           rawData: entry as unknown as Readonly<Record<string, unknown>>,
+          metadata: { reasons: qualification.reasons, confidence: qualification.confidence },
         };
 
         await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, sellerInput);
@@ -206,6 +238,19 @@ export class MarketplaceDiscoveryService {
         sellersQualified,
         sellersRejected,
         sellersDuplicate,
+        metadata: {
+          submitted: input.entries.length,
+          processed: sellersFound,
+          uniqueListings: sellersFound - sellersDuplicate,
+          duplicateListings: sellersDuplicate,
+          qualified: sellersQualified,
+          needsReview: sellersNeedsReview,
+          rejected: sellersRejected,
+          promoted: 0,
+          averageConfidence: sellersFound - sellersDuplicate > 0 ? Math.round(confidenceTotal / (sellersFound - sellersDuplicate)) : 0,
+          elapsedTime: Date.now() - startedAtMs,
+          reconciliationGap: "Discovery runs are persisted by the existing discovery service; broad Campaign Runtime execution migration remains a follow-up.",
+        },
       });
 
       return {
@@ -213,6 +258,7 @@ export class MarketplaceDiscoveryService {
         sellersFound,
         sellersQualified,
         sellersRejected,
+        sellersNeedsReview,
         sellersDuplicate,
         creditsConsumed,
       };
@@ -226,6 +272,19 @@ export class MarketplaceDiscoveryService {
         sellersQualified,
         sellersRejected,
         sellersDuplicate,
+        metadata: {
+          submitted: input.entries.length,
+          processed: sellersFound,
+          uniqueListings: sellersFound - sellersDuplicate,
+          duplicateListings: sellersDuplicate,
+          qualified: sellersQualified,
+          needsReview: sellersNeedsReview,
+          rejected: sellersRejected,
+          promoted: 0,
+          averageConfidence: sellersFound - sellersDuplicate > 0 ? Math.round(confidenceTotal / (sellersFound - sellersDuplicate)) : 0,
+          elapsedTime: Date.now() - startedAtMs,
+          reconciliationGap: "Discovery runs are persisted by the existing discovery service; broad Campaign Runtime execution migration remains a follow-up.",
+        },
       });
       throw error;
     }
@@ -266,7 +325,7 @@ export class MarketplaceDiscoveryService {
     promoted: number;
   }> {
     const [pending, qualified, promoted] = await Promise.all([
-      this.deps.discoveryRepo.countDiscoveredSellersByCampaign(context, campaignId, "PENDING"),
+      this.deps.discoveryRepo.countDiscoveredSellersByCampaign(context, campaignId, "NEEDS_REVIEW"),
       this.deps.discoveryRepo.countDiscoveredSellersByCampaign(context, campaignId, "QUALIFIED"),
       this.deps.discoveryRepo.countDiscoveredSellersByCampaign(context, campaignId, "PROMOTED"),
     ]);
