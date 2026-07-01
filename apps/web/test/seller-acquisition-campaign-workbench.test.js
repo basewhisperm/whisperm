@@ -5,6 +5,7 @@ import { test } from "node:test";
 const globalPage = readFileSync("src/app/(app)/marketplace-acquisition/page.tsx", "utf8");
 const campaignPage = readFileSync("src/app/(app)/marketplace-acquisition/campaigns/[campaignId]/workbench/page.tsx", "utf8");
 const component = readFileSync("src/components/marketplace-acquisition/acquisition-workbench.tsx", "utf8");
+const campaignRecordsRoute = readFileSync("src/app/api/marketplace-acquisition/campaigns/[campaignId]/records/route.ts", "utf8");
 
 test("global workbench uses reusable acquisition workbench component", () => {
   assert.match(globalPage, /AcquisitionWorkbench/u);
@@ -16,6 +17,8 @@ test("campaign workbench mounts a campaign-scoped acquisition workbench", () => 
   assert.match(campaignPage, /Campaign Workbench/u);
   assert.match(campaignPage, /campaignId/u);
   assert.match(campaignPage, /campaignId=\{campaignId\}/u);
+  assert.match(campaignPage, /encodeURIComponent\(campaignId\)/u);
+  assert.match(campaignPage, /\/api\/marketplace-acquisition\/campaigns\/\$\{encodeURIComponent\(campaignId\)\}\/records/u);
   assert.match(campaignPage, /mode="campaign"/u);
 });
 
@@ -27,10 +30,15 @@ test("reusable acquisition workbench preserves core V1 operations", () => {
   assert.match(component, /recordsPath/u);
 });
 
-test("records API supports campaignId scoped record listing", () => {
+test("campaign records API supports campaign-scoped record listing", () => {
+  assert.match(campaignRecordsRoute, /paramsSchema/u);
+  assert.match(campaignRecordsRoute, /requireSellerAcquisitionFeatureForApi/u);
+  assert.match(campaignRecordsRoute, /sellerAcquisitionRecords\.listByCampaignId/u);
+  assert.doesNotMatch(campaignRecordsRoute, /sellerAcquisitionRecords\.list\(/u);
+});
+
+test("global records API remains available for unscoped record listing", () => {
   const route = readFileSync("src/app/api/marketplace-acquisition/records/route.ts", "utf8");
-  assert.match(route, /searchParams\.get\("campaignId"\)/u);
-  assert.match(route, /sellerAcquisitionRecords\.listByCampaignId/u);
   assert.match(route, /sellerAcquisitionRecords\.list/u);
 });
 
