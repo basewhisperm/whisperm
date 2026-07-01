@@ -100,7 +100,8 @@ test('executeInvitation persists dispatch state and enqueues worker command', as
     { tenantId: 'tenant-1' },
     { campaignId: 'campaign-1', opportunityId: 'capture-1', preferredChannel: 'WHATSAPP', initiatedBy: 'user-1', correlationId: 'corr-1' },
   );
-  assert.equal(execution.status, 'COMPLETED');
+  assert.equal(execution.status, 'RUNNING');
+  assert.equal(execution.completedAt, undefined);
   assert.equal(execution.metrics.invitationExecutionState, 'DISPATCHED');
   assert.equal(execution.metrics.opportunityId, 'capture-1');
   assert.equal(calls.length, 1);

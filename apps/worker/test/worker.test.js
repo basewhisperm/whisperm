@@ -363,7 +363,7 @@ test('render conversion retry worker invokes retry service with tenant isolation
   assert.equal(calls[0].input.conversionId, 'conversion-1');
 });
 
-test('marketplace invite worker executes runtime command and records runtime result', async () => {
+test('marketplace invite worker completes runtime execution after successful invitation processing', async () => {
   const calls = [];
   const runtime = createRuntimePorts();
   const app = createApp({
@@ -401,4 +401,45 @@ test('marketplace invite worker executes runtime command and records runtime res
   assert.equal(result.status, 'SUCCEEDED');
   assert.deepEqual(calls[0][2], { tenantId: 'tenant-1', captureId: 'capture-1', channel: 'WHATSAPP' });
   assert.deepEqual(calls[1][2], { executionId: 'execution-1', invitationId: 'invitation-1', status: 'SENT', channel: 'WHATSAPP' });
+});
+
+test('marketplace invite worker records failed runtime execution when invitation processing fails', async () => {
+  const calls = [];
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'unused', tenantId: 'tenant-1' }) },
+    sellerInvitation: {
+      async sendInvitation() {
+        throw new Error('provider failed token=secret');
+      },
+    },
+    campaignRuntime: {
+      async recordInvitationResult(context, input) {
+        calls.push(['recordInvitationResult', context, input]);
+      },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({
+    job: createJob({
+      queueName: 'marketplace.invite',
+      jobType: 'marketplace.invite.send',
+      payload: {
+        tenantId: 'tenant-1',
+        campaignId: 'campaign-1',
+        captureId: 'capture-1',
+        executionId: 'execution-1',
+        channel: 'WHATSAPP',
+      },
+      idempotency: { ...createJob().idempotency, key: 'invite:tenant-1:capture-1:failed' },
+      scheduling: { ...createJob().scheduling, queueName: 'marketplace.invite' },
+    }),
+  });
+
+  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(calls[0][2].executionId, 'execution-1');
+  assert.equal(calls[0][2].status, 'FAILED');
+  assert.equal(calls[0][2].channel, 'WHATSAPP');
+  assert.match(calls[0][2].errorMessage, /provider failed/);
 });

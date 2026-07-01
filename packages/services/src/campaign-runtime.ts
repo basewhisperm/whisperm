@@ -99,8 +99,7 @@ export class CampaignRuntimeService {
     });
 
     return this.deps.executions.update(context, execution.id, {
-      status: "COMPLETED",
-      completedAt: new Date().toISOString(),
+      status: "RUNNING",
       metrics: {
         ...(execution.metrics ?? {}),
         invitationExecutionState: "DISPATCHED",

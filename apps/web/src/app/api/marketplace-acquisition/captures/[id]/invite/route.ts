@@ -26,10 +26,13 @@ const invitationQueue = (): CampaignRuntimeInvitationQueue => ({
         payload: {
           tenantId: input.tenantId,
           campaignId: input.campaignId,
+          opportunityId: input.opportunityId,
           captureId: input.opportunityId,
           executionId: input.executionId,
           invitationId: input.invitationId ?? null,
+          preferredChannel: input.preferredChannel ?? "WHATSAPP",
           channel: input.preferredChannel ?? "WHATSAPP",
+          correlationId: input.correlationId ?? input.executionId,
           replaySafe: true,
         },
         maxAttempts: 3,
