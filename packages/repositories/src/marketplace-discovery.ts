@@ -38,7 +38,7 @@ export const discoveredSellerRecordSchema = z.object({
   campaignId: z.string().min(1),
   marketplaceSourceId: z.string().min(1),
   sellerIdentityKey: z.string().nullable().optional(),
-  status: z.enum(["PENDING", "QUALIFIED", "REJECTED", "DUPLICATE", "PROMOTED"]),
+  status: z.enum(["NEW", "QUALIFYING", "PENDING", "QUALIFIED", "NEEDS_REVIEW", "REJECTED", "DUPLICATE", "PROMOTED"]),
   qualificationScore: z.number().int().min(0).max(100).default(0),
   qualificationPolicy: metadataSchema.nullable().optional(),
   sellerName: z.string().nullable().optional(),

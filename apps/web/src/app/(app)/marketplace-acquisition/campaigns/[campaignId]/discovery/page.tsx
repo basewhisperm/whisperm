@@ -11,6 +11,7 @@ interface DiscoveryRun {
   readonly sellersQualified: number;
   readonly sellersRejected: number;
   readonly sellersDuplicate: number;
+  readonly metadata?: { readonly needsReview?: number; readonly uniqueListings?: number; readonly duplicateListings?: number; readonly averageConfidence?: number } | null;
   readonly createdAt: string;
   readonly completedAt?: string | null;
   readonly errorMessage?: string | null;
@@ -47,6 +48,9 @@ const STATUS_COLORS: Record<string, string> = {
   QUALIFIED: "bg-green-100 text-green-700",
   REJECTED: "bg-red-100 text-red-700",
   DUPLICATE: "bg-yellow-100 text-yellow-700",
+  NEEDS_REVIEW: "bg-orange-100 text-orange-700",
+  NEW: "bg-gray-100 text-gray-600",
+  QUALIFYING: "bg-blue-100 text-blue-700",
   PROMOTED: "bg-blue-100 text-blue-700",
   PENDING: "bg-gray-100 text-gray-600",
 };
@@ -280,7 +284,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
   const [runs, setRuns] = useState<readonly DiscoveryRun[]>([]);
   const [summary, setSummary] = useState<RunSummary | null>(null);
   const [sellers, setSellers] = useState<readonly DiscoveredSeller[]>([]);
-  const [statusFilter, setStatusFilter] = useState<string>("QUALIFIED");
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [showSeedModal, setShowSeedModal] = useState(false);
@@ -292,7 +296,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
     try {
       const [runsRes, sellersRes] = await Promise.all([
         fetch(`/api/marketplace-acquisition/campaigns/${campaignId}/discovery/runs`),
-        fetch(`/api/marketplace-acquisition/campaigns/${campaignId}/discovery/sellers?status=${statusFilter}`),
+        fetch(`/api/marketplace-acquisition/campaigns/${campaignId}/discovery/sellers${statusFilter === "ALL" ? "" : `?status=${statusFilter}`}`),
       ]);
       const [runsPayload, sellersPayload] = await Promise.all([
         runsRes.json(),
@@ -419,7 +423,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
                     {run.status}
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-1 text-center">
+                <div className="grid grid-cols-4 gap-1 text-center">
                   <div>
                     <p className="text-sm font-semibold text-foreground">{run.sellersFound}</p>
                     <p className="text-[11px] text-muted-foreground">Found</p>
@@ -429,9 +433,18 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
                     <p className="text-[11px] text-muted-foreground">Qualified</p>
                   </div>
                   <div>
+                    <p className="text-sm font-semibold text-orange-600">{run.metadata?.needsReview ?? 0}</p>
+                    <p className="text-[11px] text-muted-foreground">Review</p>
+                  </div>
+                  <div>
                     <p className="text-sm font-semibold text-muted-foreground">{run.sellersRejected}</p>
                     <p className="text-[11px] text-muted-foreground">Rejected</p>
                   </div>
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-center text-[11px] text-muted-foreground">
+                  <span>Unique {run.metadata?.uniqueListings ?? Math.max(run.sellersFound - run.sellersDuplicate, 0)}</span>
+                  <span>Duplicates {run.metadata?.duplicateListings ?? run.sellersDuplicate}</span>
+                  <span>Avg confidence {run.metadata?.averageConfidence ?? 0}</span>
                 </div>
                 {run.errorMessage ? (
                   <p className="text-xs text-red-600 truncate">{run.errorMessage}</p>
@@ -454,11 +467,15 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
             >
+              <option value="ALL">All Reviewable</option>
               <option value="QUALIFIED">Qualified</option>
-              <option value="PENDING">Pending</option>
-              <option value="PROMOTED">Promoted</option>
+              <option value="NEEDS_REVIEW">Needs Review</option>
               <option value="REJECTED">Rejected</option>
-              <option value="DUPLICATE">Duplicate</option>
+              <option value="DUPLICATE">Duplicates</option>
+              <option value="PENDING">Pending Qualification</option>
+              <option value="QUALIFYING">Qualifying</option>
+              <option value="NEW">New</option>
+              <option value="PROMOTED">Promoted</option>
             </select>
           </div>
 
@@ -468,7 +485,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
             </div>
           ) : sellers.length === 0 ? (
             <div className="rounded-2xl bg-background p-8 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
-              <p className="text-sm text-muted-foreground">No {statusFilter.toLowerCase()} sellers.</p>
+              <p className="text-sm text-muted-foreground">No {statusFilter === "ALL" ? "reviewable" : statusFilter.toLowerCase()} sellers.</p>
               {statusFilter === "QUALIFIED" ? (
                 <p className="text-xs text-muted-foreground mt-1">
                   Start a discovery run to find and qualify sellers.
