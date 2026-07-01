@@ -4,6 +4,8 @@ import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-ser
 import { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
 import { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
 export { SellerAcquisitionAnalyticsService } from "./acquisition-analytics.js";
+export { BusinessGrowthOpportunityService } from "./business-growth-opportunity.js";
+export type { BusinessGrowthOpportunityServiceDependencies } from "./business-growth-opportunity.js";
 export { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
 export { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
 export { CampaignRuntimeService } from "./campaign-runtime.js";

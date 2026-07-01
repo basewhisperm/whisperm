@@ -4,6 +4,7 @@ import type {
   CreateMarketplaceCaptureInput,
   MarketplaceCaptureRecord,
 } from "@whisperm/repositories";
+import type { BusinessGrowthOpportunityService } from "../business-growth-opportunity.js";
 import {
   PersistenceError,
   marketplaceCaptureCreateRequestSchema,
@@ -66,6 +67,7 @@ export interface MarketplaceCaptureAuditPort {
 export interface MarketplaceCaptureServiceDependencies {
   readonly marketplaceAcquisition: MarketplaceCaptureRepositoryPort;
   readonly auditLogs?: MarketplaceCaptureAuditPort | undefined;
+  readonly businessGrowthOpportunities?: BusinessGrowthOpportunityService | undefined;
 }
 
 export class MarketplaceCaptureServiceError extends Error {
@@ -230,6 +232,8 @@ export class MarketplaceCaptureService {
 
       return { capture: toResponse(duplicate, true, warnings), isNew: false, duplicate: true, normalizationWarnings: warnings };
     }
+
+    await this.dependencies.businessGrowthOpportunities?.createFromMarketplaceCapture(scope, created);
 
     await this.dependencies.auditLogs?.append?.(scope, {
       tenantId: context.tenantId,

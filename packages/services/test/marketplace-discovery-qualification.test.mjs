@@ -150,3 +150,71 @@ test('existing Campaign Runtime is not duplicated by discovery qualification sli
   assert.equal(typeof source.CampaignRuntimeService, 'function');
   assert.equal(typeof source.MarketplaceDiscoveryService, 'function');
 });
+
+class MemoryBusinessGrowthOpportunityRepo {
+  opportunities = [];
+  nextOpportunity = 1;
+  async createOrUpdateFromMarketplaceCapture(ctx, input) {
+    return this.#upsert(ctx, 'marketplaceCaptureId', input.marketplaceCaptureId, input);
+  }
+  async createOrUpdateFromDiscoveredSeller(ctx, input) {
+    return this.#upsert(ctx, 'discoveredSellerId', input.discoveredSellerId, input);
+  }
+  async findByMarketplaceCaptureId(ctx, marketplaceCaptureId) {
+    return this.opportunities.find((opportunity) => opportunity.tenantId === ctx.tenantId && opportunity.marketplaceCaptureId === marketplaceCaptureId) ?? null;
+  }
+  async findByDiscoveredSellerId(ctx, discoveredSellerId) {
+    return this.opportunities.find((opportunity) => opportunity.tenantId === ctx.tenantId && opportunity.discoveredSellerId === discoveredSellerId) ?? null;
+  }
+  async findByCampaignId(ctx, campaignId) {
+    return { items: this.opportunities.filter((opportunity) => opportunity.tenantId === ctx.tenantId && opportunity.campaignId === campaignId) };
+  }
+  async linkContact(ctx, opportunityId, contactId) { return this.#update(ctx, opportunityId, { contactId }); }
+  async linkDeal(ctx, opportunityId, dealId) { return this.#update(ctx, opportunityId, { dealId }); }
+  async linkDraftInventory(ctx, opportunityId, draftInventoryId) { return this.#update(ctx, opportunityId, { draftInventoryId }); }
+  async updateQualification(ctx, opportunityId, qualification) {
+    return this.#update(ctx, opportunityId, {
+      qualificationStatus: qualification.status,
+      qualificationScore: qualification.score,
+      qualificationReasons: qualification.reasons,
+      status: qualification.status,
+    });
+  }
+  #upsert(ctx, key, value, input) {
+    assert.equal(ctx.tenantId, input.tenantId);
+    const existing = this.opportunities.findIndex((opportunity) => opportunity.tenantId === ctx.tenantId && opportunity[key] === value);
+    const row = existing === -1
+      ? { id: `opportunity-${this.nextOpportunity++}`, status: 'IDENTIFIED', createdAt: now, updatedAt: now, ...input }
+      : { ...this.opportunities[existing], ...input, updatedAt: now };
+    if (existing === -1) this.opportunities.push(row);
+    else this.opportunities[existing] = row;
+    return row;
+  }
+  #update(ctx, opportunityId, input) {
+    const existing = this.opportunities.findIndex((opportunity) => opportunity.tenantId === ctx.tenantId && opportunity.id === opportunityId);
+    assert.notEqual(existing, -1);
+    this.opportunities[existing] = { ...this.opportunities[existing], ...input, updatedAt: now };
+    return this.opportunities[existing];
+  }
+}
+
+test('discovery qualification creates canonical business growth opportunity with provenance', async () => {
+  const { BusinessGrowthOpportunityService } = await import('@whisperm/services');
+  const discoveryRepo = new MemoryDiscoveryRepo();
+  const opportunityRepo = new MemoryBusinessGrowthOpportunityRepo();
+  const opportunityService = new BusinessGrowthOpportunityService({ opportunities: opportunityRepo });
+  const service = new MarketplaceDiscoveryService({ discoveryRepo, businessGrowthOpportunities: opportunityService });
+
+  await service.runDiscovery(context, runInput([baseEntry()]));
+
+  assert.equal(opportunityRepo.opportunities.length, 1);
+  const [opportunity] = opportunityRepo.opportunities;
+  const [seller] = discoveryRepo.sellers;
+  assert.equal(opportunity.tenantId, context.tenantId);
+  assert.equal(opportunity.discoveredSellerId, seller.id);
+  assert.equal(opportunity.campaignId, 'campaign-1');
+  assert.equal(opportunity.sourceType, 'DISCOVERED_MARKETPLACE_SELLER');
+  assert.equal(opportunity.sourceUrl, seller.listingUrl);
+  assert.equal(opportunity.qualificationStatus, 'QUALIFIED');
+  assert.equal(opportunity.status, 'QUALIFIED');
+});

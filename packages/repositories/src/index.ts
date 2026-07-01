@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PrismaBusinessGrowthOpportunityRepository } from "./business-growth-opportunity.js";
 
 import { PrismaMarketplaceAcquisitionRepository, type MarketplaceAcquisitionRepository } from "./marketplace-acquisition.js";
 
@@ -1932,6 +1933,7 @@ export interface PrismaRepositories {
   readonly marketplaceClaimTokens: MarketplaceClaimTokenRepository;
   readonly ownershipAttestations: MarketplaceOwnershipAttestationRepository;
   readonly scheduledJobs: ScheduledJobRepository;
+  readonly businessGrowthOpportunities: import("./business-growth-opportunity.js").BusinessGrowthOpportunityRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -1961,6 +1963,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     marketplaceClaimTokens: new PrismaMarketplaceClaimTokenRepository(prisma),
     ownershipAttestations: new PrismaMarketplaceOwnershipAttestationRepository(prisma),
     scheduledJobs: new PrismaScheduledJobRepository(prisma),
+    businessGrowthOpportunities: new PrismaBusinessGrowthOpportunityRepository(prisma),
     auditLogs
   };
 };
@@ -1976,3 +1979,5 @@ export const prismaTenantWhere = {
 export * from "./marketplace-acquisition.js";
 
 export * from "./marketplace-discovery.js";
+
+export * from "./business-growth-opportunity.js";
