@@ -145,6 +145,14 @@ export interface SellerInvitationServicePort {
     input: { readonly tenantId: string; readonly captureId: string; readonly channel: string },
   ): Promise<{ readonly invitationId: string; readonly status: string }> | { readonly invitationId: string; readonly status: string };
 }
+
+export interface CampaignRuntimeExecutionPort {
+  recordInvitationResult(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly executionId: string; readonly invitationId: string; readonly status: string; readonly channel: string },
+  ): Promise<void> | void;
+}
+
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
   readonly scoring?: ScoreRecomputationServicePort | undefined;
@@ -152,6 +160,7 @@ export interface WorkerServices {
   readonly claimLifecycle?: ClaimLifecycleServicePort | undefined;
   readonly renderConversionRetry?: RenderConversionRetryServicePort | undefined;
   readonly sellerInvitation?: SellerInvitationServicePort | undefined;
+  readonly campaignRuntime?: CampaignRuntimeExecutionPort | undefined;
 }
 
 export interface QueueRegistration {
@@ -564,9 +573,12 @@ export const createScoreRecomputationHandler = (services: WorkerServices): Worke
 
 const sellerInvitationJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
+  campaignId: z.string().min(1).optional(),
   captureId: z.string().min(1),
+  executionId: z.string().min(1).optional(),
+  invitationId: z.string().min(1).nullable().optional(),
   channel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).default('WHATSAPP'),
-}).strict();
+}).strict().passthrough();
 
 export const createSellerInvitationHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
@@ -592,9 +604,17 @@ export const createSellerInvitationHandler = (services: WorkerServices): WorkerJ
       { tenantId: payload.tenantId, correlation: context.correlation },
       { tenantId: payload.tenantId, captureId: payload.captureId, channel: payload.channel },
     );
+    if (payload.executionId !== undefined) {
+      await services.campaignRuntime?.recordInvitationResult(
+        { tenantId: payload.tenantId, correlation: context.correlation },
+        { executionId: payload.executionId, invitationId: result.invitationId, status: result.status, channel: payload.channel },
+      );
+    }
     return workerRuntimeMetadataSchema.parse({
       tenantId: payload.tenantId,
+      campaignId: payload.campaignId,
       captureId: payload.captureId,
+      executionId: payload.executionId,
       invitationId: result.invitationId,
       status: result.status,
       channel: payload.channel,
@@ -951,11 +971,27 @@ if (isMainModule()) {
     const config = createWorkerBootstrapConfigFromEnv();
     const prisma = new PrismaClient();
     const sellerInvitation = createSellerInvitationServicePort(prisma as unknown as import("@whisperm/repositories").PrismaPersistenceClient);
+    const campaignRuntime = {
+      async recordInvitationResult(context: { readonly tenantId: string }, input: { readonly executionId: string; readonly invitationId: string; readonly status: string; readonly channel: string }) {
+        const existing = await prisma.campaignRuntimeExecution.findFirst({
+          where: { tenantId: context.tenantId, id: input.executionId },
+          select: { metrics: true },
+        });
+        const metrics = typeof existing?.metrics === "object" && existing.metrics !== null && !Array.isArray(existing.metrics) ? existing.metrics : {};
+        await prisma.campaignRuntimeExecution.updateMany({
+          where: { tenantId: context.tenantId, id: input.executionId },
+          data: {
+            metrics: { ...metrics, invitationExecutionState: input.status === "SENT" ? "SENT" : "FAILED", invitationId: input.invitationId, provider: input.channel, finalOutcome: input.status, executionEnd: new Date().toISOString() },
+          },
+        });
+      },
+    };
     await runWorkerFromEnv({
       ...createBootstrapOnlyWorkerDependencies(config),
       services: {
         ...createBootstrapOnlyWorkerServices(),
         sellerInvitation,
+        campaignRuntime,
       },
     });
     await new Promise<void>((resolve) => {

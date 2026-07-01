@@ -14,10 +14,32 @@ export interface StartCampaignExecutionInput {
   readonly trigger?: CampaignRuntimeExecutionTrigger | undefined;
 }
 
+export interface ExecuteInvitationInput {
+  readonly campaignId: string;
+  readonly opportunityId: string;
+  readonly invitationId?: string | undefined;
+  readonly preferredChannel?: "WHATSAPP" | "SMS" | "EMAIL" | undefined;
+  readonly initiatedBy?: string | undefined;
+  readonly correlationId?: string | undefined;
+}
+
+export interface CampaignRuntimeInvitationQueue {
+  enqueueInvitation(input: {
+    readonly tenantId: string;
+    readonly campaignId: string;
+    readonly opportunityId: string;
+    readonly executionId: string;
+    readonly invitationId?: string | undefined;
+    readonly preferredChannel?: "WHATSAPP" | "SMS" | "EMAIL" | undefined;
+    readonly correlationId?: string | undefined;
+  }): Promise<void> | void;
+}
+
 export interface CampaignRuntimeServiceDependencies {
   readonly campaigns: SellerAcquisitionCampaignRepository;
   readonly executions: CampaignRuntimeExecutionRepository;
   readonly worker?: CampaignRuntimeWorker | undefined;
+  readonly invitationQueue?: CampaignRuntimeInvitationQueue | undefined;
 }
 
 const activeStatuses = new Set(["QUEUED", "RUNNING"]);
@@ -44,6 +66,47 @@ export class CampaignRuntimeService {
 
   constructor(private readonly deps: CampaignRuntimeServiceDependencies) {
     this.worker = deps.worker ?? new NoopCampaignRuntimeWorker();
+  }
+
+  async executeInvitation(context: TenantScoped, input: ExecuteInvitationInput): Promise<CampaignRuntimeExecutionRecord> {
+    const campaign = await this.deps.campaigns.findById(context, input.campaignId);
+    if (campaign === null) {
+      throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Seller acquisition campaign not found", status: 404 });
+    }
+
+    const execution = await this.deps.executions.create(context, {
+      tenantId: context.tenantId,
+      campaignId: input.campaignId,
+      trigger: "MANUAL",
+      status: "QUEUED",
+      metrics: {
+        invitationExecutionState: "PENDING",
+        opportunityId: input.opportunityId,
+        invitationId: input.invitationId ?? null,
+        initiatedBy: input.initiatedBy ?? null,
+        retryCount: 0,
+      },
+    });
+
+    await this.deps.invitationQueue?.enqueueInvitation({
+      tenantId: context.tenantId,
+      campaignId: input.campaignId,
+      opportunityId: input.opportunityId,
+      executionId: execution.id,
+      invitationId: input.invitationId,
+      preferredChannel: input.preferredChannel,
+      correlationId: input.correlationId,
+    });
+
+    return this.deps.executions.update(context, execution.id, {
+      status: "COMPLETED",
+      completedAt: new Date().toISOString(),
+      metrics: {
+        ...(execution.metrics ?? {}),
+        invitationExecutionState: "DISPATCHED",
+        dispatchedAt: new Date().toISOString(),
+      },
+    });
   }
 
   async startCampaignExecution(context: TenantScoped, input: StartCampaignExecutionInput): Promise<CampaignRuntimeExecutionRecord> {

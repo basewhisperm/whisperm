@@ -88,3 +88,29 @@ test('Campaign strategy is not modified by runtime execution', async () => {
   await service.startCampaignExecution({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1' });
   assert.equal(JSON.stringify(source), before);
 });
+
+test('executeInvitation persists dispatch state and enqueues worker command', async () => {
+  const calls = [];
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    invitationQueue: { async enqueueInvitation(input) { calls.push(input); } },
+  });
+  const execution = await runtime.executeInvitation(
+    { tenantId: 'tenant-1' },
+    { campaignId: 'campaign-1', opportunityId: 'capture-1', preferredChannel: 'WHATSAPP', initiatedBy: 'user-1', correlationId: 'corr-1' },
+  );
+  assert.equal(execution.status, 'COMPLETED');
+  assert.equal(execution.metrics.invitationExecutionState, 'DISPATCHED');
+  assert.equal(execution.metrics.opportunityId, 'capture-1');
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    tenantId: 'tenant-1',
+    campaignId: 'campaign-1',
+    opportunityId: 'capture-1',
+    executionId: 'execution-1',
+    invitationId: undefined,
+    preferredChannel: 'WHATSAPP',
+    correlationId: 'corr-1',
+  });
+});

@@ -362,3 +362,43 @@ test('render conversion retry worker invokes retry service with tenant isolation
   assert.equal(calls[0].context.tenantId, 'tenant-1');
   assert.equal(calls[0].input.conversionId, 'conversion-1');
 });
+
+test('marketplace invite worker executes runtime command and records runtime result', async () => {
+  const calls = [];
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'unused', tenantId: 'tenant-1' }) },
+    sellerInvitation: {
+      async sendInvitation(context, input) {
+        calls.push(['sendInvitation', context, input]);
+        return { invitationId: 'invitation-1', status: 'SENT' };
+      },
+    },
+    campaignRuntime: {
+      async recordInvitationResult(context, input) {
+        calls.push(['recordInvitationResult', context, input]);
+      },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({
+    job: createJob({
+      queueName: 'marketplace.invite',
+      jobType: 'marketplace.invite.send',
+      payload: {
+        tenantId: 'tenant-1',
+        campaignId: 'campaign-1',
+        captureId: 'capture-1',
+        executionId: 'execution-1',
+        channel: 'WHATSAPP',
+      },
+      idempotency: { ...createJob().idempotency, key: 'invite:tenant-1:capture-1' },
+      scheduling: { ...createJob().scheduling, queueName: 'marketplace.invite' },
+    }),
+  });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.deepEqual(calls[0][2], { tenantId: 'tenant-1', captureId: 'capture-1', channel: 'WHATSAPP' });
+  assert.deepEqual(calls[1][2], { executionId: 'execution-1', invitationId: 'invitation-1', status: 'SENT', channel: 'WHATSAPP' });
+});
