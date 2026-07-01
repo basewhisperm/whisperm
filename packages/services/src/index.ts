@@ -6,6 +6,8 @@ import { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns
 export { SellerAcquisitionAnalyticsService } from "./acquisition-analytics.js";
 export { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
 export { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
+export { CampaignRuntimeService } from "./campaign-runtime.js";
+export type { CampaignRuntimeServiceDependencies, StartCampaignExecutionInput } from "./campaign-runtime.js";
 export type { SellerAcquisitionHealthStatus, SellerAcquisitionMissingRequirement, SellerAcquisitionNextAction, SellerAcquisitionRecord, SellerAcquisitionRecordDependencies } from "./seller-acquisition-records.js";
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";

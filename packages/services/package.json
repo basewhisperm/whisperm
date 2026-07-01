@@ -9,9 +9,10 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint test/*.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm run build && node --test test/*.test.mjs"
+    "test": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/repositories build && pnpm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@whisperm/campaign-runtime": "workspace:*",
     "@whisperm/provider-adapters": "workspace:^",
     "@whisperm/repositories": "workspace:*",
     "@whisperm/types": "workspace:*",

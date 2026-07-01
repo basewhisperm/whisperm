@@ -258,6 +258,9 @@ importers:
 
   packages/services:
     dependencies:
+      '@whisperm/campaign-runtime':
+        specifier: workspace:*
+        version: link:../campaign-runtime
       '@whisperm/provider-adapters':
         specifier: workspace:^
         version: link:../provider-adapters

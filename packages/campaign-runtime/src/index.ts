@@ -858,3 +858,41 @@ export const dispatchCampaignExecution = async (
 
   return "DISPATCHED";
 };
+
+export const campaignRuntimeExecutionStatusValues = ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"] as const;
+export const campaignRuntimeExecutionStatusSchema = z.enum(campaignRuntimeExecutionStatusValues);
+export type CampaignRuntimeExecutionStatus = z.output<typeof campaignRuntimeExecutionStatusSchema>;
+
+export const campaignRuntimeExecutionTriggerValues = ["MANUAL", "SCHEDULED", "SYSTEM"] as const;
+export const campaignRuntimeExecutionTriggerSchema = z.enum(campaignRuntimeExecutionTriggerValues);
+export type CampaignRuntimeExecutionTrigger = z.output<typeof campaignRuntimeExecutionTriggerSchema>;
+
+export const campaignRuntimeWorkerResultSchema = z.object({
+  status: z.enum(["COMPLETED", "FAILED"]),
+  metrics: campaignMetadataSchema.default({}),
+  errorCode: z.string().min(1).optional(),
+  errorMessage: z.string().min(1).optional()
+}).strict();
+export type CampaignRuntimeWorkerResult = z.output<typeof campaignRuntimeWorkerResultSchema>;
+
+export const campaignRuntimeWorkerInputSchema = z.object({
+  tenantId: z.string().min(1),
+  campaignId: z.string().min(1),
+  executionId: z.string().min(1),
+  trigger: campaignRuntimeExecutionTriggerSchema,
+  correlation: correlationMetadataSchema.optional()
+}).strict();
+export type CampaignRuntimeWorkerInput = z.output<typeof campaignRuntimeWorkerInputSchema>;
+
+export interface CampaignRuntimeWorker {
+  readonly type: string;
+  execute(input: CampaignRuntimeWorkerInput): Promise<CampaignRuntimeWorkerResult>;
+}
+
+export class NoopCampaignRuntimeWorker implements CampaignRuntimeWorker {
+  readonly type = "noop";
+
+  async execute(_input: CampaignRuntimeWorkerInput): Promise<CampaignRuntimeWorkerResult> {
+    return { status: "COMPLETED", metrics: { noop: true } };
+  }
+}

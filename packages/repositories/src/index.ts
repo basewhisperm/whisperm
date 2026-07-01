@@ -94,6 +94,7 @@ export interface PrismaPersistenceClient {
   readonly marketplaceCapture: PrismaDelegate;
   readonly sellerAcquisitionCampaign: PrismaDelegate;
   readonly sellerAcquisitionCampaignMember: PrismaDelegate;
+  readonly campaignRuntimeExecution: PrismaDelegate;
   readonly draftInventory: PrismaDelegate;
   readonly marketplaceSellerInvitation: PrismaDelegate;
   readonly marketplaceClaimToken: PrismaDelegate;
@@ -279,6 +280,25 @@ export const sellerAcquisitionCampaignMemberRecordSchema = baseRecordSchema.exte
 export type SellerAcquisitionCampaignMemberRecord = z.output<typeof sellerAcquisitionCampaignMemberRecordSchema>;
 export type CreateSellerAcquisitionCampaignMemberInput = TenantScoped & Pick<SellerAcquisitionCampaignMemberRecord, "campaignId" | "marketplaceCaptureId"> & Partial<Pick<SellerAcquisitionCampaignMemberRecord, "contactId" | "dealId" | "status" | "assignedAt" | "metadata">>;
 
+export const campaignRuntimeExecutionStatusSchema = z.enum(["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]);
+export type CampaignRuntimeExecutionStatus = z.output<typeof campaignRuntimeExecutionStatusSchema>;
+export const campaignRuntimeExecutionTriggerSchema = z.enum(["MANUAL", "SCHEDULED", "SYSTEM"]);
+export type CampaignRuntimeExecutionTrigger = z.output<typeof campaignRuntimeExecutionTriggerSchema>;
+export const campaignRuntimeExecutionRecordSchema = baseRecordSchema.extend({
+  campaignId: z.string().min(1),
+  status: campaignRuntimeExecutionStatusSchema,
+  trigger: campaignRuntimeExecutionTriggerSchema,
+  startedAt: isoDateSchema.nullable().optional(),
+  completedAt: isoDateSchema.nullable().optional(),
+  failedAt: isoDateSchema.nullable().optional(),
+  errorCode: z.string().min(1).nullable().optional(),
+  errorMessage: z.string().min(1).nullable().optional(),
+  metrics: metadataSchema.nullable().optional(),
+}).required({ updatedAt: true }).passthrough();
+export type CampaignRuntimeExecutionRecord = z.output<typeof campaignRuntimeExecutionRecordSchema>;
+export type CreateCampaignRuntimeExecutionInput = TenantScoped & Pick<CampaignRuntimeExecutionRecord, "campaignId" | "trigger"> & Partial<Pick<CampaignRuntimeExecutionRecord, "status" | "startedAt" | "completedAt" | "failedAt" | "errorCode" | "errorMessage" | "metrics">>;
+export type UpdateCampaignRuntimeExecutionInput = Partial<Pick<CampaignRuntimeExecutionRecord, "status" | "startedAt" | "completedAt" | "failedAt" | "errorCode" | "errorMessage" | "metrics">>;
+
 export interface SellerAcquisitionCampaignRepository {
   create(context: TenantScoped, input: CreateSellerAcquisitionCampaignInput): Promise<SellerAcquisitionCampaignRecord>;
   findById(context: TenantScoped, id: string): Promise<SellerAcquisitionCampaignRecord | null>;
@@ -287,6 +307,14 @@ export interface SellerAcquisitionCampaignRepository {
   addSeller(context: TenantScoped, input: CreateSellerAcquisitionCampaignMemberInput): Promise<SellerAcquisitionCampaignMemberRecord>;
   removeSeller(context: TenantScoped, campaignId: string, memberId: string): Promise<SellerAcquisitionCampaignMemberRecord>;
   listMembers(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<SellerAcquisitionCampaignMemberRecord>>;
+}
+
+export interface CampaignRuntimeExecutionRepository {
+  create(context: TenantScoped, input: CreateCampaignRuntimeExecutionInput): Promise<CampaignRuntimeExecutionRecord>;
+  findById(context: TenantScoped, id: string): Promise<CampaignRuntimeExecutionRecord | null>;
+  findActiveByCampaignId(context: TenantScoped, campaignId: string): Promise<CampaignRuntimeExecutionRecord | null>;
+  listByCampaignId(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<CampaignRuntimeExecutionRecord>>;
+  update(context: TenantScoped, id: string, input: UpdateCampaignRuntimeExecutionInput): Promise<CampaignRuntimeExecutionRecord>;
 }
 
 export const marketplaceCaptureRecordSchema = baseRecordSchema.extend({
@@ -1366,6 +1394,62 @@ export class PrismaSellerAcquisitionCampaignRepository implements SellerAcquisit
       orderBy: { assignedAt: "desc" },
     });
     return paginate(rows.map((row) => parseRecord(sellerAcquisitionCampaignMemberRecordSchema, row)), limit);
+  }
+}
+
+export class PrismaCampaignRuntimeExecutionRepository implements CampaignRuntimeExecutionRepository {
+  constructor(private readonly prisma: PrismaPersistenceClient) {}
+
+  async create(context: TenantScoped, input: CreateCampaignRuntimeExecutionInput): Promise<CampaignRuntimeExecutionRecord> {
+    ensureTenantInput(context, input);
+    try {
+      return parseRecord(
+        campaignRuntimeExecutionRecordSchema,
+        await this.prisma.campaignRuntimeExecution.create({
+          data: dataWithDefined({ status: "QUEUED", metrics: {}, ...input }),
+        }),
+      );
+    } catch (error) {
+      return mapPrismaError(error, "Campaign runtime execution already exists");
+    }
+  }
+
+  async findById(context: TenantScoped, id: string): Promise<CampaignRuntimeExecutionRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.campaignRuntimeExecution.findFirst({ where: byTenantId(context, id) });
+    return row === null ? null : parseRecord(campaignRuntimeExecutionRecordSchema, row);
+  }
+
+  async findActiveByCampaignId(context: TenantScoped, campaignId: string): Promise<CampaignRuntimeExecutionRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.campaignRuntimeExecution.findFirst({
+      where: withTenant(context, { campaignId, status: { in: ["QUEUED", "RUNNING"] } }),
+      orderBy: { createdAt: "desc" },
+    });
+    return row === null ? null : parseRecord(campaignRuntimeExecutionRecordSchema, row);
+  }
+
+  async listByCampaignId(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<CampaignRuntimeExecutionRecord>> {
+    ensureContext(context);
+    const limit = Math.min(Math.max(page?.limit ?? 50, 1), 100);
+    const rows = await this.prisma.campaignRuntimeExecution.findMany({
+      where: withTenant(context, { campaignId, ...(page?.cursor ? { id: { gt: page.cursor } } : {}) }),
+      take: limit + 1,
+      orderBy: { createdAt: "desc" },
+    });
+    return paginate(rows.map((row) => parseRecord(campaignRuntimeExecutionRecordSchema, row)), limit);
+  }
+
+  async update(context: TenantScoped, id: string, input: UpdateCampaignRuntimeExecutionInput): Promise<CampaignRuntimeExecutionRecord> {
+    ensureContext(context);
+    const result = await this.prisma.campaignRuntimeExecution.updateMany({
+      where: byTenantId(context, id),
+      data: dataWithDefined(input),
+    });
+    if (result.count !== 1) notFound("Campaign runtime execution not found", { executionId: id });
+    const row = await this.prisma.campaignRuntimeExecution.findFirst({ where: byTenantId(context, id) });
+    if (row === null) notFound("Campaign runtime execution not found", { executionId: id });
+    return parseRecord(campaignRuntimeExecutionRecordSchema, row);
   }
 }
 
