@@ -145,6 +145,14 @@ export interface SellerInvitationServicePort {
     input: { readonly tenantId: string; readonly captureId: string; readonly channel: string },
   ): Promise<{ readonly invitationId: string; readonly status: string }> | { readonly invitationId: string; readonly status: string };
 }
+
+export interface CampaignRuntimeExecutionPort {
+  recordInvitationResult(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly executionId: string; readonly invitationId?: string | undefined; readonly status: string; readonly channel: string; readonly errorMessage?: string | undefined },
+  ): Promise<void> | void;
+}
+
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
   readonly scoring?: ScoreRecomputationServicePort | undefined;
@@ -152,6 +160,7 @@ export interface WorkerServices {
   readonly claimLifecycle?: ClaimLifecycleServicePort | undefined;
   readonly renderConversionRetry?: RenderConversionRetryServicePort | undefined;
   readonly sellerInvitation?: SellerInvitationServicePort | undefined;
+  readonly campaignRuntime?: CampaignRuntimeExecutionPort | undefined;
 }
 
 export interface QueueRegistration {
@@ -564,9 +573,22 @@ export const createScoreRecomputationHandler = (services: WorkerServices): Worke
 
 const sellerInvitationJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
-  captureId: z.string().min(1),
-  channel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).default('WHATSAPP'),
-}).strict();
+  campaignId: z.string().min(1).optional(),
+  opportunityId: z.string().min(1).optional(),
+  captureId: z.string().min(1).optional(),
+  executionId: z.string().min(1).optional(),
+  invitationId: z.string().min(1).nullable().optional(),
+  preferredChannel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).optional(),
+  channel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).optional(),
+  correlationId: z.string().min(1).optional(),
+}).strict().passthrough().transform((payload, ctx) => {
+  const captureId = payload.captureId ?? payload.opportunityId;
+  if (captureId === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'captureId or opportunityId is required' });
+    return z.NEVER;
+  }
+  return { ...payload, captureId, channel: payload.preferredChannel ?? payload.channel ?? 'WHATSAPP' };
+});
 
 export const createSellerInvitationHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
@@ -588,13 +610,32 @@ export const createSellerInvitationHandler = (services: WorkerServices): WorkerJ
         correlation: context.correlation,
       });
     }
-    const result = await services.sellerInvitation.sendInvitation(
-      { tenantId: payload.tenantId, correlation: context.correlation },
-      { tenantId: payload.tenantId, captureId: payload.captureId, channel: payload.channel },
-    );
+    let result: { readonly invitationId: string; readonly status: string };
+    try {
+      result = await services.sellerInvitation.sendInvitation(
+        { tenantId: payload.tenantId, correlation: context.correlation },
+        { tenantId: payload.tenantId, captureId: payload.captureId, channel: payload.channel },
+      );
+    } catch (error) {
+      if (payload.executionId !== undefined) {
+        await services.campaignRuntime?.recordInvitationResult(
+          { tenantId: payload.tenantId, correlation: context.correlation },
+          { executionId: payload.executionId, status: "FAILED", channel: payload.channel, errorMessage: error instanceof Error ? error.message : "Seller invitation worker failed" },
+        );
+      }
+      throw error;
+    }
+    if (payload.executionId !== undefined) {
+      await services.campaignRuntime?.recordInvitationResult(
+        { tenantId: payload.tenantId, correlation: context.correlation },
+        { executionId: payload.executionId, invitationId: result.invitationId, status: result.status, channel: payload.channel },
+      );
+    }
     return workerRuntimeMetadataSchema.parse({
       tenantId: payload.tenantId,
+      campaignId: payload.campaignId,
       captureId: payload.captureId,
+      executionId: payload.executionId,
       invitationId: result.invitationId,
       status: result.status,
       channel: payload.channel,
@@ -951,11 +992,41 @@ if (isMainModule()) {
     const config = createWorkerBootstrapConfigFromEnv();
     const prisma = new PrismaClient();
     const sellerInvitation = createSellerInvitationServicePort(prisma as unknown as import("@whisperm/repositories").PrismaPersistenceClient);
+    const campaignRuntime = {
+      async recordInvitationResult(context: { readonly tenantId: string }, input: { readonly executionId: string; readonly invitationId?: string | undefined; readonly status: string; readonly channel: string; readonly errorMessage?: string | undefined }) {
+        const existing = await prisma.campaignRuntimeExecution.findFirst({
+          where: { tenantId: context.tenantId, id: input.executionId },
+          select: { metrics: true },
+        });
+        const now = new Date().toISOString();
+        const metrics = typeof existing?.metrics === "object" && existing.metrics !== null && !Array.isArray(existing.metrics) ? existing.metrics : {};
+        const sent = input.status === "SENT";
+        const failureReason = input.errorMessage?.replace(/(token|secret|password|authorization|api[_-]?key)=[^\s&]+/giu, (_match, key) => `${key}=[REDACTED]`).slice(0, 500);
+        await prisma.campaignRuntimeExecution.updateMany({
+          where: { tenantId: context.tenantId, id: input.executionId },
+          data: {
+            status: sent ? "COMPLETED" : "FAILED",
+            completedAt: sent ? now : null,
+            failedAt: sent ? null : now,
+            errorMessage: sent ? null : failureReason ?? "Seller invitation worker failed",
+            metrics: {
+              ...metrics,
+              invitationExecutionState: sent ? "SENT" : "FAILED",
+              invitationId: input.invitationId ?? null,
+              provider: input.channel,
+              finalOutcome: input.status,
+              ...(sent ? { sentAt: now } : { failedAt: now, failureReason: failureReason ?? "Seller invitation worker failed" }),
+            },
+          },
+        });
+      },
+    };
     await runWorkerFromEnv({
       ...createBootstrapOnlyWorkerDependencies(config),
       services: {
         ...createBootstrapOnlyWorkerServices(),
         sellerInvitation,
+        campaignRuntime,
       },
     });
     await new Promise<void>((resolve) => {
