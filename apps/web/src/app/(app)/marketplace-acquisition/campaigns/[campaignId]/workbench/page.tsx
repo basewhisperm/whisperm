@@ -13,7 +13,7 @@ export default function CampaignWorkbenchPage({ params }: CampaignWorkbenchPageP
     <AcquisitionWorkbench
       mode="campaign"
       campaignId={campaignId}
-      recordsPath="/api/marketplace-acquisition/records"
+      recordsPath={`/api/marketplace-acquisition/campaigns/${encodeURIComponent(campaignId)}/records`}
       title="Campaign Workbench"
       description="Run seller acquisition operations for this campaign: review assigned sellers, fix extracted data, approve readiness, send WhatsApp-first invitations, retry failures, and move qualified sellers toward claim and conversion."
       contextNote="This campaign workbench only shows sellers assigned to this campaign. Use the global Acquisition Workbench for unassigned or cross-campaign seller operations."
