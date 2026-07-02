@@ -1,8 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService } from "@whisperm/services";
-import { PrismaCampaignRuntimeExecutionRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { CampaignRuntimeService, MarketplaceDiscoveryService } from "@whisperm/services";
+import { PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
@@ -148,6 +148,13 @@ export interface SellerInvitationServicePort {
   ): Promise<{ readonly invitationId: string; readonly status: string; readonly provider?: string | undefined }> | { readonly invitationId: string; readonly status: string; readonly provider?: string | undefined };
 }
 
+export interface MarketplaceDiscoveryExecutionPort {
+  executeAutonomousDiscovery(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string },
+  ): Promise<{ readonly discoveredCount: number; readonly capturedCount: number; readonly skippedDuplicateCount: number }> | { readonly discoveredCount: number; readonly capturedCount: number; readonly skippedDuplicateCount: number };
+}
+
 export interface CampaignRuntimeExecutionPort {
   runDueScheduledCampaigns?(
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
@@ -157,6 +164,11 @@ export interface CampaignRuntimeExecutionPort {
   recordInvitationResult(
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
     input: { readonly executionId: string; readonly opportunityId?: string | undefined; readonly invitationId?: string | undefined; readonly status: string; readonly channel: string; readonly provider?: string | undefined; readonly errorCode?: string | undefined; readonly errorMessage?: string | undefined; readonly retryable?: boolean | undefined },
+  ): Promise<void> | void;
+
+  recordDiscoveryResult?(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly executionId: string; readonly status: "COMPLETED" | "FAILED"; readonly discoveredCount?: number | undefined; readonly capturedCount?: number | undefined; readonly skippedDuplicateCount?: number | undefined; readonly errorCode?: string | undefined; readonly errorMessage?: string | undefined },
   ): Promise<void> | void;
 }
 
@@ -658,6 +670,42 @@ export const createSellerInvitationHandler = (services: WorkerServices): WorkerJ
 });
 
 
+const marketplaceDiscoveryJobPayloadSchema = z.object({
+  tenantId: z.string().min(1),
+  campaignId: z.string().min(1),
+  executionId: z.string().min(1),
+  replaySafe: z.literal(true),
+}).strict().passthrough();
+
+export const createMarketplaceDiscoveryHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.marketplaceDiscovery === undefined || services.campaignRuntime?.recordDiscoveryResult === undefined) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Marketplace discovery service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+    }
+    const payload = marketplaceDiscoveryJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Marketplace discovery job tenantId must match execution context", status: 403, correlation: context.correlation });
+    }
+    try {
+      const result = await services.marketplaceDiscovery.executeAutonomousDiscovery(
+        { tenantId: payload.tenantId, correlation: context.correlation },
+        { tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId },
+      );
+      await services.campaignRuntime.recordDiscoveryResult(
+        { tenantId: payload.tenantId, correlation: context.correlation },
+        { executionId: payload.executionId, status: "COMPLETED", ...result },
+      );
+      return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId, status: "COMPLETED", ...result, correlationId: context.correlation.correlationId });
+    } catch (error) {
+      await services.campaignRuntime.recordDiscoveryResult(
+        { tenantId: payload.tenantId, correlation: context.correlation },
+        { executionId: payload.executionId, status: "FAILED", errorCode: typeof error === "object" && error !== null && "code" in error ? String((error as { readonly code: unknown }).code) : "DISCOVERY_EXECUTION_FAILED", errorMessage: error instanceof Error ? error.message : "Discovery worker failed" },
+      );
+      throw error;
+    }
+  },
+});
+
 const schedulerTickJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
   now: z.string().datetime().optional(),
@@ -1037,6 +1085,42 @@ export class WorkerApplication {
   }
 }
 
+const discoveryEntriesFromMetadata = (metadata: unknown): readonly { readonly listingUrl: string; readonly sellerName?: string; readonly phone?: string; readonly email?: string; readonly sellerProfileUrl?: string; readonly title?: string; readonly description?: string; readonly price?: string | number; readonly currency?: string; readonly category?: string; readonly location?: string; readonly images?: readonly string[]; readonly portfolioListingCount?: number }[] => {
+  if (typeof metadata !== "object" || metadata === null) return [];
+  const discovery = (metadata as { readonly discovery?: unknown }).discovery;
+  if (typeof discovery !== "object" || discovery === null) return [];
+  const entries = (discovery as { readonly entries?: unknown }).entries;
+  if (!Array.isArray(entries)) return [];
+  return entries.filter((entry): entry is { readonly listingUrl: string } => typeof entry === "object" && entry !== null && typeof (entry as { readonly listingUrl?: unknown }).listingUrl === "string");
+};
+
+export const createMarketplaceDiscoveryExecutionPort = (input: {
+  readonly campaigns: SellerAcquisitionCampaignRepository;
+  readonly discovery: MarketplaceDiscoveryService;
+}): MarketplaceDiscoveryExecutionPort => ({
+  async executeAutonomousDiscovery(context, job) {
+    const campaign = await input.campaigns.findById({ tenantId: context.tenantId }, job.campaignId);
+    if (campaign === null) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Campaign not found for discovery execution", status: 404, correlation: context.correlation });
+    }
+    const metadata = campaign.metadata ?? {};
+    const discovery = typeof metadata === "object" && metadata !== null ? (metadata as { readonly discovery?: Record<string, unknown> }).discovery ?? {} : {};
+    const entries = discoveryEntriesFromMetadata(metadata);
+    const marketplaceSourceId = typeof discovery.marketplaceSourceId === "string" ? discovery.marketplaceSourceId : "internal-autonomous-discovery";
+    const marketplaceSourceKey = typeof discovery.marketplaceSourceKey === "string" ? discovery.marketplaceSourceKey : marketplaceSourceId;
+    const discoveryCreditsRemaining = typeof discovery.discoveryCreditsRemaining === "number" ? discovery.discoveryCreditsRemaining : Math.max(entries.length, 1);
+    const result = await input.discovery.runDiscovery(
+      { tenantId: context.tenantId, actorId: "campaign-runtime" },
+      { campaignId: job.campaignId, marketplaceSourceId, marketplaceSourceKey, mode: "MANUAL_SEED", entries, discoveryCreditsRemaining },
+    );
+    return {
+      discoveredCount: result.sellersFound,
+      capturedCount: result.sellersQualified + result.sellersNeedsReview,
+      skippedDuplicateCount: result.sellersDuplicate,
+    };
+  },
+});
+
 export const createWorkerApplication = (dependencies: WorkerApplicationDependencies): WorkerApplication => new WorkerApplication(dependencies);
 
 export const runWorkerFromEnv = async (dependencies: Omit<WorkerApplicationDependencies, "config">): Promise<WorkerApplication> => {
@@ -1066,10 +1150,13 @@ if (isMainModule()) {
     const prisma = new PrismaClient();
     const persistence = prisma as unknown as PrismaPersistenceClient;
     const sellerInvitation = createSellerInvitationServicePort(persistence);
+    const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
+    const discoveryQueue = { async enqueueDiscovery(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true }) { void input; } };
     const campaignRuntimeService = new CampaignRuntimeService({
-      campaigns: new PrismaSellerAcquisitionCampaignRepository(persistence),
+      campaigns,
       executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
       sellerInvitations: new PrismaSellerInvitationRepository(persistence),
+      discoveryQueue,
     });
     const campaignRuntime = {
       async runDueScheduledCampaigns(context: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[0], input: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[1]) {
@@ -1078,6 +1165,9 @@ if (isMainModule()) {
       async recordInvitationResult(context: Parameters<typeof campaignRuntimeService.recordInvitationResult>[0], input: Parameters<typeof campaignRuntimeService.recordInvitationResult>[1]) {
         await campaignRuntimeService.recordInvitationResult(context, input);
       },
+      async recordDiscoveryResult(context: Parameters<typeof campaignRuntimeService.recordDiscoveryResult>[0], input: Parameters<typeof campaignRuntimeService.recordDiscoveryResult>[1]) {
+        await campaignRuntimeService.recordDiscoveryResult(context, input);
+      },
     };
     await runWorkerFromEnv({
       ...createBootstrapOnlyWorkerDependencies(config),
@@ -1085,6 +1175,7 @@ if (isMainModule()) {
         ...createBootstrapOnlyWorkerServices(),
         sellerInvitation,
         campaignRuntime,
+        marketplaceDiscovery: createMarketplaceDiscoveryExecutionPort({ campaigns, discovery: new MarketplaceDiscoveryService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence) }) }),
       },
     });
     await new Promise<void>((resolve) => {
