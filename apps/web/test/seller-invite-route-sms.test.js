@@ -3,30 +3,23 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const route = readFileSync(new URL('../src/app/api/marketplace-acquisition/captures/[id]/invite/route.ts', import.meta.url), 'utf8');
-const metaWhatsappProvider = readFileSync(new URL("../../../packages/provider-adapters/src/whatsapp/meta-whatsapp-cloud-provider.ts", import.meta.url), "utf8");
 
-test('seller acquisition invite route wires the generic SMS provider from launch environment variables', () => {
-  assert.match(route, /createHttpSmsProviderFromEnv/u);
-  assert.match(route, /SELLER_INVITATION_SMS_PROVIDER/u);
-  assert.match(route, /SELLER_INVITATION_SMS_API_URL/u);
-  assert.match(route, /SELLER_INVITATION_SMS_API_KEY/u);
-  assert.match(route, /SELLER_INVITATION_SMS_SENDER_ID/u);
-  assert.match(route, /configuredSmsProvider/u);
-  assert.match(route, /\.\.\.\(sms === undefined \? \{\} : \{ sms \}\)/u);
+test('seller acquisition invite route delegates execution to campaign runtime', () => {
+  assert.match(route, /CampaignRuntimeService/u);
+  assert.match(route, /executeInvitation/u);
+  assert.match(route, /invitationQueue/u);
+  assert.match(route, /queueJob\.create/u);
 });
 
-test('seller acquisition invite route keeps Resend email optional and avoids TrustLayer dependency', () => {
-  assert.match(route, /configuredEmailProvider/u);
-  assert.match(route, /RESEND_API_KEY/u);
-  assert.doesNotMatch(route, /TrustLayer|trustLayer/u);
+test('seller acquisition invite route resolves campaign membership before runtime dispatch', () => {
+  assert.match(route, /sellerAcquisitionCampaignMember\.findFirst/u);
+  assert.match(route, /resolveCampaignId/u);
+  assert.match(route, /Capture is not assigned to a campaign/u);
 });
 
-
-test('seller acquisition invite route wires Meta WhatsApp Cloud API provider from environment variables', () => {
-  assert.match(route, /createMetaWhatsAppCloudProviderFromEnv/u);
-  assert.match(metaWhatsappProvider, /META_WHATSAPP_ACCESS_TOKEN/u);
-  assert.match(metaWhatsappProvider, /META_WHATSAPP_PHONE_NUMBER_ID/u);
-  assert.match(metaWhatsappProvider, /WHATSAPP_CLOUD_TEMPLATE_NAME/u);
-  assert.match(metaWhatsappProvider, /graph\.facebook\.com/u);
-  assert.match(route, /\.\.\.\(whatsapp === undefined \? \{\} : \{ whatsapp \}\)/u);
+test('seller acquisition invite route no longer wires providers directly', () => {
+  assert.doesNotMatch(route, /createHttpSmsProviderFromEnv/u);
+  assert.doesNotMatch(route, /configuredSmsProvider/u);
+  assert.doesNotMatch(route, /configuredEmailProvider/u);
+  assert.doesNotMatch(route, /createMetaWhatsAppCloudProviderFromEnv/u);
 });
