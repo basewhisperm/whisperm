@@ -104,14 +104,15 @@ test('registers event ingestion, score recomputation, notification, claim lifecy
 
   const registrations = await app.start();
 
-  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'render.conversion.retry', 'marketplace.invite', 'publish', 'scheduler']);
-  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'render.conversion.retry', 'marketplace.invite.send', 'publish.dispatch', 'scheduler.tick']);
+  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'render.conversion.retry', 'marketplace.invite', 'marketplace.discovery', 'publish', 'scheduler']);
+  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'render.conversion.retry', 'marketplace.invite.send', 'marketplace.discovery.execute', 'publish.dispatch', 'scheduler.tick']);
   assert.equal(app.getReadiness().status, 'HEALTHY');
   assert.equal(queues.isWorkerActive('event-ingestion-worker'), true);
   assert.equal(queues.isWorkerActive('score-recomputation-worker'), true);
   assert.equal(queues.isWorkerActive('notification-worker'), true);
   assert.equal(queues.isWorkerActive('claim-lifecycle-worker'), true);
   assert.equal(queues.isWorkerActive('render-conversion-retry-worker'), true);
+  assert.equal(queues.isWorkerActive('marketplace-discovery-worker'), true);
   assert.equal(queues.isWorkerActive('publish-worker'), true);
   assert.equal(queues.isWorkerActive('scheduler-worker'), true);
 });
@@ -474,4 +475,57 @@ test('scheduler worker delegates due campaign execution to campaign runtime', as
   assert.equal(calls[0].context.tenantId, 'tenant-1');
   assert.equal(calls[0].input.now.toISOString(), fixedDate.toISOString());
   assert.equal(calls[0].input.limit, 25);
+});
+
+test('marketplace discovery worker executes through service port and records runtime success', async () => {
+  const { ports } = createRuntimePorts();
+  const calls = [];
+  const app = createApp({
+    events: { async ingest() { throw new Error('unused'); } },
+    marketplaceDiscovery: {
+      async executeAutonomousDiscovery(context, input) {
+        calls.push({ context, input });
+        return { discoveredCount: 2, capturedCount: 1, skippedDuplicateCount: 1 };
+      },
+    },
+    campaignRuntime: {
+      async recordInvitationResult() {},
+      async recordDiscoveryResult(context, input) { calls.push({ recordContext: context, recordInput: input }); },
+    },
+  }, ports);
+  const result = await app.processJob({ job: createJob({
+    jobId: 'discovery-job-1',
+    queueName: 'marketplace.discovery',
+    jobType: 'marketplace.discovery.execute',
+    payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', replaySafe: true },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'discovery:execution-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.discovery', priority: 'NORMAL' },
+  }) });
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(calls[0].input.executionId, 'execution-1');
+  assert.equal(calls[1].recordInput.status, 'COMPLETED');
+  assert.equal(calls[1].recordInput.discoveredCount, 2);
+});
+
+test('marketplace discovery worker records failure before retry or dead-letter handling', async () => {
+  const { ports } = createRuntimePorts();
+  const recorded = [];
+  const app = createApp({
+    events: { async ingest() { throw new Error('unused'); } },
+    marketplaceDiscovery: { async executeAutonomousDiscovery() { throw new Error('provider failed token=secret'); } },
+    campaignRuntime: {
+      async recordInvitationResult() {},
+      async recordDiscoveryResult(_context, input) { recorded.push(input); },
+    },
+  }, ports);
+  const result = await app.processJob({ job: createJob({
+    jobId: 'discovery-job-2',
+    queueName: 'marketplace.discovery',
+    jobType: 'marketplace.discovery.execute',
+    payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', replaySafe: true },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'discovery:execution-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.discovery', priority: 'NORMAL' },
+  }) });
+  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(recorded[0].status, 'FAILED');
 });

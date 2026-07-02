@@ -77,3 +77,12 @@ test("AcquisitionWorkbench keeps global records path unchanged without campaignI
   assert.match(component, /campaignId === undefined \|\| campaignId\.trim\(\)\.length === 0/u);
   assert.match(component, /return recordsPath/u);
 });
+
+test("campaign workbench visualizes autonomous discovery runtime state without executing discovery", () => {
+  assert.match(component, /fetchDiscoveryRuntimeState/u);
+  assert.match(component, /Autonomous discovery execution/u);
+  assert.match(component, /discoveredCount/u);
+  assert.match(component, /capturedCount/u);
+  assert.match(component, /skippedDuplicateCount/u);
+  assert.doesNotMatch(component, /runDiscovery\(/u);
+});
