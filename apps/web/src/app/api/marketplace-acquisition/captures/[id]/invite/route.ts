@@ -33,6 +33,7 @@ const invitationQueue = (): CampaignRuntimeInvitationQueue => ({
           preferredChannel: input.preferredChannel ?? "WHATSAPP",
           channel: input.preferredChannel ?? "WHATSAPP",
           correlationId: input.correlationId ?? input.executionId,
+          delayMs: input.delayMs ?? 0,
           replaySafe: true,
         },
         maxAttempts: 3,

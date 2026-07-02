@@ -129,14 +129,63 @@ test('recordInvitationResult completes runtime execution with safe delivery metr
   assert.ok(result.metrics.deliveredAt);
 });
 
-test('recordInvitationResult fails runtime execution with sanitized retryable failure', async () => {
+test('recordInvitationResult schedules retry with sanitized retryable failure', async () => {
   const executions = new MemoryExecutions();
   const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions });
   const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { invitationExecutionState: 'DISPATCHED', opportunityId: 'capture-1' } });
   const result = await service.recordInvitationResult({ tenantId: 'tenant-1' }, { executionId: created.id, opportunityId: 'capture-1', status: 'FAILED', channel: 'SMS', errorMessage: 'provider failed authorization=secret-token', retryable: true });
-  assert.equal(result.status, 'FAILED');
-  assert.equal(result.metrics.invitationExecutionState, 'FAILED');
+  assert.equal(result.status, 'RUNNING');
+  assert.equal(result.metrics.invitationExecutionState, 'RETRY_SCHEDULED');
   assert.equal(result.metrics.retryable, true);
-  assert.match(result.errorMessage, /authorization=\[REDACTED\]/);
-  assert.doesNotMatch(result.errorMessage, /secret-token/);
+  assert.match(result.metrics.failureMessage, /authorization=\[REDACTED\]/);
+  assert.doesNotMatch(result.metrics.failureMessage, /secret-token/);
+});
+
+test('retryable invitation failure schedules deterministic retry without terminal failure', async () => {
+  const executions = new MemoryExecutions();
+  const calls = [];
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, invitationQueue: { async enqueueInvitation(input) { calls.push(input); } } });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { invitationExecutionState: 'DISPATCHED', opportunityId: 'capture-1', retryCount: 0, maxRetries: 3 } });
+  const result = await service.recordInvitationResult({ tenantId: 'tenant-1', correlation: { correlationId: 'corr-1' } }, { executionId: created.id, opportunityId: 'capture-1', status: 'FAILED', channel: 'SMS', errorCode: 'PROVIDER_UNAVAILABLE', errorMessage: 'provider failed api_key=secret', retryable: true });
+  assert.equal(result.status, 'RUNNING');
+  assert.equal(result.metrics.invitationExecutionState, 'RETRY_SCHEDULED');
+  assert.equal(result.metrics.retryCount, 1);
+  assert.equal(new Date(result.metrics.nextRetryAt).getTime() - new Date(result.metrics.lastAttemptAt).getTime(), 300000);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].delayMs, 300000);
+  assert.doesNotMatch(result.metrics.failureMessage, /secret/);
+});
+
+test('non-retryable invitation failure dead-letters without requeue', async () => {
+  const executions = new MemoryExecutions();
+  const calls = [];
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, invitationQueue: { async enqueueInvitation(input) { calls.push(input); } } });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { invitationExecutionState: 'DISPATCHED', opportunityId: 'capture-1', retryCount: 0, maxRetries: 3 } });
+  const result = await service.recordInvitationResult({ tenantId: 'tenant-1' }, { executionId: created.id, opportunityId: 'capture-1', status: 'FAILED', channel: 'EMAIL', errorCode: 'INVALID_RECIPIENT', retryable: false });
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.metrics.invitationExecutionState, 'DEAD_LETTERED');
+  assert.equal(calls.length, 0);
+});
+
+test('max retry exhaustion dead-letters invitation execution', async () => {
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, invitationQueue: { async enqueueInvitation() { throw new Error('should not enqueue'); } } });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { invitationExecutionState: 'RETRY_SCHEDULED', opportunityId: 'capture-1', retryCount: 2, maxRetries: 3 } });
+  const result = await service.recordInvitationResult({ tenantId: 'tenant-1' }, { executionId: created.id, opportunityId: 'capture-1', status: 'FAILED', channel: 'WHATSAPP', retryable: true });
+  assert.equal(result.metrics.retryCount, 3);
+  assert.equal(result.metrics.invitationExecutionState, 'DEAD_LETTERED');
+});
+
+test('manual retry is tenant-scoped and dispatches through existing queue path', async () => {
+  const executions = new MemoryExecutions();
+  const calls = [];
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, invitationQueue: { async enqueueInvitation(input) { calls.push(input); } } });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'FAILED', metrics: { invitationExecutionState: 'DEAD_LETTERED', opportunityId: 'capture-1', invitationId: 'invite-1', channel: 'WHATSAPP', retryCount: 3, maxRetries: 3 } });
+  await assert.rejects(service.retryInvitationExecution({ tenantId: 'tenant-2' }, created.id), /not found/);
+  const result = await service.retryInvitationExecution({ tenantId: 'tenant-1' }, created.id);
+  assert.equal(result.status, 'RUNNING');
+  assert.equal(result.metrics.invitationExecutionState, 'DISPATCHED');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].tenantId, 'tenant-1');
+  assert.equal(calls[0].opportunityId, 'capture-1');
 });
