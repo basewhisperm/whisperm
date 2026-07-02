@@ -731,3 +731,5 @@ export type { MetaWhatsAppCloudProviderOptions } from "./whatsapp/meta-whatsapp-
 
 export { RenderSellerHttpConnector, RenderSellerConnectorError, createRenderSellerConnectorFromEnv } from "./render-seller.js";
 export type { RenderSellerConnector, RenderSellerPayload, CreateRenderSellerInput, CreateRenderSellerResult } from "./render-seller.js";
+
+export * from "./discovery.js";

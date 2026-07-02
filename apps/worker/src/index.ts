@@ -160,6 +160,10 @@ export interface CampaignRuntimeExecutionPort {
   ): Promise<void> | void;
 }
 
+export interface DiscoveryExecutionServicePort {
+  execute(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly trigger: "MANUAL" | "SCHEDULED" | "SYSTEM"; readonly correlation: CorrelationMetadata }): Promise<{ readonly status: string; readonly metrics?: Readonly<Record<string, unknown>>; readonly errorCode?: string; readonly errorMessage?: string }> | { readonly status: string; readonly metrics?: Readonly<Record<string, unknown>>; readonly errorCode?: string; readonly errorMessage?: string };
+}
+
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
   readonly scoring?: ScoreRecomputationServicePort | undefined;
@@ -168,6 +172,7 @@ export interface WorkerServices {
   readonly renderConversionRetry?: RenderConversionRetryServicePort | undefined;
   readonly sellerInvitation?: SellerInvitationServicePort | undefined;
   readonly campaignRuntime?: CampaignRuntimeExecutionPort | undefined;
+  readonly discoveryExecution?: DiscoveryExecutionServicePort | undefined;
 }
 
 export interface QueueRegistration {
@@ -659,6 +664,25 @@ const schedulerTickJobPayloadSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
 }).strict().passthrough();
 
+const discoveryExecutionJobPayloadSchema = z.object({ tenantId: z.string().min(1), campaignId: z.string().min(1), executionId: z.string().min(1), trigger: z.enum(["MANUAL", "SCHEDULED", "SYSTEM"]).default("MANUAL") }).strict();
+
+export const createDiscoveryExecutionHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.discoveryExecution === undefined) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Discovery execution service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+    }
+    const payload = discoveryExecutionJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Discovery execution job tenantId must match execution context", status: 403, correlation: context.correlation });
+    }
+    const result = await services.discoveryExecution.execute({ ...payload, correlation: context.correlation });
+    if (result.status === "FAILED") {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: result.errorMessage ?? "Discovery execution failed", status: 502, retryable: result.metrics?.retryable !== false, correlation: context.correlation });
+    }
+    return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId, ...(result.metrics ?? {}), correlationId: context.correlation.correlationId });
+  },
+});
+
 export const createSchedulerTickHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.campaignRuntime?.runDueScheduledCampaigns === undefined) {
@@ -728,6 +752,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.invite", deadLetterQueueName: "marketplace.invite.dlq" }),
       jobTypes: ["marketplace.invite.send"],
       handler: createSellerInvitationHandler(input.services),
+    },
+    {
+      name: "marketplace-discovery-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.discovery", deadLetterQueueName: "marketplace.discovery.dlq" }),
+      jobTypes: ["marketplace.discovery.execute"],
+      handler: createDiscoveryExecutionHandler(input.services),
     },
     {
       name: "publish-worker",
