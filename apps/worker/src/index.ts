@@ -184,6 +184,7 @@ export interface WorkerServices {
   readonly renderConversionRetry?: RenderConversionRetryServicePort | undefined;
   readonly sellerInvitation?: SellerInvitationServicePort | undefined;
   readonly campaignRuntime?: CampaignRuntimeExecutionPort | undefined;
+  readonly marketplaceDiscovery?: MarketplaceDiscoveryExecutionPort | undefined;
   readonly discoveryExecution?: DiscoveryExecutionServicePort | undefined;
 }
 
