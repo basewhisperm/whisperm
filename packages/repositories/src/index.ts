@@ -265,12 +265,17 @@ export const sellerAcquisitionCampaignRecordSchema = baseRecordSchema.extend({
   currency: z.string().min(1).nullable().optional(),
   startsAt: isoDateSchema.nullable().optional(),
   endsAt: isoDateSchema.nullable().optional(),
+  scheduleEnabled: z.boolean().default(false),
+  scheduleCadence: z.enum(["HOURLY", "DAILY", "WEEKLY"]).nullable().optional(),
+  scheduleTimezone: z.string().min(1).nullable().optional(),
+  nextRunAt: isoDateSchema.nullable().optional(),
+  lastRunAt: isoDateSchema.nullable().optional(),
   metadata: metadataSchema.nullable().optional(),
 }).required({ updatedAt: true }).passthrough();
 
 export type SellerAcquisitionCampaignRecord = z.output<typeof sellerAcquisitionCampaignRecordSchema>;
-export type CreateSellerAcquisitionCampaignInput = TenantScoped & Pick<SellerAcquisitionCampaignRecord, "name"> & Partial<Pick<SellerAcquisitionCampaignRecord, "description" | "status" | "ownerId" | "goalSellerCount" | "goalRevenue" | "currency" | "startsAt" | "endsAt" | "metadata">>;
-export type UpdateSellerAcquisitionCampaignInput = Partial<Pick<SellerAcquisitionCampaignRecord, "name" | "description" | "status" | "ownerId" | "goalSellerCount" | "goalRevenue" | "currency" | "startsAt" | "endsAt" | "metadata">>;
+export type CreateSellerAcquisitionCampaignInput = TenantScoped & Pick<SellerAcquisitionCampaignRecord, "name"> & Partial<Pick<SellerAcquisitionCampaignRecord, "description" | "status" | "ownerId" | "goalSellerCount" | "goalRevenue" | "currency" | "startsAt" | "endsAt" | "scheduleEnabled" | "scheduleCadence" | "scheduleTimezone" | "nextRunAt" | "lastRunAt" | "metadata">>;
+export type UpdateSellerAcquisitionCampaignInput = Partial<Pick<SellerAcquisitionCampaignRecord, "name" | "description" | "status" | "ownerId" | "goalSellerCount" | "goalRevenue" | "currency" | "startsAt" | "endsAt" | "scheduleEnabled" | "scheduleCadence" | "scheduleTimezone" | "nextRunAt" | "lastRunAt" | "metadata">>;
 
 export const sellerAcquisitionCampaignMemberRecordSchema = baseRecordSchema.extend({
   campaignId: z.string().min(1),
@@ -310,6 +315,7 @@ export interface SellerAcquisitionCampaignRepository {
   findById(context: TenantScoped, id: string): Promise<SellerAcquisitionCampaignRecord | null>;
   list(context: TenantScoped, page?: PageRequest): Promise<Page<SellerAcquisitionCampaignRecord>>;
   update(context: TenantScoped, id: string, input: UpdateSellerAcquisitionCampaignInput): Promise<SellerAcquisitionCampaignRecord>;
+  listDueScheduled(context: TenantScoped, now: string, page?: PageRequest): Promise<Page<SellerAcquisitionCampaignRecord>>;
   addSeller(context: TenantScoped, input: CreateSellerAcquisitionCampaignMemberInput): Promise<SellerAcquisitionCampaignMemberRecord>;
   removeSeller(context: TenantScoped, campaignId: string, memberId: string): Promise<SellerAcquisitionCampaignMemberRecord>;
   listMembers(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<SellerAcquisitionCampaignMemberRecord>>;
@@ -1359,6 +1365,23 @@ export class PrismaSellerAcquisitionCampaignRepository implements SellerAcquisit
     const row = await this.prisma.sellerAcquisitionCampaign.findFirst({ where: byTenantId(context, id) });
     if (row === null) notFound("Seller acquisition campaign not found", { campaignId: id });
     return parseRecord(sellerAcquisitionCampaignRecordSchema, row);
+  }
+
+
+  async listDueScheduled(context: TenantScoped, now: string, page?: PageRequest): Promise<Page<SellerAcquisitionCampaignRecord>> {
+    ensureContext(context);
+    const limit = Math.min(Math.max(page?.limit ?? 50, 1), 100);
+    const rows = await this.prisma.sellerAcquisitionCampaign.findMany({
+      where: withTenant(context, {
+        scheduleEnabled: true,
+        status: "ACTIVE",
+        nextRunAt: { lte: new Date(now) },
+        ...(page?.cursor ? { id: { gt: page.cursor } } : {}),
+      }),
+      take: limit + 1,
+      orderBy: { nextRunAt: "asc" },
+    });
+    return paginate(rows.map((row) => parseRecord(sellerAcquisitionCampaignRecordSchema, row)), limit);
   }
 
   async addSeller(context: TenantScoped, input: CreateSellerAcquisitionCampaignMemberInput): Promise<SellerAcquisitionCampaignMemberRecord> {

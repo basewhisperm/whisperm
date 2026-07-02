@@ -149,6 +149,11 @@ export interface SellerInvitationServicePort {
 }
 
 export interface CampaignRuntimeExecutionPort {
+  runDueScheduledCampaigns?(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input?: { readonly now?: Date | undefined; readonly limit?: number | undefined },
+  ): Promise<{ readonly started: number; readonly skipped: number }> | { readonly started: number; readonly skipped: number };
+
   recordInvitationResult(
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
     input: { readonly executionId: string; readonly opportunityId?: string | undefined; readonly invitationId?: string | undefined; readonly status: string; readonly channel: string; readonly provider?: string | undefined; readonly errorCode?: string | undefined; readonly errorMessage?: string | undefined; readonly retryable?: boolean | undefined },
@@ -647,6 +652,41 @@ export const createSellerInvitationHandler = (services: WorkerServices): WorkerJ
   },
 });
 
+
+const schedulerTickJobPayloadSchema = z.object({
+  tenantId: z.string().min(1),
+  now: z.string().datetime().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+}).strict().passthrough();
+
+export const createSchedulerTickHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.campaignRuntime?.runDueScheduledCampaigns === undefined) {
+      throw new WorkerRuntimeError({
+        code: 'WORKER_RUNTIME_VALIDATION_FAILED',
+        message: 'Campaign runtime scheduler port is not configured',
+        status: 503,
+        retryable: true,
+        correlation: context.correlation,
+      });
+    }
+    const payload = schedulerTickJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({
+        code: 'WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION',
+        message: 'Scheduler tick job tenantId must match execution context',
+        status: 403,
+        correlation: context.correlation,
+      });
+    }
+    const result = await services.campaignRuntime.runDueScheduledCampaigns(
+      { tenantId: payload.tenantId, correlation: context.correlation },
+      { now: payload.now === undefined ? undefined : new Date(payload.now), limit: payload.limit },
+    );
+    return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, started: result.started, skipped: result.skipped, correlationId: context.correlation.correlationId });
+  },
+});
+
 export const createWorkerDefinitions = (input: {
   readonly tenantId: string;
   readonly services: WorkerServices;
@@ -699,7 +739,7 @@ export const createWorkerDefinitions = (input: {
       name: "scheduler-worker",
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "scheduler", deadLetterQueueName: "scheduler.dlq", capabilities: placeholderQueueCapabilities }),
       jobTypes: ["scheduler.tick"],
-      handler: createPlaceholderHandler("scheduler-worker"),
+      handler: createSchedulerTickHandler(input.services),
     },
   ];
 
@@ -1002,6 +1042,9 @@ if (isMainModule()) {
       sellerInvitations: new PrismaSellerInvitationRepository(persistence),
     });
     const campaignRuntime = {
+      async runDueScheduledCampaigns(context: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[0], input: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[1]) {
+        return campaignRuntimeService.runDueScheduledCampaigns(context, input);
+      },
       async recordInvitationResult(context: Parameters<typeof campaignRuntimeService.recordInvitationResult>[0], input: Parameters<typeof campaignRuntimeService.recordInvitationResult>[1]) {
         await campaignRuntimeService.recordInvitationResult(context, input);
       },

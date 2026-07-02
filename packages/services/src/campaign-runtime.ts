@@ -62,6 +62,16 @@ export const nextInvitationRetryAt = (retryCount: number, now: Date = new Date()
   return new Date(now.getTime() + (invitationBackoffMs[index] ?? 7_200_000)).toISOString();
 };
 
+export interface RunDueScheduledCampaignsInput {
+  readonly now?: Date | undefined;
+  readonly limit?: number | undefined;
+}
+
+export interface RunDueScheduledCampaignsResult {
+  readonly started: number;
+  readonly skipped: number;
+}
+
 export interface CampaignRuntimeServiceDependencies {
   readonly campaigns: SellerAcquisitionCampaignRepository;
   readonly executions: CampaignRuntimeExecutionRepository;
@@ -71,6 +81,15 @@ export interface CampaignRuntimeServiceDependencies {
 }
 
 const activeStatuses = new Set(["QUEUED", "RUNNING"]);
+
+const nextRunAtForCadence = (from: Date, cadence: string | null | undefined): string | null => {
+  const next = new Date(from.getTime());
+  if (cadence === "HOURLY") next.setUTCHours(next.getUTCHours() + 1);
+  else if (cadence === "DAILY") next.setUTCDate(next.getUTCDate() + 1);
+  else if (cadence === "WEEKLY") next.setUTCDate(next.getUTCDate() + 7);
+  else return null;
+  return next.toISOString();
+};
 
 const sanitizeErrorMessage = (error: unknown): string => {
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "Campaign runtime worker failed";
@@ -190,6 +209,33 @@ export class CampaignRuntimeService {
     }
   }
 
+
+
+  async runDueScheduledCampaigns(context: TenantScoped, input: RunDueScheduledCampaignsInput = {}): Promise<RunDueScheduledCampaignsResult> {
+    const now = input.now ?? new Date();
+    const due = await this.deps.campaigns.listDueScheduled(context, now.toISOString(), { limit: input.limit ?? 50 });
+    let started = 0;
+    let skipped = 0;
+
+    for (const campaign of due.items) {
+      try {
+        await this.startCampaignExecution(context, { campaignId: campaign.id, trigger: "SCHEDULED" });
+        started += 1;
+        await this.deps.campaigns.update(context, campaign.id, {
+          lastRunAt: now.toISOString(),
+          nextRunAt: nextRunAtForCadence(now, campaign.scheduleCadence),
+        });
+      } catch (error) {
+        if (error instanceof PersistenceError && error.status === 409) {
+          skipped += 1;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return { started, skipped };
+  }
 
   async recordInvitationResult(context: TenantScoped, input: RecordInvitationResultInput): Promise<CampaignRuntimeExecutionRecord> {
     const existing = await this.deps.executions.findById(context, input.executionId);

@@ -8,6 +8,13 @@ const campaign = (overrides = {}) => ({ id: 'campaign-1', tenantId: 'tenant-1', 
 class MemoryCampaigns {
   constructor(campaigns) { this.campaigns = campaigns; }
   async findById(context, id) { return this.campaigns.find((row) => row.tenantId === context.tenantId && row.id === id) ?? null; }
+  async listDueScheduled(context, dueNow) { return { items: this.campaigns.filter((row) => row.tenantId === context.tenantId && row.status === 'ACTIVE' && row.scheduleEnabled === true && row.nextRunAt && row.nextRunAt <= dueNow) }; }
+  async update(context, id, input) {
+    const row = await this.findById(context, id);
+    assert.ok(row);
+    Object.assign(row, input, { updatedAt: now });
+    return row;
+  }
 }
 
 class MemoryExecutions {
@@ -188,4 +195,35 @@ test('manual retry is tenant-scoped and dispatches through existing queue path',
   assert.equal(calls.length, 1);
   assert.equal(calls[0].tenantId, 'tenant-1');
   assert.equal(calls[0].opportunityId, 'capture-1');
+});
+
+test('due scheduled campaigns start scheduled executions and advance schedule', async () => {
+  const source = campaign({ scheduleEnabled: true, scheduleCadence: 'DAILY', scheduleTimezone: 'UTC', nextRunAt: '2026-06-29T00:00:00.000Z', lastRunAt: null });
+  const campaigns = new MemoryCampaigns([source]);
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns, executions });
+  const result = await service.runDueScheduledCampaigns({ tenantId: 'tenant-1' }, { now: new Date(now) });
+  assert.deepEqual(result, { started: 1, skipped: 0 });
+  assert.equal(executions.rows[0].trigger, 'SCHEDULED');
+  assert.equal(source.lastRunAt, now);
+  assert.equal(source.nextRunAt, '2026-07-01T00:00:00.000Z');
+});
+
+test('disabled scheduled campaigns do not create executions', async () => {
+  const source = campaign({ scheduleEnabled: false, scheduleCadence: 'DAILY', nextRunAt: '2026-06-29T00:00:00.000Z' });
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([source]), executions });
+  const result = await service.runDueScheduledCampaigns({ tenantId: 'tenant-1' }, { now: new Date(now) });
+  assert.deepEqual(result, { started: 0, skipped: 0 });
+  assert.equal(executions.rows.length, 0);
+});
+
+test('scheduled runner skips campaigns with duplicate active executions', async () => {
+  const source = campaign({ scheduleEnabled: true, scheduleCadence: 'HOURLY', nextRunAt: '2026-06-29T00:00:00.000Z' });
+  const executions = new MemoryExecutions();
+  await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING' });
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([source]), executions });
+  const result = await service.runDueScheduledCampaigns({ tenantId: 'tenant-1' }, { now: new Date(now) });
+  assert.deepEqual(result, { started: 0, skipped: 1 });
+  assert.equal(source.lastRunAt, undefined);
 });
