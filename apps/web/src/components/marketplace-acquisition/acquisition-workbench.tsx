@@ -69,6 +69,37 @@ import {
 
 
 
+interface DiscoveryRuntimeState {
+  readonly status: string;
+  readonly discoveredCount: number;
+  readonly capturedCount: number;
+  readonly skippedDuplicateCount: number;
+  readonly lastExecutionTime?: string | undefined;
+  readonly failureMessage?: string | undefined;
+}
+
+const latestDiscoveryState = (executions: readonly { readonly status: string; readonly startedAt?: string | null; readonly completedAt?: string | null; readonly failedAt?: string | null; readonly errorMessage?: string | null; readonly metrics?: Record<string, unknown> | null }[]): DiscoveryRuntimeState | null => {
+  const execution = executions.find((item) => typeof item.metrics?.discoveryStatus === "string");
+  if (execution === undefined) return null;
+  const metrics = execution.metrics ?? {};
+  return {
+    status: typeof metrics.discoveryStatus === "string" ? metrics.discoveryStatus : execution.status,
+    discoveredCount: typeof metrics.discoveredCount === "number" ? metrics.discoveredCount : 0,
+    capturedCount: typeof metrics.capturedCount === "number" ? metrics.capturedCount : 0,
+    skippedDuplicateCount: typeof metrics.skippedDuplicateCount === "number" ? metrics.skippedDuplicateCount : 0,
+    lastExecutionTime: execution.completedAt ?? execution.failedAt ?? execution.startedAt ?? undefined,
+    failureMessage: typeof metrics.failureMessage === "string" ? metrics.failureMessage : execution.errorMessage ?? undefined,
+  };
+};
+
+async function fetchDiscoveryRuntimeState(campaignId: string): Promise<DiscoveryRuntimeState | null> {
+  const response = await fetch(`/api/marketplace-acquisition/campaigns/${encodeURIComponent(campaignId)}/runtime/executions?limit=5`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Discovery runtime state could not be loaded.");
+  const executions = (payload as { readonly data?: { readonly executions?: readonly { readonly status: string; readonly startedAt?: string | null; readonly completedAt?: string | null; readonly failedAt?: string | null; readonly errorMessage?: string | null; readonly metrics?: Record<string, unknown> | null }[] } }).data?.executions ?? [];
+  return latestDiscoveryState(executions);
+}
+
 const invitationRuntimeStatus = (invitation: { readonly status: string; readonly channel: string; readonly metadata?: unknown; readonly updatedAt?: string } | null): string => {
   if (invitation === null) return "No invitation sent";
   const metadata = typeof invitation.metadata === "object" && invitation.metadata !== null ? invitation.metadata as Record<string, unknown> : {};
@@ -178,6 +209,7 @@ export function AcquisitionWorkbench({
   const [stageFilter, setStageFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [discoveryRuntime, setDiscoveryRuntime] = useState<DiscoveryRuntimeState | null>(null);
 
   const scopedRecordsPath = useMemo(() => {
     if (campaignId === undefined || campaignId.trim().length === 0) return recordsPath;
@@ -209,6 +241,15 @@ export function AcquisitionWorkbench({
       });
     return () => { cancelled = true; };
   }, [scopedRecordsPath]);
+
+  useEffect(() => {
+    if (mode !== "campaign" || campaignId === undefined) return;
+    let cancelled = false;
+    fetchDiscoveryRuntimeState(campaignId)
+      .then((state) => { if (!cancelled) setDiscoveryRuntime(state); })
+      .catch(() => { if (!cancelled) setDiscoveryRuntime(null); });
+    return () => { cancelled = true; };
+  }, [campaignId, mode]);
 
   const filteredRecords = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -326,6 +367,24 @@ export function AcquisitionWorkbench({
           </Link>
         </div>
       </section>
+
+      {mode === "campaign" && discoveryRuntime !== null ? (
+        <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Discovery execution state">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Autonomous discovery execution</p>
+              <h2 className="mt-1 text-sm font-semibold text-foreground">{discoveryRuntime.status}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">Last execution {discoveryRuntime.lastExecutionTime ?? "not recorded"}</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center text-xs sm:min-w-[360px]">
+              <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.discoveredCount}</p><p className="text-muted-foreground">discovered</p></div>
+              <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.capturedCount}</p><p className="text-muted-foreground">captured</p></div>
+              <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.skippedDuplicateCount}</p><p className="text-muted-foreground">duplicates</p></div>
+            </div>
+          </div>
+          {discoveryRuntime.failureMessage ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.failureMessage}</p> : null}
+        </section>
+      ) : null}
 
       <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6" aria-label="Acquisition workbench summary">
         {commandCenterStats.map((stat) => (

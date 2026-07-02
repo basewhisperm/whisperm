@@ -24,6 +24,16 @@ export interface ExecuteInvitationInput {
   readonly correlationId?: string | undefined;
 }
 
+export interface CampaignRuntimeDiscoveryQueue {
+  enqueueDiscovery(input: {
+    readonly tenantId: string;
+    readonly campaignId: string;
+    readonly executionId: string;
+    readonly correlationId?: string | undefined;
+    readonly replaySafe: true;
+  }): Promise<void> | void;
+}
+
 export interface CampaignRuntimeInvitationQueue {
   enqueueInvitation(input: {
     readonly tenantId: string;
@@ -38,6 +48,16 @@ export interface CampaignRuntimeInvitationQueue {
   }): Promise<void> | void;
 }
 
+
+export interface RecordDiscoveryResultInput {
+  readonly executionId: string;
+  readonly status: "COMPLETED" | "FAILED";
+  readonly discoveredCount?: number | undefined;
+  readonly capturedCount?: number | undefined;
+  readonly skippedDuplicateCount?: number | undefined;
+  readonly errorCode?: string | undefined;
+  readonly errorMessage?: string | undefined;
+}
 
 export interface RecordInvitationResultInput {
   readonly executionId: string;
@@ -77,6 +97,7 @@ export interface CampaignRuntimeServiceDependencies {
   readonly executions: CampaignRuntimeExecutionRepository;
   readonly worker?: CampaignRuntimeWorker | undefined;
   readonly invitationQueue?: CampaignRuntimeInvitationQueue | undefined;
+  readonly discoveryQueue?: CampaignRuntimeDiscoveryQueue | undefined;
   readonly sellerInvitations?: SellerInvitationRepository | undefined;
 }
 
@@ -176,7 +197,20 @@ export class CampaignRuntimeService {
       metrics: {},
     });
 
-    const running = await this.deps.executions.update(context, execution.id, { status: "RUNNING", startedAt: new Date().toISOString() });
+    const running = await this.deps.executions.update(context, execution.id, { status: "RUNNING", startedAt: new Date().toISOString(), metrics: { discoveryStatus: "PENDING", discoveredCount: 0, capturedCount: 0, skippedDuplicateCount: 0 } });
+
+    if (this.deps.discoveryQueue !== undefined) {
+      await this.deps.discoveryQueue.enqueueDiscovery({
+        tenantId: context.tenantId,
+        campaignId: input.campaignId,
+        executionId: running.id,
+        replaySafe: true,
+      });
+      return this.deps.executions.update(context, running.id, {
+        status: "RUNNING",
+        metrics: { ...(running.metrics ?? {}), discoveryStatus: "RUNNING", discoveryStartedAt: running.startedAt ?? new Date().toISOString() },
+      });
+    }
 
     try {
       const result = await this.worker.execute({
@@ -235,6 +269,45 @@ export class CampaignRuntimeService {
     }
 
     return { started, skipped };
+  }
+
+  async recordDiscoveryResult(context: TenantScoped, input: RecordDiscoveryResultInput): Promise<CampaignRuntimeExecutionRecord> {
+    const existing = await this.deps.executions.findById(context, input.executionId);
+    if (existing === null) {
+      throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Campaign runtime execution not found", status: 404 });
+    }
+    const now = new Date().toISOString();
+    const baseMetrics = existing.metrics ?? {};
+    if (input.status === "COMPLETED") {
+      return this.deps.executions.update(context, input.executionId, {
+        status: "COMPLETED",
+        completedAt: now,
+        metrics: {
+          ...baseMetrics,
+          discoveryStatus: "COMPLETED",
+          discoveryCompletedAt: now,
+          discoveredCount: input.discoveredCount ?? 0,
+          capturedCount: input.capturedCount ?? 0,
+          skippedDuplicateCount: input.skippedDuplicateCount ?? 0,
+        },
+      });
+    }
+    const safeMessage = input.errorMessage === undefined ? "Discovery execution failed" : sanitizeErrorMessage(input.errorMessage);
+    return this.deps.executions.update(context, input.executionId, {
+      status: "FAILED",
+      failedAt: now,
+      errorCode: input.errorCode ?? "DISCOVERY_EXECUTION_FAILED",
+      errorMessage: safeMessage,
+      metrics: {
+        ...baseMetrics,
+        discoveryStatus: "FAILED",
+        discoveryFailedAt: now,
+        discoveredCount: input.discoveredCount ?? 0,
+        capturedCount: input.capturedCount ?? 0,
+        skippedDuplicateCount: input.skippedDuplicateCount ?? 0,
+        failureMessage: safeMessage,
+      },
+    });
   }
 
   async recordInvitationResult(context: TenantScoped, input: RecordInvitationResultInput): Promise<CampaignRuntimeExecutionRecord> {

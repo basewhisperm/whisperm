@@ -227,3 +227,46 @@ test('scheduled runner skips campaigns with duplicate active executions', async 
   assert.deepEqual(result, { started: 0, skipped: 1 });
   assert.equal(source.lastRunAt, undefined);
 });
+
+test('scheduled campaign runtime owns autonomous discovery enqueue decision', async () => {
+  const source = campaign({ scheduleEnabled: true, scheduleCadence: 'DAILY', nextRunAt: '2026-06-29T00:00:00.000Z' });
+  const calls = [];
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([source]),
+    executions,
+    discoveryQueue: { async enqueueDiscovery(input) { calls.push(input); } },
+  });
+  const result = await service.runDueScheduledCampaigns({ tenantId: 'tenant-1' }, { now: new Date(now) });
+  assert.deepEqual(result, { started: 1, skipped: 0 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].tenantId, 'tenant-1');
+  assert.equal(calls[0].campaignId, 'campaign-1');
+  assert.equal(calls[0].executionId, 'execution-1');
+  assert.equal(calls[0].replaySafe, true);
+  assert.equal(executions.rows[0].status, 'RUNNING');
+  assert.equal(executions.rows[0].metrics.discoveryStatus, 'RUNNING');
+});
+
+test('recordDiscoveryResult completes runtime execution with discovery counts', async () => {
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'SCHEDULED', status: 'RUNNING', metrics: { discoveryStatus: 'RUNNING' } });
+  const result = await service.recordDiscoveryResult({ tenantId: 'tenant-1' }, { executionId: created.id, status: 'COMPLETED', discoveredCount: 3, capturedCount: 2, skippedDuplicateCount: 1 });
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.metrics.discoveryStatus, 'COMPLETED');
+  assert.equal(result.metrics.discoveredCount, 3);
+  assert.equal(result.metrics.capturedCount, 2);
+  assert.equal(result.metrics.skippedDuplicateCount, 1);
+});
+
+test('recordDiscoveryResult fails runtime execution with sanitized failure metadata', async () => {
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'SCHEDULED', status: 'RUNNING', metrics: { discoveryStatus: 'RUNNING' } });
+  const result = await service.recordDiscoveryResult({ tenantId: 'tenant-1' }, { executionId: created.id, status: 'FAILED', errorMessage: 'provider failed api_key=secret' });
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.metrics.discoveryStatus, 'FAILED');
+  assert.match(result.errorMessage, /api_key=\[REDACTED\]/);
+  assert.doesNotMatch(result.errorMessage, /secret/);
+});
