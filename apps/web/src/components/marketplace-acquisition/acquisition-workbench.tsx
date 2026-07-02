@@ -73,9 +73,11 @@ const invitationRuntimeStatus = (invitation: { readonly status: string; readonly
   if (invitation === null) return "No invitation sent";
   const metadata = typeof invitation.metadata === "object" && invitation.metadata !== null ? invitation.metadata as Record<string, unknown> : {};
   const state = typeof metadata.invitationExecutionState === "string" ? metadata.invitationExecutionState : invitation.status;
-  const lastAttempted = typeof metadata.lastAttemptedAt === "string" ? metadata.lastAttemptedAt : invitation.updatedAt;
+  const lastAttempted = typeof metadata.lastAttemptAt === "string" ? metadata.lastAttemptAt : typeof metadata.lastAttemptedAt === "string" ? metadata.lastAttemptedAt : invitation.updatedAt;
+  const retryCount = typeof metadata.retryCount === "number" ? ` · retries ${metadata.retryCount}/${typeof metadata.maxRetries === "number" ? metadata.maxRetries : "?"}` : "";
+  const nextRetry = typeof metadata.nextRetryAt === "string" ? ` · next retry ${metadata.nextRetryAt}` : "";
   const failure = typeof metadata.failureMessage === "string" ? ` — ${metadata.failureMessage}` : "";
-  return `${invitation.channel} ${state}${lastAttempted ? ` (last attempted ${lastAttempted})` : ""}${failure}`;
+  return `${invitation.channel} ${state}${lastAttempted ? ` (last attempted ${lastAttempted})` : ""}${retryCount}${nextRetry}${failure}`;
 };
 
 async function fetchSellerAcquisitionRecords(recordsPath: string): Promise<readonly SellerAcquisitionRecord[]> {

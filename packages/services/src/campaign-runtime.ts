@@ -33,6 +33,7 @@ export interface CampaignRuntimeInvitationQueue {
     readonly invitationId?: string | undefined;
     readonly preferredChannel?: "WHATSAPP" | "SMS" | "EMAIL" | undefined;
     readonly correlationId?: string | undefined;
+    readonly delayMs?: number | undefined;
     readonly replaySafe: true;
   }): Promise<void> | void;
 }
@@ -48,9 +49,18 @@ export interface RecordInvitationResultInput {
   readonly errorCode?: string | undefined;
   readonly errorMessage?: string | undefined;
   readonly retryable?: boolean | undefined;
+  readonly maxRetries?: number | undefined;
 }
 
 const deliveredStatuses = new Set(["SENT", "DELIVERED", "COMPLETED"]);
+const retryableStates = new Set(["FAILED", "DEAD_LETTERED", "RETRY_SCHEDULED"]);
+const defaultInvitationMaxRetries = 3;
+const invitationBackoffMs = [5 * 60_000, 30 * 60_000, 2 * 60 * 60_000] as const;
+
+export const nextInvitationRetryAt = (retryCount: number, now: Date = new Date()): string => {
+  const index = Math.max(0, Math.min(retryCount - 1, invitationBackoffMs.length - 1));
+  return new Date(now.getTime() + (invitationBackoffMs[index] ?? 7_200_000)).toISOString();
+};
 
 export interface CampaignRuntimeServiceDependencies {
   readonly campaigns: SellerAcquisitionCampaignRepository;
@@ -103,6 +113,7 @@ export class CampaignRuntimeService {
         invitationId: input.invitationId ?? null,
         initiatedBy: input.initiatedBy ?? null,
         retryCount: 0,
+        maxRetries: defaultInvitationMaxRetries,
       },
     });
 
@@ -195,6 +206,7 @@ export class CampaignRuntimeService {
       invitationId: input.invitationId ?? existing.metrics?.invitationId ?? null,
       channel: input.channel,
       provider: input.provider ?? input.channel,
+      lastAttemptAt: now,
       lastAttemptedAt: now,
       ...(delivered
         ? { deliveredAt: now }
@@ -206,11 +218,41 @@ export class CampaignRuntimeService {
           }),
     };
 
+    const previousRetryCount = typeof existing.metrics?.retryCount === "number" ? existing.metrics.retryCount : 0;
+    const maxRetries = input.maxRetries ?? (typeof existing.metrics?.maxRetries === "number" ? existing.metrics.maxRetries : defaultInvitationMaxRetries);
+    const retryCount = delivered ? previousRetryCount : previousRetryCount + 1;
+    const shouldScheduleRetry = !delivered && (input.retryable ?? false) && retryCount < maxRetries;
+    const terminalFailure = !delivered && !shouldScheduleRetry;
+    const nextRetryAt = shouldScheduleRetry ? nextInvitationRetryAt(retryCount, new Date(now)) : undefined;
+
+    const finalMetrics = {
+      ...metrics,
+      retryCount,
+      maxRetries,
+      ...(shouldScheduleRetry ? { invitationExecutionState: "RETRY_SCHEDULED", nextRetryAt } : {}),
+      ...(terminalFailure ? { invitationExecutionState: "DEAD_LETTERED", deadLetteredAt: now, nextRetryAt: null } : {}),
+      ...(delivered ? { nextRetryAt: null, retryable: false } : {}),
+    };
+
+    if (shouldScheduleRetry && this.deps.invitationQueue !== undefined) {
+      await this.deps.invitationQueue.enqueueInvitation({
+        tenantId: context.tenantId,
+        campaignId: existing.campaignId,
+        opportunityId: String(finalMetrics.opportunityId),
+        executionId: input.executionId,
+        invitationId: input.invitationId ?? (typeof finalMetrics.invitationId === "string" ? finalMetrics.invitationId : undefined),
+        preferredChannel: input.channel,
+        correlationId: typeof (context as { readonly correlation?: { readonly correlationId?: unknown } }).correlation?.correlationId === "string" ? (context as { readonly correlation?: { readonly correlationId?: string } }).correlation?.correlationId : input.executionId,
+        delayMs: Date.parse(nextRetryAt ?? now) - Date.parse(now),
+        replaySafe: true,
+      });
+    }
+
     if (input.invitationId !== undefined && this.deps.sellerInvitations !== undefined) {
       await this.deps.sellerInvitations.update(context, input.invitationId, {
         status: delivered ? "SENT" : "FAILED",
         metadata: {
-          invitationExecutionState: delivered ? "DELIVERED" : "FAILED",
+          ...finalMetrics,
           campaignRuntimeExecutionId: input.executionId,
           correlationId: typeof (context as { readonly correlation?: { readonly correlationId?: unknown } }).correlation?.correlationId === "string" ? (context as { readonly correlation?: { readonly correlationId?: string } }).correlation?.correlationId : null,
           channel: input.channel,
@@ -221,13 +263,26 @@ export class CampaignRuntimeService {
     }
 
     return this.deps.executions.update(context, input.executionId, {
-      status: delivered ? "COMPLETED" : "FAILED",
+      status: delivered ? "COMPLETED" : shouldScheduleRetry ? "RUNNING" : "FAILED",
       completedAt: delivered ? now : null,
-      failedAt: delivered ? null : now,
-      errorCode: delivered ? null : input.errorCode ?? "INVITATION_DELIVERY_FAILED",
-      errorMessage: delivered ? null : safeFailureMessage ?? "Seller invitation worker failed",
-      metrics,
+      failedAt: delivered || shouldScheduleRetry ? null : now,
+      errorCode: delivered || shouldScheduleRetry ? null : input.errorCode ?? "INVITATION_DELIVERY_FAILED",
+      errorMessage: delivered || shouldScheduleRetry ? null : safeFailureMessage ?? "Seller invitation worker failed",
+      metrics: finalMetrics,
     });
+  }
+
+  async retryInvitationExecution(context: TenantScoped, executionId: string): Promise<CampaignRuntimeExecutionRecord> {
+    const existing = await this.deps.executions.findById(context, executionId);
+    if (existing === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Campaign runtime execution not found", status: 404 });
+    const state = typeof existing.metrics?.invitationExecutionState === "string" ? existing.metrics.invitationExecutionState : existing.status;
+    if (!retryableStates.has(state)) throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Invitation execution is not retryable", status: 409 });
+    if (this.deps.invitationQueue === undefined) throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Invitation queue is not configured", status: 503 });
+    const opportunityId = typeof existing.metrics?.opportunityId === "string" ? existing.metrics.opportunityId : undefined;
+    if (opportunityId === undefined) throw new PersistenceError({ code: "PERSISTENCE_VALIDATION_FAILED", message: "Invitation execution is missing opportunity context", status: 422 });
+    const channel = ["WHATSAPP", "SMS", "EMAIL"].includes(String(existing.metrics?.channel)) ? existing.metrics?.channel as "WHATSAPP" | "SMS" | "EMAIL" : undefined;
+    await this.deps.invitationQueue.enqueueInvitation({ tenantId: context.tenantId, campaignId: existing.campaignId, opportunityId, executionId, invitationId: typeof existing.metrics?.invitationId === "string" ? existing.metrics.invitationId : undefined, preferredChannel: channel, correlationId: executionId, replaySafe: true });
+    return this.deps.executions.update(context, executionId, { status: "RUNNING", failedAt: null, errorCode: null, errorMessage: null, metrics: { ...(existing.metrics ?? {}), invitationExecutionState: "DISPATCHED", retryable: true, nextRetryAt: null, manualRetryAt: new Date().toISOString() } });
   }
 
   getCampaignExecution(context: TenantScoped, executionId: string): Promise<CampaignRuntimeExecutionRecord | null> {
