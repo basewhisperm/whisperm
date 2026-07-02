@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
@@ -8,6 +9,28 @@ import { SellerAcquisitionCampaignService } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
+
+const campaignScheduleSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().min(1).nullable().optional(),
+  status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "ARCHIVED"]).optional(),
+  ownerId: z.string().min(1).nullable().optional(),
+  goalSellerCount: z.number().int().positive().nullable().optional(),
+  scheduleEnabled: z.boolean().optional(),
+  scheduleCadence: z.enum(["HOURLY", "DAILY", "WEEKLY"]).nullable().optional(),
+  scheduleTimezone: z.string().min(1).nullable().optional(),
+  nextRunAt: z.string().datetime().nullable().optional(),
+}).strict();
+
+const normalizeCampaignInput = (body: unknown) => {
+  const parsed = campaignScheduleSchema.safeParse(body);
+  if (!parsed.success) return parsed;
+  const data = parsed.data;
+  if (data.scheduleEnabled === true && (data.scheduleCadence ?? null) === null) {
+    return { success: false as const, error: { issues: [{ message: "Schedule cadence is required when scheduling is enabled." }] } };
+  }
+  return { success: true as const, data: { ...data, scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
+};
 
 interface RouteContext {
   readonly params: { readonly campaignId: string };
@@ -50,9 +73,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   const service = campaignService();
   const input = body as { readonly archive?: boolean };
-  const campaign = input.archive === true
+  const parsed = input.archive === true ? null : normalizeCampaignInput(body);
+  if (parsed !== null && !parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid campaign request.", 400);
+  const campaign = input.archive === true || parsed === null
     ? await service.archive({ tenantId: tenant.id }, context.params.campaignId)
-    : await service.update({ tenantId: tenant.id }, context.params.campaignId, body as never);
+    : await service.update({ tenantId: tenant.id }, context.params.campaignId, parsed.data as never);
 
   return NextResponse.json({ ok: true, data: { campaign } });
 }

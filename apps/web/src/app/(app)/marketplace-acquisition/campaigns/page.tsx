@@ -18,6 +18,11 @@ interface SellerAcquisitionCampaign {
   createdAt: string;
   updatedAt: string;
   memberCount?: number | null;
+  scheduleEnabled?: boolean | null;
+  scheduleCadence?: "HOURLY" | "DAILY" | "WEEKLY" | null;
+  scheduleTimezone?: string | null;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
 }
 
 interface CampaignFormState {
@@ -26,6 +31,10 @@ interface CampaignFormState {
   ownerId: string;
   goalSellerCount: string;
   status: CampaignStatus;
+  scheduleEnabled: boolean;
+  scheduleCadence: "HOURLY" | "DAILY" | "WEEKLY";
+  scheduleTimezone: string;
+  nextRunAt: string;
 }
 
 const EMPTY_FORM: CampaignFormState = {
@@ -34,6 +43,10 @@ const EMPTY_FORM: CampaignFormState = {
   ownerId: "",
   goalSellerCount: "",
   status: "DRAFT",
+  scheduleEnabled: false,
+  scheduleCadence: "DAILY",
+  scheduleTimezone: "UTC",
+  nextRunAt: "",
 };
 
 const STATUSES: readonly CampaignStatus[] = ["DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "ARCHIVED"];
@@ -47,6 +60,11 @@ function campaignApiPath(campaignId?: string) {
 async function readError(response: Response) {
   const payload = await response.json().catch(() => ({}));
   return payload?.error?.message ?? "Campaign request failed.";
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "Not scheduled";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
 
 function formatDate(value: string) {
@@ -67,6 +85,10 @@ function formPayload(form: CampaignFormState) {
     ownerId: form.ownerId.trim() || null,
     goalSellerCount: form.goalSellerCount.trim() ? Number.parseInt(form.goalSellerCount, 10) : null,
     status: form.status,
+    scheduleEnabled: form.scheduleEnabled,
+    scheduleCadence: form.scheduleEnabled ? form.scheduleCadence : null,
+    scheduleTimezone: form.scheduleEnabled ? form.scheduleTimezone.trim() || "UTC" : null,
+    nextRunAt: form.scheduleEnabled ? form.nextRunAt || null : null,
   };
 }
 
@@ -134,6 +156,10 @@ export default function SellerAcquisitionCampaignsPage() {
       ownerId: campaign.ownerId ?? "",
       goalSellerCount: campaign.goalSellerCount == null ? "" : String(campaign.goalSellerCount),
       status: campaign.status,
+      scheduleEnabled: campaign.scheduleEnabled === true,
+      scheduleCadence: campaign.scheduleCadence ?? "DAILY",
+      scheduleTimezone: campaign.scheduleTimezone ?? "UTC",
+      nextRunAt: campaign.nextRunAt ?? "",
     });
     setModalMode("edit");
   }
@@ -269,6 +295,9 @@ export default function SellerAcquisitionCampaignsPage() {
                 <div><dt className="text-muted-foreground">Members</dt><dd className="font-medium text-foreground">{campaign.memberCount ?? 0}</dd></div>
                 <div><dt className="text-muted-foreground">Created</dt><dd className="font-medium text-foreground">{formatDate(campaign.createdAt)}</dd></div>
                 <div><dt className="text-muted-foreground">Updated</dt><dd className="font-medium text-foreground">{formatDate(campaign.updatedAt)}</dd></div>
+                <div><dt className="text-muted-foreground">Schedule</dt><dd className="font-medium text-foreground">{campaign.scheduleEnabled ? campaign.scheduleCadence ?? "Enabled" : "Disabled"}</dd></div>
+                <div><dt className="text-muted-foreground">Next Run</dt><dd className="font-medium text-foreground">{formatDateTime(campaign.nextRunAt)}</dd></div>
+                <div><dt className="text-muted-foreground">Last Run</dt><dd className="font-medium text-foreground">{formatDateTime(campaign.lastRunAt)}</dd></div>
               </dl>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -298,6 +327,20 @@ export default function SellerAcquisitionCampaignsPage() {
               <Field label="Description" value={form.description} onChange={(value) => setForm({ ...form, description: value })} />
               <Field label="Owner" value={form.ownerId} onChange={(value) => setForm({ ...form, ownerId: value })} />
               <Field label="Goal" inputMode="numeric" value={form.goalSellerCount} onChange={(value) => setForm({ ...form, goalSellerCount: value })} />
+              <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <input checked={form.scheduleEnabled} onChange={(event) => setForm({ ...form, scheduleEnabled: event.target.checked })} type="checkbox" />
+                Schedule enabled
+              </label>
+              <label className="block text-sm font-medium text-muted-foreground">
+                Cadence
+                <select className="mt-1 h-10 w-full rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse" disabled={!form.scheduleEnabled} value={form.scheduleCadence} onChange={(event) => setForm({ ...form, scheduleCadence: event.target.value as CampaignFormState["scheduleCadence"] })}>
+                  <option value="HOURLY">Hourly</option>
+                  <option value="DAILY">Daily</option>
+                  <option value="WEEKLY">Weekly</option>
+                </select>
+              </label>
+              <Field label="Timezone" value={form.scheduleTimezone} onChange={(value) => setForm({ ...form, scheduleTimezone: value })} />
+              <Field label="Next Run (ISO)" value={form.nextRunAt} onChange={(value) => setForm({ ...form, nextRunAt: value })} />
               <label className="block text-sm font-medium text-muted-foreground">
                 Status
                 <select className="mt-1 h-10 w-full rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse" value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as CampaignStatus })}>

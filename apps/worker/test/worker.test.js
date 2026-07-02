@@ -444,3 +444,34 @@ test('marketplace invite worker records failed runtime execution when invitation
   assert.match(calls[0][2].errorMessage, /provider failed/);
   assert.equal(calls[0][2].retryable, false);
 });
+
+test('scheduler worker delegates due campaign execution to campaign runtime', async () => {
+  const calls = [];
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) },
+    campaignRuntime: {
+      runDueScheduledCampaigns: async (context, input) => {
+        calls.push({ context, input });
+        return { started: 2, skipped: 1 };
+      },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({ job: createJob({
+    queueName: 'scheduler',
+    jobType: 'scheduler.tick',
+    payload: { tenantId: 'tenant-1', now: fixedDate.toISOString(), limit: 25 },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'tenant-1:scheduler:tick', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'scheduler', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(result.result.started, 2);
+  assert.equal(result.result.skipped, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].context.tenantId, 'tenant-1');
+  assert.equal(calls[0].input.now.toISOString(), fixedDate.toISOString());
+  assert.equal(calls[0].input.limit, 25);
+});
