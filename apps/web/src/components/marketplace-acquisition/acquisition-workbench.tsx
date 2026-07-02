@@ -68,6 +68,16 @@ import {
 } from "@/lib/marketplace-acquisition/workbench-domain";
 
 
+
+const invitationRuntimeStatus = (invitation: { readonly status: string; readonly channel: string; readonly metadata?: unknown; readonly updatedAt?: string } | null): string => {
+  if (invitation === null) return "No invitation sent";
+  const metadata = typeof invitation.metadata === "object" && invitation.metadata !== null ? invitation.metadata as Record<string, unknown> : {};
+  const state = typeof metadata.invitationExecutionState === "string" ? metadata.invitationExecutionState : invitation.status;
+  const lastAttempted = typeof metadata.lastAttemptedAt === "string" ? metadata.lastAttemptedAt : invitation.updatedAt;
+  const failure = typeof metadata.failureMessage === "string" ? ` — ${metadata.failureMessage}` : "";
+  return `${invitation.channel} ${state}${lastAttempted ? ` (last attempted ${lastAttempted})` : ""}${failure}`;
+};
+
 async function fetchSellerAcquisitionRecords(recordsPath: string): Promise<readonly SellerAcquisitionRecord[]> {
   const response = await fetch(recordsPath);
   const payload = await response.json().catch(() => ({}));
@@ -724,7 +734,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
           <p><strong className="text-foreground">Phone-ready captures:</strong> {sellerPhoneReadyCount}/{sellerRecords.length}</p>
           <p><strong className="text-foreground">Images captured:</strong> {sellerImageCount}</p>
           <p><strong className="text-foreground">Activity events:</strong> {sellerRecords.reduce((count, item) => count + item.activityTimeline.length, 0)}</p>
-          <p><strong className="text-foreground">Latest invitation:</strong> {sellerLatestInvitation ? `${sellerLatestInvitation.channel} ${sellerLatestInvitation.status}` : "No invitation sent"}</p>
+          <p><strong className="text-foreground">Latest invitation:</strong> {invitationRuntimeStatus(sellerLatestInvitation)}</p>
         </div>
         {sellerListingTitles.length > 0 ? (
           <ul className="mt-3 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
@@ -754,7 +764,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
 
         <WorkbenchSection title="Invitation status">
           <p className="text-sm text-muted-foreground">
-            {sellerLatestInvitation ? `${sellerLatestInvitation.channel} ${sellerLatestInvitation.status}` : "No invitation sent"}
+            {invitationRuntimeStatus(sellerLatestInvitation)}
           </p>
         </WorkbenchSection>
 

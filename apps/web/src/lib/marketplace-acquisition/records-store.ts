@@ -58,7 +58,9 @@ export interface SellerInvitationRecord {
   readonly status: string;
   readonly recipient: string;
   readonly createdAt: string;
+  readonly updatedAt?: string;
   readonly expiresAt: string;
+  readonly metadata?: unknown;
 }
 
 export interface SellerAcquisitionPortfolioSummary {
