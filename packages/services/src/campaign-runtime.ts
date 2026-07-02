@@ -5,6 +5,7 @@ import type {
   CampaignRuntimeExecutionTrigger,
   PageRequest,
   SellerAcquisitionCampaignRepository,
+  SellerInvitationRepository,
 } from "@whisperm/repositories";
 import { PersistenceError } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
@@ -32,20 +33,37 @@ export interface CampaignRuntimeInvitationQueue {
     readonly invitationId?: string | undefined;
     readonly preferredChannel?: "WHATSAPP" | "SMS" | "EMAIL" | undefined;
     readonly correlationId?: string | undefined;
+    readonly replaySafe: true;
   }): Promise<void> | void;
 }
+
+
+export interface RecordInvitationResultInput {
+  readonly executionId: string;
+  readonly opportunityId?: string | undefined;
+  readonly invitationId?: string | undefined;
+  readonly status: string;
+  readonly channel: "WHATSAPP" | "SMS" | "EMAIL";
+  readonly provider?: string | undefined;
+  readonly errorCode?: string | undefined;
+  readonly errorMessage?: string | undefined;
+  readonly retryable?: boolean | undefined;
+}
+
+const deliveredStatuses = new Set(["SENT", "DELIVERED", "COMPLETED"]);
 
 export interface CampaignRuntimeServiceDependencies {
   readonly campaigns: SellerAcquisitionCampaignRepository;
   readonly executions: CampaignRuntimeExecutionRepository;
   readonly worker?: CampaignRuntimeWorker | undefined;
   readonly invitationQueue?: CampaignRuntimeInvitationQueue | undefined;
+  readonly sellerInvitations?: SellerInvitationRepository | undefined;
 }
 
 const activeStatuses = new Set(["QUEUED", "RUNNING"]);
 
 const sanitizeErrorMessage = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : "Campaign runtime worker failed";
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "Campaign runtime worker failed";
   return message
   .replace(
     /(token|secret|password|authorization|api[_-]?key)=[^\s&]+/giu,
@@ -96,6 +114,7 @@ export class CampaignRuntimeService {
       invitationId: input.invitationId,
       preferredChannel: input.preferredChannel,
       correlationId: input.correlationId,
+      replaySafe: true,
     });
 
     return this.deps.executions.update(context, execution.id, {
@@ -158,6 +177,57 @@ export class CampaignRuntimeService {
         errorMessage: sanitizeErrorMessage(error),
       });
     }
+  }
+
+
+  async recordInvitationResult(context: TenantScoped, input: RecordInvitationResultInput): Promise<CampaignRuntimeExecutionRecord> {
+    const existing = await this.deps.executions.findById(context, input.executionId);
+    if (existing === null) {
+      throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Campaign runtime execution not found", status: 404 });
+    }
+    const delivered = deliveredStatuses.has(input.status);
+    const now = new Date().toISOString();
+    const safeFailureMessage = input.errorMessage === undefined ? undefined : sanitizeErrorMessage(input.errorMessage);
+    const metrics = {
+      ...(existing.metrics ?? {}),
+      invitationExecutionState: delivered ? "DELIVERED" : "FAILED",
+      opportunityId: input.opportunityId ?? existing.metrics?.opportunityId ?? null,
+      invitationId: input.invitationId ?? existing.metrics?.invitationId ?? null,
+      channel: input.channel,
+      provider: input.provider ?? input.channel,
+      lastAttemptedAt: now,
+      ...(delivered
+        ? { deliveredAt: now }
+        : {
+            failedAt: now,
+            failureCode: input.errorCode ?? "INVITATION_DELIVERY_FAILED",
+            failureMessage: safeFailureMessage ?? "Seller invitation worker failed",
+            retryable: input.retryable ?? false,
+          }),
+    };
+
+    if (input.invitationId !== undefined && this.deps.sellerInvitations !== undefined) {
+      await this.deps.sellerInvitations.update(context, input.invitationId, {
+        status: delivered ? "SENT" : "FAILED",
+        metadata: {
+          invitationExecutionState: delivered ? "DELIVERED" : "FAILED",
+          campaignRuntimeExecutionId: input.executionId,
+          correlationId: typeof (context as { readonly correlation?: { readonly correlationId?: unknown } }).correlation?.correlationId === "string" ? (context as { readonly correlation?: { readonly correlationId?: string } }).correlation?.correlationId : null,
+          channel: input.channel,
+          provider: input.provider ?? input.channel,
+          ...(delivered ? { deliveredAt: now } : { failedAt: now, failureCode: input.errorCode ?? "INVITATION_DELIVERY_FAILED", failureMessage: safeFailureMessage ?? "Seller invitation worker failed", retryable: input.retryable ?? false }),
+        },
+      });
+    }
+
+    return this.deps.executions.update(context, input.executionId, {
+      status: delivered ? "COMPLETED" : "FAILED",
+      completedAt: delivered ? now : null,
+      failedAt: delivered ? null : now,
+      errorCode: delivered ? null : input.errorCode ?? "INVITATION_DELIVERY_FAILED",
+      errorMessage: delivered ? null : safeFailureMessage ?? "Seller invitation worker failed",
+      metrics,
+    });
   }
 
   getCampaignExecution(context: TenantScoped, executionId: string): Promise<CampaignRuntimeExecutionRecord | null> {

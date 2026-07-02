@@ -113,5 +113,30 @@ test('executeInvitation persists dispatch state and enqueues worker command', as
     invitationId: undefined,
     preferredChannel: 'WHATSAPP',
     correlationId: 'corr-1',
+    replaySafe: true,
   });
+});
+
+
+test('recordInvitationResult completes runtime execution with safe delivery metrics', async () => {
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { invitationExecutionState: 'DISPATCHED', opportunityId: 'capture-1' } });
+  const result = await service.recordInvitationResult({ tenantId: 'tenant-1' }, { executionId: created.id, opportunityId: 'capture-1', invitationId: 'invite-1', status: 'SENT', channel: 'WHATSAPP', provider: 'WHATSAPP' });
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.metrics.invitationExecutionState, 'DELIVERED');
+  assert.equal(result.metrics.invitationId, 'invite-1');
+  assert.ok(result.metrics.deliveredAt);
+});
+
+test('recordInvitationResult fails runtime execution with sanitized retryable failure', async () => {
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { invitationExecutionState: 'DISPATCHED', opportunityId: 'capture-1' } });
+  const result = await service.recordInvitationResult({ tenantId: 'tenant-1' }, { executionId: created.id, opportunityId: 'capture-1', status: 'FAILED', channel: 'SMS', errorMessage: 'provider failed authorization=secret-token', retryable: true });
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.metrics.invitationExecutionState, 'FAILED');
+  assert.equal(result.metrics.retryable, true);
+  assert.match(result.errorMessage, /authorization=\[REDACTED\]/);
+  assert.doesNotMatch(result.errorMessage, /secret-token/);
 });

@@ -1,6 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
+import { CampaignRuntimeService } from "@whisperm/services";
+import { PrismaCampaignRuntimeExecutionRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
@@ -143,13 +145,13 @@ export interface SellerInvitationServicePort {
   sendInvitation(
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
     input: { readonly tenantId: string; readonly captureId: string; readonly channel: string },
-  ): Promise<{ readonly invitationId: string; readonly status: string }> | { readonly invitationId: string; readonly status: string };
+  ): Promise<{ readonly invitationId: string; readonly status: string; readonly provider?: string | undefined }> | { readonly invitationId: string; readonly status: string; readonly provider?: string | undefined };
 }
 
 export interface CampaignRuntimeExecutionPort {
   recordInvitationResult(
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
-    input: { readonly executionId: string; readonly invitationId?: string | undefined; readonly status: string; readonly channel: string; readonly errorMessage?: string | undefined },
+    input: { readonly executionId: string; readonly opportunityId?: string | undefined; readonly invitationId?: string | undefined; readonly status: string; readonly channel: string; readonly provider?: string | undefined; readonly errorCode?: string | undefined; readonly errorMessage?: string | undefined; readonly retryable?: boolean | undefined },
   ): Promise<void> | void;
 }
 
@@ -581,6 +583,7 @@ const sellerInvitationJobPayloadSchema = z.object({
   preferredChannel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).optional(),
   channel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).optional(),
   correlationId: z.string().min(1).optional(),
+  replaySafe: z.literal(true).optional(),
 }).strict().passthrough().transform((payload, ctx) => {
   const captureId = payload.captureId ?? payload.opportunityId;
   if (captureId === undefined) {
@@ -610,7 +613,7 @@ export const createSellerInvitationHandler = (services: WorkerServices): WorkerJ
         correlation: context.correlation,
       });
     }
-    let result: { readonly invitationId: string; readonly status: string };
+    let result: { readonly invitationId: string; readonly status: string; readonly provider?: string | undefined };
     try {
       result = await services.sellerInvitation.sendInvitation(
         { tenantId: payload.tenantId, correlation: context.correlation },
@@ -620,15 +623,15 @@ export const createSellerInvitationHandler = (services: WorkerServices): WorkerJ
       if (payload.executionId !== undefined) {
         await services.campaignRuntime?.recordInvitationResult(
           { tenantId: payload.tenantId, correlation: context.correlation },
-          { executionId: payload.executionId, status: "FAILED", channel: payload.channel, errorMessage: error instanceof Error ? error.message : "Seller invitation worker failed" },
+          { executionId: payload.executionId, opportunityId: payload.opportunityId, invitationId: payload.invitationId ?? undefined, status: "FAILED", channel: payload.channel, provider: payload.channel, errorCode: typeof error === "object" && error !== null && "code" in error ? String((error as { readonly code: unknown }).code) : "INVITATION_DELIVERY_FAILED", errorMessage: error instanceof Error ? error.message : "Seller invitation worker failed", retryable: typeof error === "object" && error !== null && "retryable" in error ? Boolean((error as { readonly retryable: unknown }).retryable) : false },
         );
       }
-      throw error;
+      return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, captureId: payload.captureId, executionId: payload.executionId, invitationId: payload.invitationId ?? undefined, status: "FAILED", channel: payload.channel, correlationId: context.correlation.correlationId });
     }
     if (payload.executionId !== undefined) {
       await services.campaignRuntime?.recordInvitationResult(
         { tenantId: payload.tenantId, correlation: context.correlation },
-        { executionId: payload.executionId, invitationId: result.invitationId, status: result.status, channel: payload.channel },
+        { executionId: payload.executionId, opportunityId: payload.opportunityId, invitationId: result.invitationId, status: result.status, channel: payload.channel, provider: result.provider ?? payload.channel },
       );
     }
     return workerRuntimeMetadataSchema.parse({
@@ -991,34 +994,16 @@ if (isMainModule()) {
   try {
     const config = createWorkerBootstrapConfigFromEnv();
     const prisma = new PrismaClient();
-    const sellerInvitation = createSellerInvitationServicePort(prisma as unknown as import("@whisperm/repositories").PrismaPersistenceClient);
+    const persistence = prisma as unknown as PrismaPersistenceClient;
+    const sellerInvitation = createSellerInvitationServicePort(persistence);
+    const campaignRuntimeService = new CampaignRuntimeService({
+      campaigns: new PrismaSellerAcquisitionCampaignRepository(persistence),
+      executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
+      sellerInvitations: new PrismaSellerInvitationRepository(persistence),
+    });
     const campaignRuntime = {
-      async recordInvitationResult(context: { readonly tenantId: string }, input: { readonly executionId: string; readonly invitationId?: string | undefined; readonly status: string; readonly channel: string; readonly errorMessage?: string | undefined }) {
-        const existing = await prisma.campaignRuntimeExecution.findFirst({
-          where: { tenantId: context.tenantId, id: input.executionId },
-          select: { metrics: true },
-        });
-        const now = new Date().toISOString();
-        const metrics = typeof existing?.metrics === "object" && existing.metrics !== null && !Array.isArray(existing.metrics) ? existing.metrics : {};
-        const sent = input.status === "SENT";
-        const failureReason = input.errorMessage?.replace(/(token|secret|password|authorization|api[_-]?key)=[^\s&]+/giu, (_match, key) => `${key}=[REDACTED]`).slice(0, 500);
-        await prisma.campaignRuntimeExecution.updateMany({
-          where: { tenantId: context.tenantId, id: input.executionId },
-          data: {
-            status: sent ? "COMPLETED" : "FAILED",
-            completedAt: sent ? now : null,
-            failedAt: sent ? null : now,
-            errorMessage: sent ? null : failureReason ?? "Seller invitation worker failed",
-            metrics: {
-              ...metrics,
-              invitationExecutionState: sent ? "SENT" : "FAILED",
-              invitationId: input.invitationId ?? null,
-              provider: input.channel,
-              finalOutcome: input.status,
-              ...(sent ? { sentAt: now } : { failedAt: now, failureReason: failureReason ?? "Seller invitation worker failed" }),
-            },
-          },
-        });
+      async recordInvitationResult(context: Parameters<typeof campaignRuntimeService.recordInvitationResult>[0], input: Parameters<typeof campaignRuntimeService.recordInvitationResult>[1]) {
+        await campaignRuntimeService.recordInvitationResult(context, input);
       },
     };
     await runWorkerFromEnv({

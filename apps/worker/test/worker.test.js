@@ -400,7 +400,7 @@ test('marketplace invite worker completes runtime execution after successful inv
 
   assert.equal(result.status, 'SUCCEEDED');
   assert.deepEqual(calls[0][2], { tenantId: 'tenant-1', captureId: 'capture-1', channel: 'WHATSAPP' });
-  assert.deepEqual(calls[1][2], { executionId: 'execution-1', invitationId: 'invitation-1', status: 'SENT', channel: 'WHATSAPP' });
+  assert.deepEqual(calls[1][2], { executionId: 'execution-1', opportunityId: undefined, invitationId: 'invitation-1', status: 'SENT', channel: 'WHATSAPP', provider: 'WHATSAPP' });
 });
 
 test('marketplace invite worker records failed runtime execution when invitation processing fails', async () => {
@@ -437,9 +437,10 @@ test('marketplace invite worker records failed runtime execution when invitation
     }),
   });
 
-  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(result.status, 'SUCCEEDED');
   assert.equal(calls[0][2].executionId, 'execution-1');
   assert.equal(calls[0][2].status, 'FAILED');
   assert.equal(calls[0][2].channel, 'WHATSAPP');
   assert.match(calls[0][2].errorMessage, /provider failed/);
+  assert.equal(calls[0][2].retryable, false);
 });
