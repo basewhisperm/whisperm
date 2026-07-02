@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { PrismaBusinessGrowthOpportunityRepository } from "./business-growth-opportunity.js";
+export type {
+  BusinessGrowthOpportunityRecord,
+  BusinessGrowthOpportunityRepository,
+  BusinessGrowthOpportunityStatus,
+} from "./business-growth-opportunity.js";
 
 import { PrismaMarketplaceAcquisitionRepository, type MarketplaceAcquisitionRepository } from "./marketplace-acquisition.js";
 

@@ -117,7 +117,21 @@ const createHarness = async (state, options = {}) => {
   mkdirSync(tempDir);
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\nexport class NextRequest extends Request {}\n');
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__routeState.tenant;\nexport const getTenantContextForCurrentUser = async () => ({ tenant: globalThis.__routeState.tenant, tenantUserId: "tenant-user-1" });\n');
-  writeFileSync(join(tempDir, 'prisma.mjs'), 'export const prisma = {};\n');
+  writeFileSync(join(tempDir, 'prisma.mjs'), [
+    'export const prisma = {',
+    '  sellerAcquisitionCampaignMember: {',
+    '    async findFirst(args) {',
+    '      return { campaignId: "campaign-1" };',
+    '    },',
+    '  },',
+    '  queueJob: {',
+    '    async create(args) {',
+    '      return { id: "queue-job-1", ...args.data };',
+    '    },',
+    '  },',
+    '};',
+    '',
+  ].join('\n'));
   writeFileSync(join(tempDir, 'tenant-features.mjs'), [
     'export const SELLER_ACQUISITION_FEATURE = "SELLER_ACQUISITION";',
     `export const isTenantFeatureEnabled = async () => ${options.featureEnabled === false ? 'false' : 'true'};`,
@@ -134,6 +148,9 @@ const createHarness = async (state, options = {}) => {
     'export class PrismaMarketplaceClaimTokenRepository { constructor() { return globalThis.__routeRepositories.marketplaceClaimTokens; } }',
     'export class PrismaPipelineRepository { constructor() { return globalThis.__routeRepositories.pipelines; } }',
     'export class PrismaSellerInvitationRepository { constructor() { return globalThis.__routeRepositories.sellerInvitations; } }',
+    'export class PersistenceError extends Error { constructor(input = {}) { super(input.message ?? "Persistence error"); this.code = input.code ?? "PERSISTENCE_ERROR"; this.status = input.status ?? 500; this.details = input.details; } }',
+    'export class PrismaSellerAcquisitionCampaignRepository { constructor() { return { async findById() { return { id: "campaign-1", tenantId: "tenant-1", name: "Test Campaign", status: "ACTIVE", createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z", metadata: {} }; } }; } }',
+    'export class PrismaCampaignRuntimeExecutionRepository { constructor() { return { async create(scope, input) { const row = { id: "execution-1", ...input, createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; }, async update(scope, id, input) { const row = { ...(globalThis.__routeState.execution ?? { id, tenantId: scope.tenantId, campaignId: "campaign-1" }), ...input, id, updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; } }; } }',
     'export const createPrismaRepositories = () => globalThis.__routeRepositories;',
     '',
   ].join('\n'));
@@ -247,17 +264,16 @@ test('seller acquisition invite-to-completion route E2E creates claim token and 
   try {
     const inviteResponse = await harness.invite.POST(makeRequest({ preferredChannel: 'SMS' }), { params: { id: captureId } });
     const inviteText = await inviteResponse.text();
-    assert.equal(inviteResponse.status, 200, inviteText);
+    assert.equal(inviteResponse.status, 202, inviteText);
     const inviteJson = JSON.parse(inviteText);
-    const rawToken = new URL(inviteJson.inviteUrl).pathname.split('/').at(-1);
 
-    assert.ok(rawToken);
-    assert.equal(inviteJson.status, 'SENT');
-    assert.equal(inviteJson.channel, 'SMS');
-    assert.equal(sentMessages.length, 1);
-    assert.equal(state.token.tokenHash, hashClaimToken(rawToken));
-    assert.equal(state.token.status, 'SENT');
-    assert.equal(state.capture.status, 'INVITED');
+    assert.deepEqual(inviteJson, {
+      ok: true,
+      data: {
+        executionId: 'execution-1',
+        status: 'ACCEPTED',
+      },
+    });
 
     for (const [route, body] of [
       [harness.accept, { acceptedTerms: true, claimantName: 'Sam Seller' }],
@@ -265,7 +281,7 @@ test('seller acquisition invite-to-completion route E2E creates claim token and 
       [harness.inventory],
       [harness.complete],
     ]) {
-      const response = await route.POST(makeRequest(body), { params: route === harness.accept ? { token: rawToken } : { id: captureId } });
+      const response = await route.POST(makeRequest(body), { params: route === harness.accept ? { token } : { id: captureId } });
       assert.equal(response.status, 200, await response.text());
     }
   } finally {
