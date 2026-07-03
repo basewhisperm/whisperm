@@ -1,8 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService, MarketplaceDiscoveryService } from "@whisperm/services";
-import { PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { BusinessGrowthOpportunityService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService } from "@whisperm/services";
+import { PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
@@ -148,6 +148,13 @@ export interface SellerInvitationServicePort {
   ): Promise<{ readonly invitationId: string; readonly status: string; readonly provider?: string | undefined }> | { readonly invitationId: string; readonly status: string; readonly provider?: string | undefined };
 }
 
+export interface MarketplaceQualificationExecutionPort {
+  executeQualification(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string },
+  ): Promise<{ readonly qualifiedCount: number; readonly disqualifiedCount: number; readonly needsReviewCount: number; readonly skippedDuplicateCount: number; readonly failedCount: number }> | { readonly qualifiedCount: number; readonly disqualifiedCount: number; readonly needsReviewCount: number; readonly skippedDuplicateCount: number; readonly failedCount: number };
+}
+
 export interface MarketplaceDiscoveryExecutionPort {
   executeAutonomousDiscovery(
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
@@ -170,6 +177,11 @@ export interface CampaignRuntimeExecutionPort {
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
     input: { readonly executionId: string; readonly status: "COMPLETED" | "FAILED"; readonly discoveredCount?: number | undefined; readonly capturedCount?: number | undefined; readonly skippedDuplicateCount?: number | undefined; readonly errorCode?: string | undefined; readonly errorMessage?: string | undefined },
   ): Promise<void> | void;
+
+  recordQualificationResult?(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly executionId: string; readonly status: "COMPLETED" | "FAILED"; readonly qualifiedCount?: number | undefined; readonly disqualifiedCount?: number | undefined; readonly needsReviewCount?: number | undefined; readonly skippedDuplicateCount?: number | undefined; readonly failedCount?: number | undefined; readonly errorCode?: string | undefined; readonly errorMessage?: string | undefined },
+  ): Promise<void> | void;
 }
 
 export interface DiscoveryExecutionServicePort {
@@ -185,6 +197,7 @@ export interface WorkerServices {
   readonly sellerInvitation?: SellerInvitationServicePort | undefined;
   readonly campaignRuntime?: CampaignRuntimeExecutionPort | undefined;
   readonly marketplaceDiscovery?: MarketplaceDiscoveryExecutionPort | undefined;
+  readonly marketplaceQualification?: MarketplaceQualificationExecutionPort | undefined;
   readonly discoveryExecution?: DiscoveryExecutionServicePort | undefined;
 }
 
@@ -707,6 +720,34 @@ export const createMarketplaceDiscoveryHandler = (services: WorkerServices): Wor
   },
 });
 
+
+const marketplaceQualificationJobPayloadSchema = z.object({
+  tenantId: z.string().min(1),
+  campaignId: z.string().min(1),
+  executionId: z.string().min(1),
+  replaySafe: z.literal(true),
+}).strict().passthrough();
+
+export const createMarketplaceQualificationHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.marketplaceQualification === undefined || services.campaignRuntime?.recordQualificationResult === undefined) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Marketplace qualification service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+    }
+    const payload = marketplaceQualificationJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Marketplace qualification job tenantId must match execution context", status: 403, correlation: context.correlation });
+    }
+    try {
+      const result = await services.marketplaceQualification.executeQualification({ tenantId: payload.tenantId, correlation: context.correlation }, payload);
+      await services.campaignRuntime.recordQualificationResult({ tenantId: payload.tenantId, correlation: context.correlation }, { executionId: payload.executionId, status: "COMPLETED", ...result });
+      return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId, status: "COMPLETED", ...result, correlationId: context.correlation.correlationId });
+    } catch (error) {
+      await services.campaignRuntime.recordQualificationResult({ tenantId: payload.tenantId, correlation: context.correlation }, { executionId: payload.executionId, status: "FAILED", errorCode: typeof error === "object" && error !== null && "code" in error ? String((error as { readonly code: unknown }).code) : "QUALIFICATION_EXECUTION_FAILED", errorMessage: error instanceof Error ? error.message : "Qualification worker failed" });
+      throw error;
+    }
+  },
+});
+
 const schedulerTickJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
   now: z.string().datetime().optional(),
@@ -807,6 +848,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.discovery", deadLetterQueueName: "marketplace.discovery.dlq" }),
       jobTypes: ["marketplace.discovery.execute"],
       handler: createMarketplaceDiscoveryHandler(input.services),
+    },
+    {
+      name: "marketplace-qualification-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.qualification", deadLetterQueueName: "marketplace.qualification.dlq" }),
+      jobTypes: ["marketplace.qualification.execute"],
+      handler: createMarketplaceQualificationHandler(input.services),
     },
     {
       name: "publish-worker",
@@ -1112,13 +1159,20 @@ export const createMarketplaceDiscoveryExecutionPort = (input: {
     const discoveryCreditsRemaining = typeof discovery.discoveryCreditsRemaining === "number" ? discovery.discoveryCreditsRemaining : Math.max(entries.length, 1);
     const result = await input.discovery.runDiscovery(
       { tenantId: context.tenantId, actorId: "campaign-runtime" },
-      { campaignId: job.campaignId, marketplaceSourceId, marketplaceSourceKey, mode: "MANUAL_SEED", entries, discoveryCreditsRemaining },
+      { campaignId: job.campaignId, marketplaceSourceId, marketplaceSourceKey, mode: "MANUAL_SEED", entries, deferQualification: true, discoveryCreditsRemaining },
     );
     return {
       discoveredCount: result.sellersFound,
       capturedCount: result.sellersQualified + result.sellersNeedsReview,
       skippedDuplicateCount: result.sellersDuplicate,
     };
+  },
+});
+
+
+export const createMarketplaceQualificationExecutionPort = (input: { readonly qualification: MarketplaceQualificationExecutionService }): MarketplaceQualificationExecutionPort => ({
+  async executeQualification(context, job) {
+    return input.qualification.qualifyDiscoveredSellers({ tenantId: context.tenantId }, { campaignId: job.campaignId });
   },
 });
 
@@ -1153,11 +1207,14 @@ if (isMainModule()) {
     const sellerInvitation = createSellerInvitationServicePort(persistence);
     const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
     const discoveryQueue = { async enqueueDiscovery(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true }) { void input; } };
+    const qualificationQueue = { async enqueueQualification(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true }) { void input; } };
     const campaignRuntimeService = new CampaignRuntimeService({
       campaigns,
       executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
       sellerInvitations: new PrismaSellerInvitationRepository(persistence),
       discoveryQueue,
+      qualificationQueue,
+      opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence),
     });
     const campaignRuntime = {
       async runDueScheduledCampaigns(context: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[0], input: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[1]) {
@@ -1169,6 +1226,9 @@ if (isMainModule()) {
       async recordDiscoveryResult(context: Parameters<typeof campaignRuntimeService.recordDiscoveryResult>[0], input: Parameters<typeof campaignRuntimeService.recordDiscoveryResult>[1]) {
         await campaignRuntimeService.recordDiscoveryResult(context, input);
       },
+      async recordQualificationResult(context: Parameters<typeof campaignRuntimeService.recordQualificationResult>[0], input: Parameters<typeof campaignRuntimeService.recordQualificationResult>[1]) {
+        await campaignRuntimeService.recordQualificationResult(context, input);
+      },
     };
     await runWorkerFromEnv({
       ...createBootstrapOnlyWorkerDependencies(config),
@@ -1177,6 +1237,7 @@ if (isMainModule()) {
         sellerInvitation,
         campaignRuntime,
         marketplaceDiscovery: createMarketplaceDiscoveryExecutionPort({ campaigns, discovery: new MarketplaceDiscoveryService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence) }) }),
+        marketplaceQualification: createMarketplaceQualificationExecutionPort({ qualification: new MarketplaceQualificationExecutionService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence), businessGrowthOpportunities: new BusinessGrowthOpportunityService({ opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence) }) }) }),
       },
     });
     await new Promise<void>((resolve) => {
