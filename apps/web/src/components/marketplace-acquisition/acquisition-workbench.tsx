@@ -95,6 +95,9 @@ interface DiscoveryRuntimeState {
   readonly lastOptimizedAt?: string | undefined;
   readonly optimizationFailureMessage?: string | undefined;
   readonly optimizationRecommendations: readonly OptimizationRecommendationState[];
+  readonly targetingStatus?: string | undefined;
+  readonly targetingSnapshot?: Record<string, unknown> | undefined;
+  readonly targetingFailureReason?: string | undefined;
 }
 
 const asOptimizationRecommendations = (value: unknown): readonly OptimizationRecommendationState[] => {
@@ -135,6 +138,9 @@ const latestDiscoveryState = (executions: readonly { readonly status: string; re
     lastOptimizedAt: typeof metrics.lastOptimizedAt === "string" ? metrics.lastOptimizedAt : undefined,
     optimizationFailureMessage: typeof metrics.optimizationFailureMessage === "string" ? metrics.optimizationFailureMessage : undefined,
     optimizationRecommendations: asOptimizationRecommendations(metrics.optimizationRecommendations),
+    targetingStatus: typeof metrics.targetingStatus === "string" ? metrics.targetingStatus : undefined,
+    targetingSnapshot: typeof metrics.targetingSnapshot === "object" && metrics.targetingSnapshot !== null ? metrics.targetingSnapshot as Record<string, unknown> : undefined,
+    targetingFailureReason: typeof metrics.targetingFailureReason === "string" ? metrics.targetingFailureReason : undefined,
   };
 };
 
@@ -431,7 +437,7 @@ export function AcquisitionWorkbench({
           <div className="mt-3 rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
             <p className="font-semibold text-foreground">Targeting {discoveryRuntime.targetingStatus ?? "not recorded"}</p>
             <p>{discoveryRuntime.targetingSnapshot ? [discoveryRuntime.targetingSnapshot.marketplaceSourceKey ?? discoveryRuntime.targetingSnapshot.marketplaceSourceId, discoveryRuntime.targetingSnapshot.keyword, discoveryRuntime.targetingSnapshot.category, discoveryRuntime.targetingSnapshot.location].filter(Boolean).join(" · ") : "No targeting snapshot recorded."}</p>
-            <p>Execution limit: {discoveryRuntime.targetingSnapshot?.executionLimit ?? "—"}</p>
+            <p>Execution limit: {typeof discoveryRuntime.targetingSnapshot?.executionLimit === "number" || typeof discoveryRuntime.targetingSnapshot?.executionLimit === "string" ? discoveryRuntime.targetingSnapshot.executionLimit : "—"}</p>
           </div>
           {discoveryRuntime.targetingFailureReason ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{discoveryRuntime.targetingFailureReason}</p> : null}
           {discoveryRuntime.failureMessage ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.failureMessage}</p> : null}
@@ -643,7 +649,7 @@ function Filter({ label, value, options, onChange }: {
   );
 }
 
-function Badge({ children, tone }: { readonly children: ReactNode; readonly tone?: string }) {
+function Badge({ children, tone }: { readonly children: ReactNode; readonly tone?: string | undefined }) {
   return (
     <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone ?? "bg-secondary text-muted-foreground"}`}>
       {children}

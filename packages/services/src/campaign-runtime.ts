@@ -11,6 +11,7 @@ import type {
 import { PersistenceError } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
 import { DiscoveryOptimizationWorker } from "./marketplace-acquisition/discovery-optimization-worker.js";
+import { validateCampaignTargeting } from "./campaign-targeting.js";
 
 export interface StartCampaignExecutionInput {
   readonly campaignId: string;
