@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord } from "@whisperm/services";
+import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord } from "@whisperm/services";
 import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
@@ -143,6 +143,8 @@ export interface ClaimLifecycleServicePort {
 
 export interface RenderConversionRetryServicePort { retryRenderConversion(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly conversionId: string }): Promise<{ readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }> | { readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }; }
 
+export interface CrmConversionRuntimePort { executeConversion(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly claimTokenId: string; readonly marketplaceCaptureId: string }): Promise<{ readonly status: string; readonly contactId?: string; readonly dealId?: string; readonly opportunityId?: string; readonly idempotencyKey: string }> | { readonly status: string; readonly contactId?: string; readonly dealId?: string; readonly opportunityId?: string; readonly idempotencyKey: string }; }
+
 
 export interface SellerInvitationServicePort {
   sendInvitation(
@@ -197,6 +199,7 @@ export interface WorkerServices {
   readonly notifications?: NotificationServicePort | undefined;
   readonly claimLifecycle?: ClaimLifecycleServicePort | undefined;
   readonly renderConversionRetry?: RenderConversionRetryServicePort | undefined;
+  readonly crmConversionRuntime?: CrmConversionRuntimePort | undefined;
   readonly sellerInvitation?: SellerInvitationServicePort | undefined;
   readonly campaignRuntime?: CampaignRuntimeExecutionPort | undefined;
   readonly marketplaceDiscovery?: MarketplaceDiscoveryExecutionPort | undefined;
@@ -539,6 +542,23 @@ export const createRenderConversionRetryHandler = (services: WorkerServices): Wo
   },
 });
 
+
+const crmConversionJobPayloadSchema = z.object({ tenantId: z.string().min(1), claimTokenId: z.string().min(1), marketplaceCaptureId: z.string().min(1) }).strict();
+
+export const createCrmConversionHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.crmConversionRuntime === undefined) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "CRM conversion runtime service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+    }
+    const payload = crmConversionJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "CRM conversion job tenantId must match execution context", status: 403, correlation: context.correlation });
+    }
+    const result = await services.crmConversionRuntime.executeConversion({ tenantId: payload.tenantId, correlation: context.correlation }, payload);
+    return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, claimTokenId: payload.claimTokenId, marketplaceCaptureId: payload.marketplaceCaptureId, status: result.status, contactId: result.contactId, dealId: result.dealId, opportunityId: result.opportunityId, idempotencyKey: result.idempotencyKey, correlationId: context.correlation.correlationId });
+  },
+});
+
 const claimLifecycleJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
   invitationId: z.string().min(1),
@@ -844,6 +864,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.claim.lifecycle", deadLetterQueueName: "marketplace.claim.lifecycle.dlq" }),
       jobTypes: ["marketplace.claim.reminder", "marketplace.claim.expire", "marketplace.claim.intelligence"],
       handler: createClaimLifecycleHandler(input.services),
+    },
+    {
+      name: "crm-conversion-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: crmConversionQueueName, deadLetterQueueName: `${crmConversionQueueName}.dlq` }),
+      jobTypes: [crmConversionJobType],
+      handler: createCrmConversionHandler(input.services),
     },
     {
       name: "render-conversion-retry-worker",

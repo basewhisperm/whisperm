@@ -104,13 +104,14 @@ test('registers event ingestion, score recomputation, notification, claim lifecy
 
   const registrations = await app.start();
 
-  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'render.conversion.retry', 'marketplace.invite', 'marketplace.discovery', 'marketplace.qualification', 'publish', 'scheduler']);
-  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'render.conversion.retry', 'marketplace.invite.send', 'marketplace.discovery.execute', 'marketplace.qualification.execute', 'publish.dispatch', 'scheduler.tick']);
+  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'marketplace.crm.conversion', 'render.conversion.retry', 'marketplace.invite', 'marketplace.discovery', 'marketplace.qualification', 'publish', 'scheduler']);
+  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'marketplace.crm.conversion.execute', 'render.conversion.retry', 'marketplace.invite.send', 'marketplace.discovery.execute', 'marketplace.qualification.execute', 'publish.dispatch', 'scheduler.tick']);
   assert.equal(app.getReadiness().status, 'HEALTHY');
   assert.equal(queues.isWorkerActive('event-ingestion-worker'), true);
   assert.equal(queues.isWorkerActive('score-recomputation-worker'), true);
   assert.equal(queues.isWorkerActive('notification-worker'), true);
   assert.equal(queues.isWorkerActive('claim-lifecycle-worker'), true);
+  assert.equal(queues.isWorkerActive('crm-conversion-worker'), true);
   assert.equal(queues.isWorkerActive('render-conversion-retry-worker'), true);
   assert.equal(queues.isWorkerActive('marketplace-discovery-worker'), true);
   assert.equal(queues.isWorkerActive('marketplace-qualification-worker'), true);
@@ -337,6 +338,35 @@ test('concurrent jobs remain tenant isolated', async () => {
 });
 
 
+
+
+test('crm conversion worker invokes runtime service with tenant isolation', async () => {
+  const calls = [];
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) },
+    crmConversionRuntime: {
+      executeConversion: async (context, input) => {
+        calls.push({ context, input });
+        return { status: 'CONVERTED', contactId: 'contact-1', dealId: 'deal-1', opportunityId: 'opp-1', idempotencyKey: 'crm-key-1' };
+      },
+    },
+  }, runtime.ports);
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'crm-conversion-1',
+    queueName: 'marketplace.crm.conversion',
+    jobType: 'marketplace.crm.conversion.execute',
+    payload: { tenantId: 'tenant-1', claimTokenId: 'token-1', marketplaceCaptureId: 'capture-1' },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'tenant-1:crm-conversion-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.crm.conversion', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(calls[0].context.tenantId, 'tenant-1');
+  assert.equal(calls[0].input.claimTokenId, 'token-1');
+  assert.equal(calls[0].input.marketplaceCaptureId, 'capture-1');
+});
 
 test('render conversion retry worker invokes retry service with tenant isolation', async () => {
   const calls = [];
