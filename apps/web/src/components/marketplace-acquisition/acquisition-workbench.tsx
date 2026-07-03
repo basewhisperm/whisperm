@@ -61,7 +61,7 @@ import {
   rollupRecords,
   searchText,
   sellerName,
-  sellerTimelineItems,
+  sellerRelationshipTimelineItems,
   source,
   title,
   location,
@@ -909,9 +909,9 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
           </p>
         </WorkbenchSection>
 
-        <WorkbenchSection title="Seller timeline">
+        <WorkbenchSection title="Seller relationship memory">
           <div className="space-y-2">
-            {sellerTimelineItems(sellerRecords).map((item) => (
+            {sellerRelationshipTimelineItems(sellerRecords).map((item) => (
               <CheckLine key={item.label} label={item.label} detail={item.detail} passed={item.done} />
             ))}
           </div>

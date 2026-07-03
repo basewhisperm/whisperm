@@ -70,6 +70,32 @@ export interface SellerAcquisitionPortfolioSummary {
   readonly images: readonly string[];
 }
 
+export interface SellerRelationshipTimelineEvent {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly kind: "DISCOVERY" | "QUALIFICATION" | "INVITATION" | "CLAIM" | "CRM";
+  readonly label: string;
+  readonly captureId: string;
+  readonly campaignId?: string;
+  readonly metadata: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+export interface SellerRelationshipMemory {
+  readonly canonicalSellerKey: string;
+  readonly captureIds: readonly string[];
+  readonly marketplacesSeen: readonly string[];
+  readonly campaignIds: readonly string[];
+  readonly hasPriorInvitation: boolean;
+  readonly hasClaimed: boolean;
+  readonly wasPreviouslyDisqualified: boolean;
+  readonly hasConverted: boolean;
+  readonly historyCompleteness: "COMPLETE" | "PARTIAL";
+  readonly timelineGenerationStatus: "SUCCESS" | "PARTIAL";
+  readonly timelineGenerationFailures: readonly string[];
+  readonly identityResolutionConfidence?: string;
+  readonly timeline: readonly SellerRelationshipTimelineEvent[];
+}
+
 export interface SellerAcquisitionRecord {
   readonly capture: MarketplaceCaptureRecord;
   readonly contact: SellerAcquisitionContact | null;
@@ -92,6 +118,7 @@ export interface SellerAcquisitionRecord {
   readonly captureConfidence?: CaptureConfidence;
   readonly acquisitionScore?: number;
   readonly slaStatus?: string;
+  readonly relationshipMemory?: SellerRelationshipMemory;
 }
 
 export interface MarketplaceAcquisitionRecordsResponse {

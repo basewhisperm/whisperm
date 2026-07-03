@@ -20,6 +20,7 @@ import type {
   SellerInvitationRepository,
 } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
+import { buildSellerRelationshipMemory, type SellerRelationshipMemory } from "./seller-relationship-memory.js";
 
 export type SellerAcquisitionHealthStatus = "READY" | "ACTION_REQUIRED" | "BLOCKED" | "EXPIRED" | "COMPLETED";
 export type SellerAcquisitionNextAction = "REVEAL_PHONE" | "SEND_INVITATION" | "RETRY_INVITATION" | "WAIT_FOR_CLAIM" | "CONVERT_SELLER" | "CONVERT_INVENTORY" | "COMPLETE_ACQUISITION" | "NONE";
@@ -54,6 +55,7 @@ export interface SellerAcquisitionRecord {
   readonly nextAction: SellerAcquisitionNextAction;
   readonly missingRequirements: readonly SellerAcquisitionMissingRequirement[];
   readonly isQualifiedSellerLead: boolean;
+  readonly relationshipMemory?: SellerRelationshipMemory | undefined;
 }
 
 export interface SellerAcquisitionRecordPage {
@@ -260,7 +262,8 @@ export class SellerAcquisitionRecordService {
     const capture = await this.deps.marketplaceCaptures.findById(context, captureId);
     if (capture === null) return null;
     const records = await this.buildFromCaptures(context, [capture]);
-    return records[0] ?? null;
+    const record = records[0] ?? null;
+    return record === null ? null : { ...record, relationshipMemory: buildSellerRelationshipMemory([record]) };
   }
 
   private async buildFromCaptures(context: Context, captures: readonly MarketplaceCaptureRecord[]): Promise<readonly SellerAcquisitionRecord[]> {
@@ -447,8 +450,11 @@ export class SellerAcquisitionRecordService {
         .map((record) => record.draftInventory?.id)
         .filter((id): id is string => typeof id === "string" && id.length > 0);
 
+      const relationshipMemory = buildSellerRelationshipMemory(group);
+
       return {
         ...representative,
+        relationshipMemory,
         images: images.length > 0 ? images : representative.images,
         portfolio: {
           listingCount: group.length,
