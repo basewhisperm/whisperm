@@ -270,3 +270,41 @@ test('recordDiscoveryResult fails runtime execution with sanitized failure metad
   assert.match(result.errorMessage, /api_key=\[REDACTED\]/);
   assert.doesNotMatch(result.errorMessage, /secret/);
 });
+
+test('recordDiscoveryResult enqueues governed qualification before completing execution', async () => {
+  const executions = new MemoryExecutions();
+  const calls = [];
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, qualificationQueue: { async enqueueQualification(input) { calls.push(input); } } });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { discoveryStatus: 'RUNNING' } });
+  const result = await service.recordDiscoveryResult({ tenantId: 'tenant-1', correlation: { correlationId: 'corr-1' } }, { executionId: created.id, status: 'COMPLETED', discoveredCount: 2, capturedCount: 0, skippedDuplicateCount: 1 });
+  assert.equal(result.status, 'RUNNING');
+  assert.equal(result.metrics.discoveryStatus, 'COMPLETED');
+  assert.equal(result.metrics.qualificationStatus, 'RUNNING');
+  assert.deepEqual(calls[0], { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: created.id, correlationId: 'corr-1', replaySafe: true });
+});
+
+test('recordQualificationResult completes execution with observable counts', async () => {
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { qualificationStatus: 'RUNNING' } });
+  const result = await service.recordQualificationResult({ tenantId: 'tenant-1' }, { executionId: created.id, status: 'COMPLETED', qualifiedCount: 1, disqualifiedCount: 1, skippedDuplicateCount: 1, failedCount: 0 });
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.metrics.qualificationStatus, 'COMPLETED');
+  assert.equal(result.metrics.qualifiedCount, 1);
+  assert.equal(result.metrics.disqualifiedCount, 1);
+});
+
+test('executeInvitation blocks records with non-qualified opportunity state', async () => {
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    opportunities: {
+      async findByMarketplaceCaptureId() { return { id: 'opp-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', status: 'REJECTED', qualificationStatus: 'REJECTED', createdAt: now, updatedAt: now }; },
+      async findByDiscoveredSellerId() { return null; },
+    },
+  });
+  await assert.rejects(
+    runtime.executeInvitation({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1', opportunityId: 'capture-1' }),
+    /not qualified for invitation/,
+  );
+});

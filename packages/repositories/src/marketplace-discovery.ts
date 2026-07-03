@@ -120,6 +120,7 @@ export interface MarketplaceDiscoveryRepository {
   listDiscoveryRunsByCampaign(context: TenantScoped, campaignId: string): Promise<readonly DiscoveryRunRecord[]>;
   createDiscoveredSeller(context: TenantScoped, input: CreateDiscoveredSellerInput): Promise<DiscoveredSellerRecord>;
   updateDiscoveredSellerStatus(context: TenantScoped, sellerId: string, status: DiscoveredSellerRecord["status"], extra?: { promotedCaptureId?: string; reviewedBy?: string }): Promise<DiscoveredSellerRecord>;
+  updateDiscoveredSellerQualification(context: TenantScoped, sellerId: string, input: { readonly status: DiscoveredSellerRecord["status"]; readonly qualificationScore: number; readonly qualificationPolicy?: Readonly<Record<string, unknown>>; readonly metadata?: Readonly<Record<string, unknown>> }): Promise<DiscoveredSellerRecord>;
   findDiscoveredSellerByListingUrl(context: TenantScoped, runId: string, listingUrl: string): Promise<DiscoveredSellerRecord | null>;
   findDiscoveredSellerByIdentityKey(context: TenantScoped, campaignId: string, sellerIdentityKey: string): Promise<DiscoveredSellerRecord | null>;
   listDiscoveredSellersByRun(context: TenantScoped, runId: string, status?: DiscoveredSellerRecord["status"]): Promise<readonly DiscoveredSellerRecord[]>;
@@ -288,6 +289,25 @@ export class PrismaMarketplaceDiscoveryRepository implements MarketplaceDiscover
           promotedCaptureId: extra?.promotedCaptureId,
           reviewedBy: extra?.reviewedBy,
           reviewedAt: extra?.reviewedBy !== undefined ? new Date().toISOString() : undefined,
+        }),
+      }));
+    } catch (error) { return mapError(error, "Discovered seller"); }
+  }
+
+  async updateDiscoveredSellerQualification(
+    context: TenantScoped,
+    sellerId: string,
+    input: { readonly status: DiscoveredSellerRecord["status"]; readonly qualificationScore: number; readonly qualificationPolicy?: Readonly<Record<string, unknown>>; readonly metadata?: Readonly<Record<string, unknown>> },
+  ): Promise<DiscoveredSellerRecord> {
+    ensureContext(context);
+    try {
+      return parseSeller(await this.sellers.update({
+        where: { tenantId: context.tenantId, id: sellerId },
+        data: dataWithDefined({
+          status: input.status,
+          qualificationScore: input.qualificationScore,
+          qualificationPolicy: input.qualificationPolicy,
+          metadata: input.metadata,
         }),
       }));
     } catch (error) { return mapError(error, "Discovered seller"); }
