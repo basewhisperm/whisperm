@@ -149,6 +149,7 @@ export { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
 export { MarketplaceDiscoveryService } from './marketplace-acquisition/discovery-service.js';
 export type { DiscoveryServiceContext, DiscoveryServiceDependencies, DiscoveryRunResult, ManualSeedEntry, StartDiscoveryRunInput } from './marketplace-acquisition/discovery-service.js';
 export { SellerQualificationService, DEFAULT_QUALIFICATION_POLICY } from './marketplace-acquisition/qualification-service.js';
+export { MarketplaceQualificationExecutionService } from './marketplace-acquisition/qualification-execution-service.js';
 export type { QualificationPolicy, QualificationResult, SellerDataForQualification } from './marketplace-acquisition/qualification-service.js';
 export { SellerDedupeService, computeSellerIdentityKey } from './marketplace-acquisition/dedupe-service.js';
 
@@ -2193,3 +2194,5 @@ export type { RenderConversionRetryContext, RenderConversionRetryDependencies, R
 export { SellerAcquisitionEditService } from "./seller-acquisition-edit.js";
 
 export { evaluateCaptureQuality } from "./seller-acquisition/capture-quality.js";
+export { DiscoveryExecutionWorker, normalizeProviderResultForDiscovery } from './marketplace-acquisition/discovery-execution-worker.js';
+export type { DiscoveryExecutionWorkerDependencies } from './marketplace-acquisition/discovery-execution-worker.js';

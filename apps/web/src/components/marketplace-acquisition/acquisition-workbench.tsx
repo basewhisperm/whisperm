@@ -75,6 +75,12 @@ interface DiscoveryRuntimeState {
   readonly capturedCount: number;
   readonly skippedDuplicateCount: number;
   readonly lastExecutionTime?: string | undefined;
+  readonly qualificationStatus?: string | undefined;
+  readonly qualifiedCount: number;
+  readonly disqualifiedCount: number;
+  readonly needsReviewCount: number;
+  readonly qualificationFailedCount: number;
+  readonly qualificationFailureMessage?: string | undefined;
   readonly failureMessage?: string | undefined;
   readonly targetingStatus?: string | null | undefined;
   readonly targetingSnapshot?: { readonly marketplaceSourceKey?: string; readonly marketplaceSourceId?: string; readonly keyword?: string; readonly category?: string; readonly location?: string; readonly executionLimit?: number } | null | undefined;
@@ -90,6 +96,12 @@ const latestDiscoveryState = (executions: readonly { readonly status: string; re
     discoveredCount: typeof metrics.discoveredCount === "number" ? metrics.discoveredCount : 0,
     capturedCount: typeof metrics.capturedCount === "number" ? metrics.capturedCount : 0,
     skippedDuplicateCount: typeof metrics.skippedDuplicateCount === "number" ? metrics.skippedDuplicateCount : 0,
+    qualificationStatus: typeof metrics.qualificationStatus === "string" ? metrics.qualificationStatus : undefined,
+    qualifiedCount: typeof metrics.qualifiedCount === "number" ? metrics.qualifiedCount : 0,
+    disqualifiedCount: typeof metrics.disqualifiedCount === "number" ? metrics.disqualifiedCount : 0,
+    needsReviewCount: typeof metrics.needsReviewCount === "number" ? metrics.needsReviewCount : 0,
+    qualificationFailedCount: typeof metrics.qualificationFailedCount === "number" ? metrics.qualificationFailedCount : 0,
+    qualificationFailureMessage: typeof metrics.qualificationFailureMessage === "string" ? metrics.qualificationFailureMessage : undefined,
     lastExecutionTime: execution.completedAt ?? execution.failedAt ?? execution.startedAt ?? undefined,
     failureMessage: typeof metrics.failureMessage === "string" ? metrics.failureMessage : execution.errorMessage ?? undefined,
     targetingStatus: typeof metrics.targetingStatus === "string" ? metrics.targetingStatus : null,
@@ -395,6 +407,7 @@ export function AcquisitionWorkbench({
           </div>
           {discoveryRuntime.targetingFailureReason ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{discoveryRuntime.targetingFailureReason}</p> : null}
           {discoveryRuntime.failureMessage ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.failureMessage}</p> : null}
+          {discoveryRuntime.qualificationFailureMessage ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.qualificationFailureMessage}</p> : null}
         </section>
       ) : null}
 

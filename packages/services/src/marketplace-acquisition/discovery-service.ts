@@ -41,6 +41,7 @@ export interface StartDiscoveryRunInput {
   readonly mode: DiscoveryRunRecord["mode"];
   readonly entries: readonly ManualSeedEntry[];
   readonly qualificationPolicy?: QualificationPolicy;
+  readonly deferQualification?: boolean;
   readonly discoveryCreditsRemaining: number;
   readonly targeting?: CampaignTargetingConfig | undefined;
 }
@@ -178,8 +179,8 @@ export class MarketplaceDiscoveryService {
           continue;
         }
 
-        // Qualify the seller
-        const qualification = this.qualificationService.qualify(
+        // Qualify the seller unless autonomous Campaign Runtime has deferred this to the qualification worker.
+        const qualification = input.deferQualification ? undefined : this.qualificationService.qualify(
           {
             listingUrl: entry.listingUrl,
             marketplaceSourceKey: input.marketplaceSourceKey,
@@ -203,13 +204,13 @@ export class MarketplaceDiscoveryService {
           input.qualificationPolicy,
         );
 
-        confidenceTotal += qualification.confidence.overallConfidence;
-        if (qualification.status === "QUALIFIED") {
+        if (qualification !== undefined) confidenceTotal += qualification.confidence.overallConfidence;
+        if (qualification?.status === "QUALIFIED") {
           sellersQualified++;
-        } else if (qualification.status === "NEEDS_REVIEW") {
+        } else if (qualification?.status === "NEEDS_REVIEW") {
           sellersNeedsReview++;
         } else {
-          sellersRejected++;
+          if (qualification !== undefined) sellersRejected++;
         }
 
         const sellerInput: CreateDiscoveredSellerInput = {
@@ -219,9 +220,9 @@ export class MarketplaceDiscoveryService {
           marketplaceSourceId: input.marketplaceSourceId,
           listingUrl: entry.listingUrl,
           ...(sellerIdentityKey !== undefined ? { sellerIdentityKey } : {}),
-          status: qualification.status,
-          qualificationScore: qualification.score,
-          qualificationPolicy: qualification.breakdown as Readonly<Record<string, unknown>>,
+          status: qualification?.status ?? "PENDING",
+          qualificationScore: qualification?.score ?? 0,
+          ...(qualification !== undefined ? { qualificationPolicy: qualification.breakdown as Readonly<Record<string, unknown>> } : {}),
           ...(entry.sellerName !== undefined ? { sellerName: entry.sellerName } : {}),
           ...(entry.phone !== undefined ? { phone: entry.phone } : {}),
           ...(entry.email !== undefined ? { email: entry.email } : {}),
@@ -238,9 +239,11 @@ export class MarketplaceDiscoveryService {
         };
 
         const seller = await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, sellerInput);
-        const opportunity = await this.deps.businessGrowthOpportunities?.createFromDiscoveredSeller(repoContext, seller);
-        if (opportunity !== undefined) {
-          await this.deps.businessGrowthOpportunities?.attachQualificationOutput(repoContext, opportunity.id, qualification);
+        if (qualification !== undefined) {
+          const opportunity = await this.deps.businessGrowthOpportunities?.createFromDiscoveredSeller(repoContext, seller);
+          if (opportunity !== undefined) {
+            await this.deps.businessGrowthOpportunities?.attachQualificationOutput(repoContext, opportunity.id, qualification);
+          }
         }
       }
 

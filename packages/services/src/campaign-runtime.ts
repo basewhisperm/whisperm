@@ -6,6 +6,7 @@ import type {
   PageRequest,
   SellerAcquisitionCampaignRepository,
   SellerInvitationRepository,
+  BusinessGrowthOpportunityRepository,
 } from "@whisperm/repositories";
 import { PersistenceError } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
@@ -36,6 +37,16 @@ export interface CampaignRuntimeDiscoveryQueue {
   }): Promise<void> | void;
 }
 
+export interface CampaignRuntimeQualificationQueue {
+  enqueueQualification(input: {
+    readonly tenantId: string;
+    readonly campaignId: string;
+    readonly executionId: string;
+    readonly correlationId?: string | undefined;
+    readonly replaySafe: true;
+  }): Promise<void> | void;
+}
+
 export interface CampaignRuntimeInvitationQueue {
   enqueueInvitation(input: {
     readonly tenantId: string;
@@ -57,6 +68,18 @@ export interface RecordDiscoveryResultInput {
   readonly discoveredCount?: number | undefined;
   readonly capturedCount?: number | undefined;
   readonly skippedDuplicateCount?: number | undefined;
+  readonly errorCode?: string | undefined;
+  readonly errorMessage?: string | undefined;
+}
+
+export interface RecordQualificationResultInput {
+  readonly executionId: string;
+  readonly status: "COMPLETED" | "FAILED";
+  readonly qualifiedCount?: number | undefined;
+  readonly disqualifiedCount?: number | undefined;
+  readonly needsReviewCount?: number | undefined;
+  readonly skippedDuplicateCount?: number | undefined;
+  readonly failedCount?: number | undefined;
   readonly errorCode?: string | undefined;
   readonly errorMessage?: string | undefined;
 }
@@ -100,7 +123,9 @@ export interface CampaignRuntimeServiceDependencies {
   readonly worker?: CampaignRuntimeWorker | undefined;
   readonly invitationQueue?: CampaignRuntimeInvitationQueue | undefined;
   readonly discoveryQueue?: CampaignRuntimeDiscoveryQueue | undefined;
+  readonly qualificationQueue?: CampaignRuntimeQualificationQueue | undefined;
   readonly sellerInvitations?: SellerInvitationRepository | undefined;
+  readonly opportunities?: BusinessGrowthOpportunityRepository | undefined;
 }
 
 const activeStatuses = new Set(["QUEUED", "RUNNING"]);
@@ -142,6 +167,11 @@ export class CampaignRuntimeService {
     const campaign = await this.deps.campaigns.findById(context, input.campaignId);
     if (campaign === null) {
       throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Seller acquisition campaign not found", status: 404 });
+    }
+
+    const opportunity = await this.deps.opportunities?.findByMarketplaceCaptureId(context, input.opportunityId) ?? await this.deps.opportunities?.findByDiscoveredSellerId(context, input.opportunityId) ?? null;
+    if (opportunity !== null && opportunity.qualificationStatus !== "QUALIFIED" && opportunity.status !== "QUALIFIED") {
+      throw new PersistenceError({ code: "PERSISTENCE_VALIDATION_FAILED", message: "Seller acquisition record is not qualified for invitation", status: 422 });
     }
 
     const execution = await this.deps.executions.create(context, {
@@ -297,9 +327,9 @@ export class CampaignRuntimeService {
     const now = new Date().toISOString();
     const baseMetrics = existing.metrics ?? {};
     if (input.status === "COMPLETED") {
-      return this.deps.executions.update(context, input.executionId, {
-        status: "COMPLETED",
-        completedAt: now,
+      const updated = await this.deps.executions.update(context, input.executionId, {
+        status: this.deps.qualificationQueue === undefined ? "COMPLETED" : "RUNNING",
+        completedAt: this.deps.qualificationQueue === undefined ? now : null,
         metrics: {
           ...baseMetrics,
           discoveryStatus: "COMPLETED",
@@ -307,8 +337,14 @@ export class CampaignRuntimeService {
           discoveredCount: input.discoveredCount ?? 0,
           capturedCount: input.capturedCount ?? 0,
           skippedDuplicateCount: input.skippedDuplicateCount ?? 0,
+          qualificationStatus: this.deps.qualificationQueue === undefined ? "SKIPPED" : "RUNNING",
+          qualificationStartedAt: this.deps.qualificationQueue === undefined ? undefined : now,
         },
       });
+      if (this.deps.qualificationQueue !== undefined) {
+        await this.deps.qualificationQueue.enqueueQualification({ tenantId: context.tenantId, campaignId: existing.campaignId, executionId: input.executionId, correlationId: typeof (context as { readonly correlation?: { readonly correlationId?: unknown } }).correlation?.correlationId === "string" ? (context as { readonly correlation?: { readonly correlationId?: string } }).correlation?.correlationId : input.executionId, replaySafe: true });
+      }
+      return updated;
     }
     const safeMessage = input.errorMessage === undefined ? "Discovery execution failed" : sanitizeErrorMessage(input.errorMessage);
     return this.deps.executions.update(context, input.executionId, {
@@ -324,6 +360,33 @@ export class CampaignRuntimeService {
         capturedCount: input.capturedCount ?? 0,
         skippedDuplicateCount: input.skippedDuplicateCount ?? 0,
         failureMessage: safeMessage,
+      },
+    });
+  }
+
+  async recordQualificationResult(context: TenantScoped, input: RecordQualificationResultInput): Promise<CampaignRuntimeExecutionRecord> {
+    const existing = await this.deps.executions.findById(context, input.executionId);
+    if (existing === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Campaign runtime execution not found", status: 404 });
+    const now = new Date().toISOString();
+    const safeMessage = input.errorMessage === undefined ? undefined : sanitizeErrorMessage(input.errorMessage);
+    return this.deps.executions.update(context, input.executionId, {
+      status: input.status === "COMPLETED" ? "COMPLETED" : "FAILED",
+      completedAt: input.status === "COMPLETED" ? now : null,
+      failedAt: input.status === "FAILED" ? now : null,
+      errorCode: input.status === "FAILED" ? input.errorCode ?? "QUALIFICATION_EXECUTION_FAILED" : null,
+      errorMessage: input.status === "FAILED" ? safeMessage ?? "Qualification execution failed" : null,
+      metrics: {
+        ...(existing.metrics ?? {}),
+        qualificationStatus: input.status,
+        qualificationCompletedAt: input.status === "COMPLETED" ? now : undefined,
+        qualificationFailedAt: input.status === "FAILED" ? now : undefined,
+        qualifiedCount: input.qualifiedCount ?? 0,
+        disqualifiedCount: input.disqualifiedCount ?? 0,
+        needsReviewCount: input.needsReviewCount ?? 0,
+        skippedDuplicateCount: input.skippedDuplicateCount ?? existing.metrics?.skippedDuplicateCount ?? 0,
+        qualificationFailedCount: input.failedCount ?? 0,
+        qualificationFailureCode: input.status === "FAILED" ? input.errorCode ?? "QUALIFICATION_EXECUTION_FAILED" : undefined,
+        qualificationFailureMessage: input.status === "FAILED" ? safeMessage ?? "Qualification execution failed" : undefined,
       },
     });
   }
