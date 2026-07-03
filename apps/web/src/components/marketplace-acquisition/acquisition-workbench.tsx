@@ -600,6 +600,11 @@ export function AcquisitionWorkbench({
           <p className="mt-3 max-w-3xl text-xs leading-5 text-muted-foreground">{contextNote}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
+          {mode === "campaign" ? (
+            <Link className="inline-flex h-10 items-center justify-center rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground transition hover:opacity-90" href="/marketplace-acquisition">
+              Back to command center
+            </Link>
+          ) : null}
           <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse" href={mode === "campaign" && campaignId ? `/marketplace-acquisition/capture?campaignId=${campaignId}` : "/marketplace-acquisition/capture"} style={{ background: "var(--color-whisper)" }}>
             Capture seller
             <IconArrowRight aria-hidden="true" className="size-4" stroke={1.8} />
