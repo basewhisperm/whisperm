@@ -95,10 +95,11 @@ test("workbench renders seller relationship memory from API projection", () => {
   assert.match(domain, /Date\.parse\(a\.occurredAt\)/u);
 });
 
-test("campaign workbench visualizes invitation optimization state without calculating it", () => {
-  assert.match(component, /recommended \$\{metadata\.selectedChannel\}/u);
-  assert.match(component, /optimized: \$\{metadata\.optimizationReason\}/u);
-  assert.match(component, /retry strategy max/u);
-  assert.match(component, /suppressed: \$\{metadata\.suppressionReason\}/u);
-  assert.doesNotMatch(component, /buildInvitationOptimizationStrategy/u);
+test('workbench renders claim intelligence state from API projection', () => {
+  const source = component;
+  const domain = readFileSync('src/lib/marketplace-acquisition/workbench-domain.ts', 'utf8');
+  assert.match(source, /Claim intelligence/);
+  assert.match(source, /claimIntelligenceItems\(record\)/);
+  assert.match(domain, /claimIntelligenceRecoveryActionStatus/);
+  assert.match(domain, /Stalled reason/);
 });

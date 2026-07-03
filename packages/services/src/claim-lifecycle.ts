@@ -5,7 +5,7 @@ import { type PersistenceCorrelationMetadata, type TenantScoped, assertTenantSco
 
 const idSchema = z.string().min(1);
 const reminderTypeSchema = z.enum(["DAY_3", "DAY_6"]);
-const claimTokenStatusSchema = z.enum(["PENDING", "SENT", "FAILED", "OPENED", "EXPIRED"]);
+const claimTokenStatusSchema = z.enum(["PENDING", "SENT", "FAILED", "OPENED", "EXPIRED", "CLAIMED", "ABANDONED"]);
 const channelSchema = z.enum(["WHATSAPP", "SMS", "EMAIL"]);
 const nowMs = (date: Date): number => date.getTime();
 const days = (count: number): number => count * 24 * 60 * 60 * 1000;
@@ -53,7 +53,7 @@ export interface MarketplaceClaimTokenRecord {
 export interface ClaimLifecycleScheduleJob {
   readonly tenantId: string;
   readonly invitationId: string;
-  readonly jobType: "marketplace.claim.reminder" | "marketplace.claim.expire";
+  readonly jobType: "marketplace.claim.reminder" | "marketplace.claim.expire" | "marketplace.claim.intelligence";
   readonly reminderType?: ClaimReminderType | undefined;
   readonly runAt: string;
   readonly dedupeKey: string;
@@ -90,6 +90,9 @@ export interface ClaimLifecycleDependencies {
   readonly marketplaceCaptures: ClaimLifecycleCaptureRepository;
   readonly draftInventories: ClaimLifecycleDraftInventoryRepository;
   readonly notifications: ClaimLifecycleNotificationPort;
+  readonly businessGrowthOpportunities?: {
+    createOrUpdateFromMarketplaceCapture(context: TenantScoped, capture: MarketplaceCaptureRecord): Promise<unknown>;
+  } | undefined;
   readonly scheduler: ClaimLifecycleSchedulerPort;
   readonly auditLogs: ClaimLifecycleAuditPort;
   readonly activities?: ActivityRepository | undefined;
@@ -100,6 +103,13 @@ const contextSchema = z.object({ tenantId: idSchema, actorId: idSchema.optional(
 const tenantScope = (context: ClaimLifecycleServiceContext): TenantScoped => ({ tenantId: context.tenantId });
 const terminalCaptureStatuses = new Set(["CLAIMED", "CONVERTED", "EXPIRED"]);
 const activeTokenStatuses = new Set<ClaimTokenStatus>(["SENT", "OPENED"]);
+const completedCaptureStatuses = new Set(["CLAIMED", "CONVERTED"]);
+const claimIntelligenceThresholds = { noViewMs: days(2), viewedNotCompletedMs: days(1), startedNotCompletedMs: days(1), maxRecoveryAttempts: 2 } as const;
+type ClaimStalledReason = "NONE" | "DELIVERED_NO_VIEW" | "VIEWED_NOT_STARTED" | "STARTED_NOT_COMPLETED" | "EXPIRED_TOKEN" | "REPEATED_ABANDONED" | "SELLER_ALREADY_CLAIMED_OR_CONVERTED";
+type ClaimRecoveryAction = "NONE" | "SEND_REMINDER" | "MARK_ABANDONED" | "SUPPRESS_CONTACT" | "MANUAL_REVIEW";
+export interface ClaimIntelligenceResult { readonly status: "HEALTHY" | "STALLED" | "COMPLETED" | "EXPIRED" | "SUPPRESSED"; readonly stalledReason: ClaimStalledReason; readonly recoveryAction: ClaimRecoveryAction; readonly automatic: boolean; readonly recoveryAttemptCount: number; readonly claimAgeMs: number; readonly timeSinceDeliveryMs: number | null; readonly timeSinceViewMs: number | null; readonly evaluatedAt: string; }
+const dateMeta = (metadata: Readonly<Record<string, unknown>> | null | undefined, key: string): string | null => { const value = metadata?.[key]; return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null; };
+const numMeta = (metadata: Readonly<Record<string, unknown>> | null | undefined, key: string): number => { const value = metadata?.[key]; return typeof value === "number" && Number.isFinite(value) ? value : 0; };
 const reminderField = (type: ClaimReminderType): "reminderDay3SentAt" | "reminderDay6SentAt" => type === "DAY_3" ? "reminderDay3SentAt" : "reminderDay6SentAt";
 const reminderPurpose = (type: ClaimReminderType): string => type === "DAY_3" ? "Reminder: claim your seller listing/inventory." : "Final reminder: your claim link expires soon.";
 
@@ -124,6 +134,7 @@ export class MarketplaceClaimLifecycleService {
       await this.deps.claimTokens.update(scope, id, { sentAt, expiresAt, status: token.status === "PENDING" ? "SENT" : token.status });
     }
     const jobs: ClaimLifecycleScheduleJob[] = [
+      this.job(context, id, "marketplace.claim.intelligence", new Date(Date.parse(sentAt) + days(2))),
       this.job(context, id, "marketplace.claim.reminder", new Date(Date.parse(sentAt) + days(3)), "DAY_3"),
       this.job(context, id, "marketplace.claim.reminder", new Date(Date.parse(sentAt) + days(6)), "DAY_6"),
       this.job(context, id, "marketplace.claim.expire", new Date(Date.parse(sentAt) + days(7))),
@@ -175,8 +186,70 @@ export class MarketplaceClaimLifecycleService {
     return { expired: true };
   }
 
+
+  async evaluateClaimIntelligence(contextInput: ClaimLifecycleServiceContext, invitationId: string): Promise<ClaimIntelligenceResult> {
+    const context = contextSchema.parse(contextInput) as ClaimLifecycleServiceContext;
+    const id = idSchema.parse(invitationId);
+    const scope = tenantScope(context);
+    const token = await this.requireToken(scope, id, context);
+    const capture = await this.requireCapture(scope, token.marketplaceCaptureId, context);
+    const result = this.evaluateToken(token, capture);
+    await this.deps.claimTokens.update(scope, id, { metadata: { ...(token.metadata ?? {}), claimIntelligence: result.status, claimIntelligenceLastEvaluatedAt: result.evaluatedAt, claimIntelligenceStalledReason: result.stalledReason, claimIntelligenceRecoveryAction: result.recoveryAction, claimIntelligenceRecoveryActionStatus: result.recoveryAction === "NONE" ? "NOT_REQUIRED" : "RECOMMENDED", claimIntelligenceRecoveryAttemptCount: result.recoveryAttemptCount, claimIntelligenceClaimAgeMs: result.claimAgeMs, claimIntelligenceTimeSinceDeliveryMs: result.timeSinceDeliveryMs, claimIntelligenceTimeSinceViewMs: result.timeSinceViewMs } });
+    await this.audit(context, "MARKETPLACE_CLAIM_INTELLIGENCE_EVALUATED", id, { marketplaceCaptureId: token.marketplaceCaptureId, status: result.status, stalledReason: result.stalledReason, recoveryAction: result.recoveryAction });
+    return result;
+  }
+
+  async executeClaimRecovery(contextInput: ClaimLifecycleServiceContext, invitationId: string): Promise<{ readonly executed: boolean; readonly action: ClaimRecoveryAction; readonly status: string }> {
+    const context = contextSchema.parse(contextInput) as ClaimLifecycleServiceContext;
+    const id = idSchema.parse(invitationId);
+    const scope = tenantScope(context);
+    const token = await this.requireToken(scope, id, context);
+    const capture = await this.requireCapture(scope, token.marketplaceCaptureId, context);
+    const result = this.evaluateToken(token, capture);
+    if (!result.automatic || result.recoveryAction === "NONE") return { executed: false, action: result.recoveryAction, status: "SKIPPED" };
+    if (result.recoveryAction === "SEND_REMINDER") {
+      const key = `claimRecoveryReminder:${result.stalledReason}`;
+      if (token.metadata?.[key] !== undefined) return { executed: false, action: result.recoveryAction, status: "ALREADY_EXECUTED" };
+      const sent = await this.deps.notifications.sendClaimReminder({ tenantId: context.tenantId, invitationId: id, marketplaceCaptureId: token.marketplaceCaptureId, reminderType: "DAY_3", purpose: `Recovery reminder: ${result.stalledReason}`, preferredChannel: originalChannel(token), correlation: context.correlation });
+      const sentAt = this.now().toISOString();
+      await this.deps.claimTokens.update(scope, id, { metadata: { ...(token.metadata ?? {}), [key]: sentAt, claimIntelligence: result.status, claimIntelligenceRecoveryAction: result.recoveryAction, claimIntelligenceRecoveryActionStatus: "EXECUTED", claimIntelligenceRecoveryAttemptCount: result.recoveryAttemptCount + 1, claimIntelligenceLastRecoveryAt: sentAt, claimIntelligenceLastRecoveryChannel: sent.channel } });
+      await this.audit(context, "MARKETPLACE_CLAIM_RECOVERY_REMINDER_SENT", id, { marketplaceCaptureId: token.marketplaceCaptureId, stalledReason: result.stalledReason, channel: sent.channel });
+      return { executed: true, action: result.recoveryAction, status: "EXECUTED" };
+    }
+    if (result.recoveryAction === "MARK_ABANDONED") {
+      const abandonedAt = this.now().toISOString();
+      await this.deps.claimTokens.update(scope, id, { status: "ABANDONED", metadata: { ...(token.metadata ?? {}), claimIntelligence: "STALLED", claimIntelligenceRecoveryAction: result.recoveryAction, claimIntelligenceRecoveryActionStatus: "EXECUTED", claimAbandonedAt: abandonedAt } });
+      await this.deps.marketplaceCaptures.update(scope, capture.id, { metadata: { ...(capture.metadata ?? {}), claimIntelligenceStatus: "ABANDONED", claimIntelligenceStalledReason: result.stalledReason } });
+      await this.deps.businessGrowthOpportunities?.createOrUpdateFromMarketplaceCapture(scope, { ...capture, metadata: { ...(capture.metadata ?? {}), claimIntelligenceStatus: "ABANDONED" } });
+      await this.audit(context, "MARKETPLACE_CLAIM_ABANDONED", id, { marketplaceCaptureId: capture.id, stalledReason: result.stalledReason });
+      return { executed: true, action: result.recoveryAction, status: "EXECUTED" };
+    }
+    return { executed: false, action: result.recoveryAction, status: "MANUAL_REVIEW_REQUIRED" };
+  }
+
   private now(): Date { return this.deps.clock?.() ?? new Date(); }
   private job(context: ClaimLifecycleServiceContext, invitationId: string, jobType: ClaimLifecycleScheduleJob["jobType"], runAt: Date, reminderType?: ClaimReminderType): ClaimLifecycleScheduleJob { return { tenantId: context.tenantId, invitationId, jobType, reminderType, runAt: runAt.toISOString(), dedupeKey: `${jobType}:${context.tenantId}:${invitationId}:${reminderType ?? "expire"}`, correlation: context.correlation }; }
+  private evaluateToken(token: MarketplaceClaimTokenRecord, capture: MarketplaceCaptureRecord): ClaimIntelligenceResult {
+    const evaluatedAt = this.now().toISOString();
+    const nowTime = this.now().getTime();
+    const createdTime = Date.parse(token.createdAt);
+    const sentAt = dateMeta(token.metadata, "deliveredAt") ?? token.sentAt ?? dateMeta(token.metadata, "sentAt");
+    const openedAt = dateMeta(token.metadata, "openedAt");
+    const startedAt = capture.status === "CLAIM_STARTED" ? capture.updatedAt : dateMeta(token.metadata, "startedAt");
+    const recoveryAttemptCount = numMeta(token.metadata, "claimIntelligenceRecoveryAttemptCount");
+    const claimAgeMs = Math.max(0, nowTime - createdTime);
+    const timeSinceDeliveryMs = sentAt === null || sentAt === undefined ? null : Math.max(0, nowTime - Date.parse(sentAt));
+    const timeSinceViewMs = openedAt === null ? null : Math.max(0, nowTime - Date.parse(openedAt));
+    const base = { recoveryAttemptCount, claimAgeMs, timeSinceDeliveryMs, timeSinceViewMs, evaluatedAt };
+    if (completedCaptureStatuses.has(capture.status) || token.status === "CLAIMED" || token.claimedAt != null) return { ...base, status: "COMPLETED", stalledReason: "SELLER_ALREADY_CLAIMED_OR_CONVERTED", recoveryAction: "NONE", automatic: false };
+    if (token.status === "EXPIRED" || nowTime >= Date.parse(token.expiresAt)) return { ...base, status: "EXPIRED", stalledReason: "EXPIRED_TOKEN", recoveryAction: "MARK_ABANDONED", automatic: true };
+    if (recoveryAttemptCount >= claimIntelligenceThresholds.maxRecoveryAttempts) return { ...base, status: "SUPPRESSED", stalledReason: "REPEATED_ABANDONED", recoveryAction: "SUPPRESS_CONTACT", automatic: false };
+    if (startedAt !== null && nowTime - Date.parse(startedAt) >= claimIntelligenceThresholds.startedNotCompletedMs) return { ...base, status: "STALLED", stalledReason: "STARTED_NOT_COMPLETED", recoveryAction: "SEND_REMINDER", automatic: true };
+    if (openedAt !== null && nowTime - Date.parse(openedAt) >= claimIntelligenceThresholds.viewedNotCompletedMs) return { ...base, status: "STALLED", stalledReason: capture.status === "CLAIM_STARTED" ? "STARTED_NOT_COMPLETED" : "VIEWED_NOT_STARTED", recoveryAction: "SEND_REMINDER", automatic: true };
+    if (timeSinceDeliveryMs !== null && openedAt === null && timeSinceDeliveryMs >= claimIntelligenceThresholds.noViewMs) return { ...base, status: "STALLED", stalledReason: "DELIVERED_NO_VIEW", recoveryAction: "SEND_REMINDER", automatic: true };
+    return { ...base, status: "HEALTHY", stalledReason: "NONE", recoveryAction: "NONE", automatic: false };
+  }
+
   private async requireToken(scope: TenantScoped, id: string, context: ClaimLifecycleServiceContext): Promise<MarketplaceClaimTokenRecord> { const token = await this.deps.claimTokens.findById(scope, id); if (token === null) throw new ClaimLifecycleServiceError({ code: "SERVICE_NOT_FOUND", message: "Claim invitation not found", status: 404, correlation: context.correlation }); assertTenantScope(scope, token); return token; }
   private async requireCapture(scope: TenantScoped, id: string, context: ClaimLifecycleServiceContext): Promise<MarketplaceCaptureRecord> { const capture = await this.deps.marketplaceCaptures.findById(scope, id); if (capture === null) throw new ClaimLifecycleServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation }); assertTenantScope(scope, capture); return capture; }
   private async appendActivity(context: ClaimLifecycleServiceContext, capture: MarketplaceCaptureRecord, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {

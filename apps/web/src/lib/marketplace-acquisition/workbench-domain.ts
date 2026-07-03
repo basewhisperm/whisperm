@@ -253,6 +253,26 @@ export function nextActionReason(record: SellerAcquisitionRecord): string {
   return "No operator action is currently required.";
 }
 
+const claimMetaText = (record: SellerAcquisitionRecord, key: string): string | null => {
+  const value = record.claimTokenStatus?.metadata?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+};
+
+export function claimIntelligenceItems(record: SellerAcquisitionRecord): readonly { readonly label: string; readonly detail: string; readonly done: boolean }[] {
+  const token = record.claimTokenStatus;
+  if (token === null) return [{ label: "Claim not created", detail: "No claim token", done: false }];
+  const status = claimMetaText(record, "claimIntelligence") ?? token.status;
+  const reason = claimMetaText(record, "claimIntelligenceStalledReason") ?? "NONE";
+  const action = claimMetaText(record, "claimIntelligenceRecoveryAction") ?? "NONE";
+  const actionStatus = claimMetaText(record, "claimIntelligenceRecoveryActionStatus") ?? "NOT_EVALUATED";
+  const lastEvaluated = claimMetaText(record, "claimIntelligenceLastEvaluatedAt") ?? token.updatedAt ?? token.sentAt ?? token.expiresAt ?? "Not evaluated";
+  return [
+    { label: `Claim lifecycle: ${token.status}`, detail: `Intelligence: ${status}`, done: token.status === "CLAIMED" || record.ownershipAttestation !== null },
+    { label: `Stalled reason: ${reason}`, detail: `Last activity ${lastEvaluated}`, done: reason === "NONE" },
+    { label: `Recovery: ${action}`, detail: actionStatus, done: action === "NONE" || actionStatus === "EXECUTED" },
+  ];
+}
+
 export function timelineItems(record: SellerAcquisitionRecord): readonly { readonly label: string; readonly done: boolean }[] {
   return [
     { label: "Captured", done: true },
