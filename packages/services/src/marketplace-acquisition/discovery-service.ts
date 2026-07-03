@@ -235,7 +235,11 @@ export class MarketplaceDiscoveryService {
           ...(entry.location !== undefined ? { location: entry.location } : {}),
           ...(entry.images !== undefined ? { images: [...entry.images] } : {}),
           rawData: entry as unknown as Readonly<Record<string, unknown>>,
-          metadata: { reasons: qualification.reasons, confidence: qualification.confidence, targetingSnapshot: input.targeting ?? null },
+          metadata: {
+            reasons: qualification?.reasons ?? [],
+            confidence: qualification?.confidence ?? 0,
+            targetingSnapshot: input.targeting ?? null,
+          },
         };
 
         const seller = await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, sellerInput);
