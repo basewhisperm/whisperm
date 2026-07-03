@@ -198,6 +198,7 @@ export interface WorkerServices {
   readonly campaignRuntime?: CampaignRuntimeExecutionPort | undefined;
   readonly marketplaceDiscovery?: MarketplaceDiscoveryExecutionPort | undefined;
   readonly marketplaceQualification?: MarketplaceQualificationExecutionPort | undefined;
+  readonly discoveryExecution?: DiscoveryExecutionServicePort | undefined;
 }
 
 export interface QueueRegistration {
