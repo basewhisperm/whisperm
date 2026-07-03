@@ -77,6 +77,11 @@ export interface SellerDataForQualification {
   readonly price?: string | number | null | undefined;
   readonly location?: string | null | undefined;
   readonly portfolioListingCount?: number | undefined;
+  readonly targetingCategory?: string | null | undefined;
+  readonly targetingLocation?: string | null | undefined;
+  readonly targetingKeyword?: string | null | undefined;
+  readonly targetingPriceMin?: number | null | undefined;
+  readonly targetingPriceMax?: number | null | undefined;
 }
 
 export interface QualificationResult {
@@ -160,6 +165,16 @@ export class SellerQualificationService {
       }
     }
 
+    if (hasText(seller.targetingCategory) && hasText(seller.category) && seller.category.toLowerCase() !== seller.targetingCategory.toLowerCase()) {
+      reasons.add("OUTSIDE_CAMPAIGN_SCOPE");
+    }
+    if (hasText(seller.targetingLocation) && hasText(seller.location) && !seller.location.toLowerCase().includes(seller.targetingLocation.toLowerCase())) {
+      reasons.add("OUTSIDE_CAMPAIGN_SCOPE");
+    }
+    if (hasText(seller.targetingKeyword)) {
+      const haystack = [seller.title, seller.category].filter(hasText).join(" ").toLowerCase();
+      if (!haystack.includes(seller.targetingKeyword.toLowerCase())) reasons.add("OUTSIDE_CAMPAIGN_SCOPE");
+    }
     if (hasText(seller.category)) breakdown.category = policy.weights.category;
     if (hasText(seller.phone)) breakdown.phone = policy.weights.phone;
     else reasons.add("MISSING_PHONE");
@@ -170,8 +185,12 @@ export class SellerQualificationService {
     if (seller.images !== null && seller.images !== undefined && seller.images.length > 0) breakdown.images = policy.weights.images;
 
     const priceVal = seller.price !== null && seller.price !== undefined ? Number(String(seller.price).replace(/[^0-9.]/g, "")) : NaN;
-    if (!Number.isNaN(priceVal) && priceVal > 0) breakdown.price = policy.weights.price;
-    else reasons.add("PRICE_NOT_NORMALIZED");
+    if (!Number.isNaN(priceVal) && priceVal > 0) {
+      breakdown.price = policy.weights.price;
+      if ((seller.targetingPriceMin !== null && seller.targetingPriceMin !== undefined && priceVal < seller.targetingPriceMin) || (seller.targetingPriceMax !== null && seller.targetingPriceMax !== undefined && priceVal > seller.targetingPriceMax)) {
+        reasons.add("OUTSIDE_CAMPAIGN_SCOPE");
+      }
+    } else reasons.add("PRICE_NOT_NORMALIZED");
     if (hasText(seller.location)) breakdown.location = policy.weights.location;
     if ((seller.portfolioListingCount ?? 0) > 1) breakdown.multipleListings = policy.weights.multipleListings;
     if (hasText(seller.email)) breakdown.email = policy.weights.email;
@@ -181,6 +200,16 @@ export class SellerQualificationService {
     }
 
     const score = Object.values(breakdown).reduce((sum, v) => sum + v, 0);
+    if (reasons.has("OUTSIDE_CAMPAIGN_SCOPE")) {
+      return this.result(score, "REJECTED", reasons, breakdown, policy, {
+        sellerConfidence: hasText(seller.sellerName) || hasText(seller.sellerProfileUrl) ? 100 : 35,
+        phoneConfidence: hasText(seller.phone) ? 100 : 0,
+        listingConfidence: hasText(seller.title) && hasText(seller.category) ? 100 : 65,
+        locationConfidence: hasText(seller.location) ? 100 : 0,
+        priceConfidence: !Number.isNaN(priceVal) && priceVal > 0 ? 100 : 0,
+      });
+    }
+
     const preliminaryStatus = score >= policy.minScore
       ? "QUALIFIED"
       : score >= policy.reviewScore

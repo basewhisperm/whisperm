@@ -10,6 +10,8 @@ import type {
 } from "@whisperm/repositories";
 import { PersistenceError } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
+import { DiscoveryOptimizationWorker } from "./marketplace-acquisition/discovery-optimization-worker.js";
+import { validateCampaignTargeting } from "./campaign-targeting.js";
 
 export interface StartCampaignExecutionInput {
   readonly campaignId: string;
@@ -32,11 +34,22 @@ export interface CampaignRuntimeDiscoveryQueue {
     readonly executionId: string;
     readonly correlationId?: string | undefined;
     readonly replaySafe: true;
+    readonly targeting: import("./campaign-targeting.js").CampaignTargetingConfig;
   }): Promise<void> | void;
 }
 
 export interface CampaignRuntimeQualificationQueue {
   enqueueQualification(input: {
+    readonly tenantId: string;
+    readonly campaignId: string;
+    readonly executionId: string;
+    readonly correlationId?: string | undefined;
+    readonly replaySafe: true;
+  }): Promise<void> | void;
+}
+
+export interface CampaignRuntimeOptimizationQueue {
+  enqueueOptimization(input: {
     readonly tenantId: string;
     readonly campaignId: string;
     readonly executionId: string;
@@ -122,6 +135,8 @@ export interface CampaignRuntimeServiceDependencies {
   readonly invitationQueue?: CampaignRuntimeInvitationQueue | undefined;
   readonly discoveryQueue?: CampaignRuntimeDiscoveryQueue | undefined;
   readonly qualificationQueue?: CampaignRuntimeQualificationQueue | undefined;
+  readonly optimizationQueue?: CampaignRuntimeOptimizationQueue | undefined;
+  readonly optimizationWorker?: DiscoveryOptimizationWorker | undefined;
   readonly sellerInvitations?: SellerInvitationRepository | undefined;
   readonly opportunities?: BusinessGrowthOpportunityRepository | undefined;
 }
@@ -156,9 +171,11 @@ const errorCode = (error: unknown): string => {
 
 export class CampaignRuntimeService {
   private readonly worker: CampaignRuntimeWorker;
+  private readonly optimizationWorker: DiscoveryOptimizationWorker;
 
   constructor(private readonly deps: CampaignRuntimeServiceDependencies) {
     this.worker = deps.worker ?? new NoopCampaignRuntimeWorker();
+    this.optimizationWorker = deps.optimizationWorker ?? new DiscoveryOptimizationWorker();
   }
 
   async executeInvitation(context: TenantScoped, input: ExecuteInvitationInput): Promise<CampaignRuntimeExecutionRecord> {
@@ -219,15 +236,29 @@ export class CampaignRuntimeService {
       throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Campaign runtime execution is already active", status: 409 });
     }
 
+    const targetingValidation = validateCampaignTargeting(campaign.metadata);
+    const targetingMetrics = {
+      targetingStatus: targetingValidation.status,
+      targetingSnapshot: targetingValidation.targeting ?? null,
+      targetingFailureReason: targetingValidation.failureReason ?? null,
+    };
+
     const execution = await this.deps.executions.create(context, {
       tenantId: context.tenantId,
       campaignId: input.campaignId,
       trigger: input.trigger ?? "MANUAL",
-      status: "QUEUED",
-      metrics: {},
+      status: targetingValidation.status === "VALID" ? "QUEUED" : "FAILED",
+      failedAt: targetingValidation.status === "VALID" ? undefined : new Date().toISOString(),
+      errorCode: targetingValidation.status === "VALID" ? undefined : "CAMPAIGN_TARGETING_INVALID",
+      errorMessage: targetingValidation.failureReason,
+      metrics: targetingMetrics,
     });
 
-    const running = await this.deps.executions.update(context, execution.id, { status: "RUNNING", startedAt: new Date().toISOString(), metrics: { discoveryStatus: "PENDING", discoveredCount: 0, capturedCount: 0, skippedDuplicateCount: 0 } });
+    if (targetingValidation.status !== "VALID" || targetingValidation.targeting === undefined) {
+      return execution;
+    }
+
+    const running = await this.deps.executions.update(context, execution.id, { status: "RUNNING", startedAt: new Date().toISOString(), metrics: { ...targetingMetrics, discoveryStatus: "PENDING", discoveredCount: 0, capturedCount: 0, skippedDuplicateCount: 0 } });
 
     if (this.deps.discoveryQueue !== undefined) {
       await this.deps.discoveryQueue.enqueueDiscovery({
@@ -235,10 +266,11 @@ export class CampaignRuntimeService {
         campaignId: input.campaignId,
         executionId: running.id,
         replaySafe: true,
+        targeting: targetingValidation.targeting,
       });
       return this.deps.executions.update(context, running.id, {
         status: "RUNNING",
-        metrics: { ...(running.metrics ?? {}), discoveryStatus: "RUNNING", discoveryStartedAt: running.startedAt ?? new Date().toISOString() },
+        metrics: { ...(running.metrics ?? {}), discoveryStatus: "RUNNING", discoveryStartedAt: running.startedAt ?? new Date().toISOString(), targetingSnapshot: targetingValidation.targeting },
       });
     }
 
@@ -248,6 +280,7 @@ export class CampaignRuntimeService {
         campaignId: input.campaignId,
         executionId: running.id,
         trigger: running.trigger,
+        targeting: targetingValidation.targeting,
       });
       if (result.status === "FAILED") {
         return this.deps.executions.update(context, running.id, {
@@ -274,6 +307,53 @@ export class CampaignRuntimeService {
   }
 
 
+
+  private async applyOptimization(context: TenantScoped, execution: CampaignRuntimeExecutionRecord, metrics: Readonly<Record<string, unknown>>): Promise<CampaignRuntimeExecutionRecord> {
+    const now = new Date().toISOString();
+    if (this.deps.optimizationQueue !== undefined) {
+      await this.deps.optimizationQueue.enqueueOptimization({
+        tenantId: context.tenantId,
+        campaignId: execution.campaignId,
+        executionId: execution.id,
+        correlationId: typeof (context as { readonly correlation?: { readonly correlationId?: unknown } }).correlation?.correlationId === "string" ? (context as { readonly correlation?: { readonly correlationId?: string } }).correlation?.correlationId : execution.id,
+        replaySafe: true,
+      });
+      return this.deps.executions.update(context, execution.id, {
+        metrics: { ...metrics, optimizationStatus: "QUEUED", optimizationQueuedAt: now },
+      });
+    }
+
+    try {
+      const campaign = await this.deps.campaigns.findById(context, execution.campaignId);
+      if (campaign === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Seller acquisition campaign not found", status: 404 });
+      const optimizedExecution = { ...execution, metrics };
+      const result = await this.optimizationWorker.analyze({ context, campaign, execution: optimizedExecution });
+      return this.deps.executions.update(context, execution.id, {
+        metrics: {
+          ...metrics,
+          optimizationStatus: result.optimizationStatus,
+          lastOptimizedAt: result.lastOptimizedAt,
+          optimizationRecommendations: result.recommendations,
+        },
+      });
+    } catch (error) {
+      return this.deps.executions.update(context, execution.id, {
+        metrics: {
+          ...metrics,
+          optimizationStatus: "FAILED",
+          optimizationFailedAt: now,
+          optimizationFailureCode: errorCode(error),
+          optimizationFailureMessage: sanitizeErrorMessage(error),
+        },
+      });
+    }
+  }
+
+  async recordOptimizationResult(context: TenantScoped, executionId: string): Promise<CampaignRuntimeExecutionRecord> {
+    const existing = await this.deps.executions.findById(context, executionId);
+    if (existing === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Campaign runtime execution not found", status: 404 });
+    return this.applyOptimization(context, existing, existing.metrics ?? {});
+  }
 
   async runDueScheduledCampaigns(context: TenantScoped, input: RunDueScheduledCampaignsInput = {}): Promise<RunDueScheduledCampaignsResult> {
     const now = input.now ?? new Date();
@@ -329,7 +409,7 @@ export class CampaignRuntimeService {
       return updated;
     }
     const safeMessage = input.errorMessage === undefined ? "Discovery execution failed" : sanitizeErrorMessage(input.errorMessage);
-    return this.deps.executions.update(context, input.executionId, {
+    const failed = await this.deps.executions.update(context, input.executionId, {
       status: "FAILED",
       failedAt: now,
       errorCode: input.errorCode ?? "DISCOVERY_EXECUTION_FAILED",
@@ -341,9 +421,12 @@ export class CampaignRuntimeService {
         discoveredCount: input.discoveredCount ?? 0,
         capturedCount: input.capturedCount ?? 0,
         skippedDuplicateCount: input.skippedDuplicateCount ?? 0,
+        failureCategory: input.errorCode,
+        failureCode: input.errorCode,
         failureMessage: safeMessage,
       },
     });
+    return this.applyOptimization(context, failed, failed.metrics ?? {});
   }
 
   async recordQualificationResult(context: TenantScoped, input: RecordQualificationResultInput): Promise<CampaignRuntimeExecutionRecord> {
@@ -351,7 +434,7 @@ export class CampaignRuntimeService {
     if (existing === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Campaign runtime execution not found", status: 404 });
     const now = new Date().toISOString();
     const safeMessage = input.errorMessage === undefined ? undefined : sanitizeErrorMessage(input.errorMessage);
-    return this.deps.executions.update(context, input.executionId, {
+    const updated = await this.deps.executions.update(context, input.executionId, {
       status: input.status === "COMPLETED" ? "COMPLETED" : "FAILED",
       completedAt: input.status === "COMPLETED" ? now : null,
       failedAt: input.status === "FAILED" ? now : null,
@@ -371,6 +454,7 @@ export class CampaignRuntimeService {
         qualificationFailureMessage: input.status === "FAILED" ? safeMessage ?? "Qualification execution failed" : undefined,
       },
     });
+    return this.applyOptimization(context, updated, updated.metrics ?? {});
   }
 
   async recordInvitationResult(context: TenantScoped, input: RecordInvitationResultInput): Promise<CampaignRuntimeExecutionRecord> {

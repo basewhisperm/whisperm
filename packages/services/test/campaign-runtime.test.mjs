@@ -3,7 +3,7 @@ import test from 'node:test';
 import { CampaignRuntimeService } from '@whisperm/services';
 
 const now = '2026-06-30T00:00:00.000Z';
-const campaign = (overrides = {}) => ({ id: 'campaign-1', tenantId: 'tenant-1', name: 'Growth', status: 'ACTIVE', metadata: { strategy: { category: 'bikes' } }, createdAt: now, updatedAt: now, ...overrides });
+const campaign = (overrides = {}) => ({ id: 'campaign-1', tenantId: 'tenant-1', name: 'Growth', status: 'ACTIVE', metadata: { strategy: { category: 'bikes' }, targeting: { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 25 } }, createdAt: now, updatedAt: now, ...overrides });
 
 class MemoryCampaigns {
   constructor(campaigns) { this.campaigns = campaigns; }
@@ -89,7 +89,7 @@ test('existing active execution prevents duplicate active execution', async () =
 });
 
 test('Campaign strategy is not modified by runtime execution', async () => {
-  const source = campaign({ metadata: { strategy: { category: 'bikes' } } });
+  const source = campaign({ metadata: { strategy: { category: 'bikes' }, targeting: { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 25 } } });
   const before = JSON.stringify(source);
   const { service } = makeService({ campaigns: [source] });
   await service.startCampaignExecution({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1' });
@@ -244,8 +244,26 @@ test('scheduled campaign runtime owns autonomous discovery enqueue decision', as
   assert.equal(calls[0].campaignId, 'campaign-1');
   assert.equal(calls[0].executionId, 'execution-1');
   assert.equal(calls[0].replaySafe, true);
+  assert.deepEqual(calls[0].targeting, { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 25, exclusionTerms: [] });
   assert.equal(executions.rows[0].status, 'RUNNING');
   assert.equal(executions.rows[0].metrics.discoveryStatus, 'RUNNING');
+});
+
+
+test('invalid campaign targeting fails before discovery enqueue', async () => {
+  const source = campaign({ metadata: { targeting: { marketplaceSourceKey: 'JIJI', executionLimit: 10 } } });
+  const calls = [];
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([source]),
+    executions,
+    discoveryQueue: { async enqueueDiscovery(input) { calls.push(input); } },
+  });
+  const execution = await service.startCampaignExecution({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1' });
+  assert.equal(execution.status, 'FAILED');
+  assert.equal(execution.errorCode, 'CAMPAIGN_TARGETING_INVALID');
+  assert.equal(calls.length, 0);
+  assert.equal(execution.metrics.targetingStatus, 'INVALID');
 });
 
 test('recordDiscoveryResult completes runtime execution with discovery counts', async () => {
@@ -292,6 +310,51 @@ test('recordQualificationResult completes execution with observable counts', asy
   assert.equal(result.metrics.qualificationStatus, 'COMPLETED');
   assert.equal(result.metrics.qualifiedCount, 1);
   assert.equal(result.metrics.disqualifiedCount, 1);
+});
+
+
+test('runtime runs governed optimization after qualification completion without mutating campaign targeting', async () => {
+  const executions = new MemoryExecutions();
+  const source = campaign({ metadata: { discoveryExecution: { search: { category: 'bikes', location: 'Accra' }, limit: 20 } } });
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([source]), executions });
+  const before = JSON.stringify(source.metadata);
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { discoveryStatus: 'COMPLETED', discoveredCount: 10, capturedCount: 5, skippedDuplicateCount: 5, requestedLimit: 20, providerKey: 'JIJI' } });
+  const result = await service.recordQualificationResult({ tenantId: 'tenant-1' }, { executionId: created.id, status: 'COMPLETED', qualifiedCount: 1, disqualifiedCount: 4, needsReviewCount: 0, skippedDuplicateCount: 5, failedCount: 0 });
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.metrics.optimizationStatus, 'COMPLETED');
+  assert.ok(result.metrics.lastOptimizedAt);
+  assert.ok(result.metrics.optimizationRecommendations.some((item) => item.type === 'NARROW_CATEGORY'));
+  assert.ok(result.metrics.optimizationRecommendations.some((item) => item.type === 'EXCLUDE_DUPLICATE_HEAVY_TERMS'));
+  assert.deepEqual(source.metadata, JSON.parse(before));
+});
+
+test('runtime can enqueue asynchronous optimization instead of calculating in API paths', async () => {
+  const executions = new MemoryExecutions();
+  const calls = [];
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, optimizationQueue: { async enqueueOptimization(input) { calls.push(input); } } });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'RUNNING', metrics: { discoveryStatus: 'COMPLETED' } });
+  const result = await service.recordQualificationResult({ tenantId: 'tenant-1', correlation: { correlationId: 'corr-optimization' } }, { executionId: created.id, status: 'COMPLETED', qualifiedCount: 3, disqualifiedCount: 1 });
+  assert.equal(result.metrics.optimizationStatus, 'QUEUED');
+  assert.deepEqual(calls[0], { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: created.id, correlationId: 'corr-optimization', replaySafe: true });
+});
+
+test('optimization reruns safely replace recommendation state for an execution', async () => {
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'COMPLETED', metrics: { discoveredCount: 5, capturedCount: 1, skippedDuplicateCount: 4, qualifiedCount: 1, disqualifiedCount: 4, needsReviewCount: 0 } });
+  const first = await service.recordOptimizationResult({ tenantId: 'tenant-1' }, created.id);
+  const second = await service.recordOptimizationResult({ tenantId: 'tenant-1' }, created.id);
+  assert.equal(second.metrics.optimizationStatus, 'COMPLETED');
+  assert.deepEqual(second.metrics.optimizationRecommendations.map((item) => item.id), first.metrics.optimizationRecommendations.map((item) => item.id));
+});
+
+test('provider failure or rate-limit produces an optimization warning', async () => {
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'SCHEDULED', status: 'RUNNING', metrics: { discoveryStatus: 'RUNNING', providerKey: 'JIJI' } });
+  const result = await service.recordDiscoveryResult({ tenantId: 'tenant-1' }, { executionId: created.id, status: 'FAILED', errorCode: 'PROVIDER_RATE_LIMITED', errorMessage: 'rate limited' });
+  assert.equal(result.metrics.optimizationStatus, 'COMPLETED');
+  assert.ok(result.metrics.optimizationRecommendations.some((item) => item.type === 'FLAG_PROVIDER_UNHEALTHY' && item.severity === 'WARNING'));
 });
 
 test('executeInvitation blocks records with non-qualified opportunity state', async () => {

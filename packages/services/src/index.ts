@@ -10,7 +10,8 @@ export { SellerAcquisitionRecordService } from "./seller-acquisition-records.js"
 export { SellerRelationshipMemoryService, buildSellerRelationshipMemory, canonicalSellerKeyForRecord } from "./seller-relationship-memory.js";
 export { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
 export { CampaignRuntimeService, nextInvitationRetryAt } from "./campaign-runtime.js";
-export type { CampaignRuntimeServiceDependencies, StartCampaignExecutionInput, ExecuteInvitationInput, CampaignRuntimeInvitationQueue, CampaignRuntimeQualificationQueue, RecordInvitationResultInput, RecordQualificationResultInput } from "./campaign-runtime.js";
+export { DiscoveryOptimizationWorker } from "./marketplace-acquisition/discovery-optimization-worker.js";
+export type { CampaignRuntimeServiceDependencies, StartCampaignExecutionInput, ExecuteInvitationInput, CampaignRuntimeInvitationQueue, CampaignRuntimeQualificationQueue, CampaignRuntimeOptimizationQueue, RecordInvitationResultInput, RecordQualificationResultInput } from "./campaign-runtime.js";
 export type { SellerAcquisitionHealthStatus, SellerAcquisitionMissingRequirement, SellerAcquisitionNextAction, SellerAcquisitionRecord, SellerAcquisitionRecordDependencies } from "./seller-acquisition-records.js";
 export type { SellerRelationshipMemory, SellerRelationshipMemoryServiceDependencies, SellerRelationshipTimelineEvent } from "./seller-relationship-memory.js";
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
@@ -151,6 +152,7 @@ export type { DiscoveryServiceContext, DiscoveryServiceDependencies, DiscoveryRu
 export { SellerQualificationService, DEFAULT_QUALIFICATION_POLICY } from './marketplace-acquisition/qualification-service.js';
 export { MarketplaceQualificationExecutionService } from './marketplace-acquisition/qualification-execution-service.js';
 export type { QualificationPolicy, QualificationResult, SellerDataForQualification } from './marketplace-acquisition/qualification-service.js';
+export type { DiscoveryOptimizationRecommendation, DiscoveryOptimizationResult } from './marketplace-acquisition/discovery-optimization-worker.js';
 export { SellerDedupeService, computeSellerIdentityKey } from './marketplace-acquisition/dedupe-service.js';
 
 export { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
@@ -2196,3 +2198,6 @@ export { SellerAcquisitionEditService } from "./seller-acquisition-edit.js";
 export { evaluateCaptureQuality } from "./seller-acquisition/capture-quality.js";
 export { DiscoveryExecutionWorker, normalizeProviderResultForDiscovery } from './marketplace-acquisition/discovery-execution-worker.js';
 export type { DiscoveryExecutionWorkerDependencies } from './marketplace-acquisition/discovery-execution-worker.js';
+
+export { campaignTargetingConfigSchema, validateCampaignTargeting, mergeCampaignTargetingMetadata } from "./campaign-targeting.js";
+export type { CampaignTargetingConfig } from "./campaign-targeting.js";
