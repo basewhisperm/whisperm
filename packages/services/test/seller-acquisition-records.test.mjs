@@ -121,3 +121,41 @@ test('does not collapse anonymous no-phone captures into one seller', async () =
   const result = await service({ capture: first, contact: null, draft: draft({ contactId: null }), otherCaptures: [second] }).list(ctx);
   assert.equal(result.length, 2);
 });
+
+test('relationship memory spans duplicate seller captures across marketplaces and invitations', async () => {
+  const first = capture({ id: 'capture-1', marketplaceSourceId: 'facebook', metadata: { sellerPhone: '+2348012345678', campaignId: 'campaign-a', qualificationStatus: 'DISQUALIFIED' }, capturedAt: '2026-06-15T00:00:00.000Z', createdAt: '2026-06-15T00:00:00.000Z' });
+  const second = capture({ id: 'capture-2', contactId: 'contact-1', marketplaceSourceId: 'craigslist', listingUrl: 'https://market.test/2', externalId: 'listing-2', metadata: { sellerPhone: '+2348012345678', campaignId: 'campaign-b', qualificationStatus: 'QUALIFIED' }, capturedAt: '2026-06-16T00:00:00.000Z', createdAt: '2026-06-16T00:00:00.000Z' });
+  const result = await service({
+    capture: first,
+    contact: contact(),
+    draft: draft(),
+    otherCaptures: [second],
+    invitations: [
+      invitation({ id: 'invite-1', marketplaceCaptureId: 'capture-1', createdAt: '2026-06-17T00:00:00.000Z' }),
+      invitation({ id: 'invite-2', marketplaceCaptureId: 'capture-2', status: 'FAILED', createdAt: '2026-06-18T00:00:00.000Z' }),
+    ],
+    tokens: [token({ marketplaceCaptureId: 'capture-2', status: 'CLAIMED', createdAt: '2026-06-19T00:00:00.000Z' })],
+    attestation: attestation(),
+    conversions: [conversion('SELLER', { marketplaceCaptureId: 'capture-2', convertedAt: '2026-06-20T00:00:00.000Z' })],
+  }).list(ctx);
+
+  assert.equal(result.length, 1);
+  const memory = result[0].relationshipMemory;
+  assert.ok(memory);
+  assert.deepEqual(new Set(memory.captureIds), new Set(['capture-1', 'capture-2']));
+  assert.deepEqual(new Set(memory.marketplacesSeen), new Set(['MARKET', 'craigslist']));
+  assert.deepEqual(new Set(memory.campaignIds), new Set(['campaign-a', 'campaign-b']));
+  assert.equal(memory.hasPriorInvitation, true);
+  assert.equal(memory.hasClaimed, true);
+  assert.equal(memory.wasPreviouslyDisqualified, true);
+  assert.equal(memory.hasConverted, true);
+  assert.ok(memory.timeline.find((event) => event.label.includes('invitation sent')));
+  assert.ok(memory.timeline.find((event) => event.label === 'Seller claimed'));
+  assert.ok(memory.timeline.find((event) => event.label === 'Seller converted'));
+});
+
+test('runtime relationship context exposes prior invitation and qualification state', async () => {
+  const result = await record({ capture: capture({ metadata: { qualificationStatus: 'DISQUALIFIED' } }), contact: contact(), draft: draft(), invitations: [invitation()] });
+  assert.equal(result.relationshipMemory.hasPriorInvitation, true);
+  assert.equal(result.relationshipMemory.wasPreviouslyDisqualified, true);
+});

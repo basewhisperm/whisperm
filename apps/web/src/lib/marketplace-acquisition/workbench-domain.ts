@@ -264,6 +264,22 @@ export function timelineItems(record: SellerAcquisitionRecord): readonly { reado
   ];
 }
 
+export function sellerRelationshipTimelineItems(records: readonly SellerAcquisitionRecord[]): readonly { readonly label: string; readonly detail: string; readonly done: boolean }[] {
+  const relationshipTimeline = records.flatMap((record) => record.relationshipMemory?.timeline ?? []);
+  if (relationshipTimeline.length > 0) {
+    return relationshipTimeline
+      .slice()
+      .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
+      .map((event) => ({
+        label: event.label,
+        detail: new Date(event.occurredAt).toISOString().slice(0, 10),
+        done: true,
+      }));
+  }
+
+  return sellerTimelineItems(records);
+}
+
 export function sellerTimelineItems(records: readonly SellerAcquisitionRecord[]): readonly { readonly label: string; readonly detail: string; readonly done: boolean }[] {
   const captureCount = records.length;
   const contactCount = records.filter((r) => r.contact !== null).length;

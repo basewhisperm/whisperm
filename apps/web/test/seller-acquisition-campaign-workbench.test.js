@@ -86,3 +86,11 @@ test("campaign workbench visualizes autonomous discovery runtime state without e
   assert.match(component, /skippedDuplicateCount/u);
   assert.doesNotMatch(component, /runDiscovery\(/u);
 });
+
+test("workbench renders seller relationship memory from API projection", () => {
+  assert.match(component, /Seller relationship memory/u);
+  assert.match(component, /sellerRelationshipTimelineItems/u);
+  const domain = readFileSync("src/lib/marketplace-acquisition/workbench-domain.ts", "utf8");
+  assert.match(domain, /relationshipMemory\?\.timeline/u);
+  assert.match(domain, /Date\.parse\(a\.occurredAt\)/u);
+});
