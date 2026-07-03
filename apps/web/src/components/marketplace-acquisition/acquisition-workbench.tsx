@@ -69,6 +69,15 @@ import {
 
 
 
+interface OptimizationRecommendationState {
+  readonly id?: string | undefined;
+  readonly type: string;
+  readonly reason: string;
+  readonly severity: string;
+  readonly confidence: string;
+  readonly supportingMetrics?: Record<string, unknown> | undefined;
+}
+
 interface DiscoveryRuntimeState {
   readonly status: string;
   readonly discoveredCount: number;
@@ -82,7 +91,28 @@ interface DiscoveryRuntimeState {
   readonly qualificationFailedCount: number;
   readonly qualificationFailureMessage?: string | undefined;
   readonly failureMessage?: string | undefined;
+  readonly optimizationStatus?: string | undefined;
+  readonly lastOptimizedAt?: string | undefined;
+  readonly optimizationFailureMessage?: string | undefined;
+  readonly optimizationRecommendations: readonly OptimizationRecommendationState[];
 }
+
+const asOptimizationRecommendations = (value: unknown): readonly OptimizationRecommendationState[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== "object" || item === null) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.type !== "string" || typeof record.reason !== "string") return [];
+    return [{
+      id: typeof record.id === "string" ? record.id : undefined,
+      type: record.type,
+      reason: record.reason,
+      severity: typeof record.severity === "string" ? record.severity : "INFO",
+      confidence: typeof record.confidence === "string" ? record.confidence : "LOW",
+      supportingMetrics: typeof record.supportingMetrics === "object" && record.supportingMetrics !== null ? record.supportingMetrics as Record<string, unknown> : undefined,
+    }];
+  });
+};
 
 const latestDiscoveryState = (executions: readonly { readonly status: string; readonly startedAt?: string | null; readonly completedAt?: string | null; readonly failedAt?: string | null; readonly errorMessage?: string | null; readonly metrics?: Record<string, unknown> | null }[]): DiscoveryRuntimeState | null => {
   const execution = executions.find((item) => typeof item.metrics?.discoveryStatus === "string");
@@ -101,6 +131,10 @@ const latestDiscoveryState = (executions: readonly { readonly status: string; re
     qualificationFailureMessage: typeof metrics.qualificationFailureMessage === "string" ? metrics.qualificationFailureMessage : undefined,
     lastExecutionTime: execution.completedAt ?? execution.failedAt ?? execution.startedAt ?? undefined,
     failureMessage: typeof metrics.failureMessage === "string" ? metrics.failureMessage : execution.errorMessage ?? undefined,
+    optimizationStatus: typeof metrics.optimizationStatus === "string" ? metrics.optimizationStatus : undefined,
+    lastOptimizedAt: typeof metrics.lastOptimizedAt === "string" ? metrics.lastOptimizedAt : undefined,
+    optimizationFailureMessage: typeof metrics.optimizationFailureMessage === "string" ? metrics.optimizationFailureMessage : undefined,
+    optimizationRecommendations: asOptimizationRecommendations(metrics.optimizationRecommendations),
   };
 };
 
@@ -403,6 +437,27 @@ export function AcquisitionWorkbench({
           </div>
           {discoveryRuntime.failureMessage ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.failureMessage}</p> : null}
           {discoveryRuntime.qualificationFailureMessage ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.qualificationFailureMessage}</p> : null}
+          <div className="mt-4 rounded-xl bg-secondary p-3" aria-label="Adaptive discovery optimization">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Adaptive optimization</p>
+              <p className="text-xs text-muted-foreground">{discoveryRuntime.optimizationStatus ?? "Not evaluated"}{discoveryRuntime.lastOptimizedAt ? ` · ${discoveryRuntime.lastOptimizedAt}` : ""}</p>
+            </div>
+            {discoveryRuntime.optimizationFailureMessage ? <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.optimizationFailureMessage}</p> : null}
+            {discoveryRuntime.optimizationRecommendations.length > 0 ? (
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                {discoveryRuntime.optimizationRecommendations.map((recommendation) => (
+                  <div key={recommendation.id ?? `${recommendation.type}:${recommendation.reason}`} className="rounded-xl bg-background p-3" style={{ border: "0.5px solid var(--color-border)" }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-foreground">{recommendation.type.replaceAll("_", " ")}</p>
+                      <Badge tone={recommendation.severity === "ACTIONABLE" ? "bg-amber-50 text-amber-700" : recommendation.severity === "WARNING" ? "bg-red-50 text-red-700" : undefined}>{recommendation.severity}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{recommendation.reason}</p>
+                    <p className="mt-2 text-[11px] text-muted-foreground">Confidence: {recommendation.confidence}</p>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="mt-2 text-xs text-muted-foreground">No recommendations yet.</p>}
+          </div>
         </section>
       ) : null}
 
