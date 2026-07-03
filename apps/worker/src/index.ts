@@ -1,8 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName } from "@whisperm/services";
-import { PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord } from "@whisperm/services";
+import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
