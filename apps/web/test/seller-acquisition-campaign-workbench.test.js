@@ -86,3 +86,18 @@ test("campaign workbench visualizes autonomous discovery runtime state without e
   assert.match(component, /skippedDuplicateCount/u);
   assert.doesNotMatch(component, /runDiscovery\(/u);
 });
+
+test("campaign workbench visualizes adaptive optimization recommendations without calculating them", () => {
+  assert.match(component, /Adaptive optimization/u);
+  assert.match(component, /optimizationStatus/u);
+  assert.match(component, /optimizationRecommendations/u);
+  assert.match(component, /supportingMetrics/u);
+  assert.doesNotMatch(component, /DiscoveryOptimizationWorker/u);
+});
+
+test("campaign runtime executions API coordinates only and does not calculate optimization", () => {
+  const route = readFileSync("src/app/api/marketplace-acquisition/campaigns/[campaignId]/runtime/executions/route.ts", "utf8");
+  assert.match(route, /listCampaignExecutions/u);
+  assert.doesNotMatch(route, /DiscoveryOptimizationWorker/u);
+  assert.doesNotMatch(route, /optimizationRecommendations\s*=/u);
+});
