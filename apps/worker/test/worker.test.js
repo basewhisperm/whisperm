@@ -497,12 +497,13 @@ test('marketplace discovery worker executes through service port and records run
     jobId: 'discovery-job-1',
     queueName: 'marketplace.discovery',
     jobType: 'marketplace.discovery.execute',
-    payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', replaySafe: true },
+    payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', targeting: { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 10 }, replaySafe: true },
     idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'discovery:execution-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
     scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.discovery', priority: 'NORMAL' },
   }) });
   assert.equal(result.status, 'SUCCEEDED');
   assert.equal(calls[0].input.executionId, 'execution-1');
+  assert.equal(calls[0].input.targeting.keyword, 'bikes');
   assert.equal(calls[1].recordInput.status, 'COMPLETED');
   assert.equal(calls[1].recordInput.discoveredCount, 2);
 });
@@ -522,7 +523,7 @@ test('marketplace discovery worker records failure before retry or dead-letter h
     jobId: 'discovery-job-2',
     queueName: 'marketplace.discovery',
     jobType: 'marketplace.discovery.execute',
-    payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', replaySafe: true },
+    payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', targeting: { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 10 }, replaySafe: true },
     idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'discovery:execution-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
     scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.discovery', priority: 'NORMAL' },
   }) });

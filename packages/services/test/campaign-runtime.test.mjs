@@ -3,7 +3,7 @@ import test from 'node:test';
 import { CampaignRuntimeService } from '@whisperm/services';
 
 const now = '2026-06-30T00:00:00.000Z';
-const campaign = (overrides = {}) => ({ id: 'campaign-1', tenantId: 'tenant-1', name: 'Growth', status: 'ACTIVE', metadata: { strategy: { category: 'bikes' } }, createdAt: now, updatedAt: now, ...overrides });
+const campaign = (overrides = {}) => ({ id: 'campaign-1', tenantId: 'tenant-1', name: 'Growth', status: 'ACTIVE', metadata: { strategy: { category: 'bikes' }, targeting: { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 25 } }, createdAt: now, updatedAt: now, ...overrides });
 
 class MemoryCampaigns {
   constructor(campaigns) { this.campaigns = campaigns; }
@@ -89,7 +89,7 @@ test('existing active execution prevents duplicate active execution', async () =
 });
 
 test('Campaign strategy is not modified by runtime execution', async () => {
-  const source = campaign({ metadata: { strategy: { category: 'bikes' } } });
+  const source = campaign({ metadata: { strategy: { category: 'bikes' }, targeting: { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 25 } } });
   const before = JSON.stringify(source);
   const { service } = makeService({ campaigns: [source] });
   await service.startCampaignExecution({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1' });
@@ -244,8 +244,26 @@ test('scheduled campaign runtime owns autonomous discovery enqueue decision', as
   assert.equal(calls[0].campaignId, 'campaign-1');
   assert.equal(calls[0].executionId, 'execution-1');
   assert.equal(calls[0].replaySafe, true);
+  assert.deepEqual(calls[0].targeting, { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 25, exclusionTerms: [] });
   assert.equal(executions.rows[0].status, 'RUNNING');
   assert.equal(executions.rows[0].metrics.discoveryStatus, 'RUNNING');
+});
+
+
+test('invalid campaign targeting fails before discovery enqueue', async () => {
+  const source = campaign({ metadata: { targeting: { marketplaceSourceKey: 'JIJI', executionLimit: 10 } } });
+  const calls = [];
+  const executions = new MemoryExecutions();
+  const service = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([source]),
+    executions,
+    discoveryQueue: { async enqueueDiscovery(input) { calls.push(input); } },
+  });
+  const execution = await service.startCampaignExecution({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1' });
+  assert.equal(execution.status, 'FAILED');
+  assert.equal(execution.errorCode, 'CAMPAIGN_TARGETING_INVALID');
+  assert.equal(calls.length, 0);
+  assert.equal(execution.metrics.targetingStatus, 'INVALID');
 });
 
 test('recordDiscoveryResult completes runtime execution with discovery counts', async () => {

@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService, MarketplaceDiscoveryService } from "@whisperm/services";
+import { CampaignRuntimeService, MarketplaceDiscoveryService, campaignTargetingConfigSchema } from "@whisperm/services";
 import { PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
@@ -151,7 +151,7 @@ export interface SellerInvitationServicePort {
 export interface MarketplaceDiscoveryExecutionPort {
   executeAutonomousDiscovery(
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
-    input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string },
+    input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly targeting: z.output<typeof campaignTargetingConfigSchema> },
   ): Promise<{ readonly discoveredCount: number; readonly capturedCount: number; readonly skippedDuplicateCount: number }> | { readonly discoveredCount: number; readonly capturedCount: number; readonly skippedDuplicateCount: number };
 }
 
@@ -670,6 +670,7 @@ const marketplaceDiscoveryJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
   campaignId: z.string().min(1),
   executionId: z.string().min(1),
+  targeting: campaignTargetingConfigSchema,
   replaySafe: z.literal(true),
 }).strict().passthrough();
 
@@ -685,7 +686,7 @@ export const createMarketplaceDiscoveryHandler = (services: WorkerServices): Wor
     try {
       const result = await services.marketplaceDiscovery.executeAutonomousDiscovery(
         { tenantId: payload.tenantId, correlation: context.correlation },
-        { tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId },
+        { tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId, targeting: payload.targeting },
       );
       await services.campaignRuntime.recordDiscoveryResult(
         { tenantId: payload.tenantId, correlation: context.correlation },
@@ -1082,13 +1083,13 @@ export const createMarketplaceDiscoveryExecutionPort = (input: {
     }
     const metadata = campaign.metadata ?? {};
     const discovery = typeof metadata === "object" && metadata !== null ? (metadata as { readonly discovery?: Record<string, unknown> }).discovery ?? {} : {};
-    const entries = discoveryEntriesFromMetadata(metadata);
-    const marketplaceSourceId = typeof discovery.marketplaceSourceId === "string" ? discovery.marketplaceSourceId : "internal-autonomous-discovery";
-    const marketplaceSourceKey = typeof discovery.marketplaceSourceKey === "string" ? discovery.marketplaceSourceKey : marketplaceSourceId;
-    const discoveryCreditsRemaining = typeof discovery.discoveryCreditsRemaining === "number" ? discovery.discoveryCreditsRemaining : Math.max(entries.length, 1);
+    const entries = discoveryEntriesFromMetadata(metadata).slice(0, job.targeting.executionLimit);
+    const marketplaceSourceId = job.targeting.marketplaceSourceId ?? job.targeting.marketplaceSourceKey ?? "internal-autonomous-discovery";
+    const marketplaceSourceKey = job.targeting.marketplaceSourceKey ?? marketplaceSourceId;
+    const discoveryCreditsRemaining = Math.min(typeof discovery.discoveryCreditsRemaining === "number" ? discovery.discoveryCreditsRemaining : Math.max(entries.length, 1), job.targeting.executionLimit);
     const result = await input.discovery.runDiscovery(
       { tenantId: context.tenantId, actorId: "campaign-runtime" },
-      { campaignId: job.campaignId, marketplaceSourceId, marketplaceSourceKey, mode: "MANUAL_SEED", entries, discoveryCreditsRemaining },
+      { campaignId: job.campaignId, marketplaceSourceId, marketplaceSourceKey, mode: "MANUAL_SEED", entries, discoveryCreditsRemaining, targeting: job.targeting },
     );
     return {
       discoveredCount: result.sellersFound,
@@ -1128,7 +1129,7 @@ if (isMainModule()) {
     const persistence = prisma as unknown as PrismaPersistenceClient;
     const sellerInvitation = createSellerInvitationServicePort(persistence);
     const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
-    const discoveryQueue = { async enqueueDiscovery(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true }) { void input; } };
+    const discoveryQueue = { async enqueueDiscovery(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true; readonly targeting: z.output<typeof campaignTargetingConfigSchema> }) { void input; } };
     const campaignRuntimeService = new CampaignRuntimeService({
       campaigns,
       executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
