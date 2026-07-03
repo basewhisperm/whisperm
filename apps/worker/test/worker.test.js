@@ -592,3 +592,56 @@ test('marketplace discovery worker records failure before retry or dead-letter h
   assert.equal(result.status, 'DEAD_LETTERED');
   assert.equal(recorded[0].status, 'FAILED');
 });
+
+test('claim intelligence worker validates tenant scope and calls canonical lifecycle port', async () => {
+  const calls = [];
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) },
+    claimLifecycle: {
+      sendClaimReminder: async () => {},
+      expireClaimInvitation: async () => {},
+      evaluateClaimIntelligence: async (context, invitationId) => { calls.push(['evaluate', context.tenantId, invitationId]); },
+      executeClaimRecovery: async (context, invitationId) => { calls.push(['recover', context.tenantId, invitationId]); },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'claim-intelligence-1',
+    queueName: 'marketplace.claim.lifecycle',
+    jobType: 'marketplace.claim.intelligence',
+    payload: { tenantId: 'tenant-1', invitationId: 'token-1', correlationId: 'corr-1', replaySafe: true },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'marketplace.claim.intelligence:tenant-1:token-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.claim.lifecycle', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.deepEqual(calls, [['evaluate', 'tenant-1', 'token-1'], ['recover', 'tenant-1', 'token-1']]);
+});
+
+test('claim lifecycle worker rejects cross-tenant claim jobs', async () => {
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) },
+    claimLifecycle: {
+      sendClaimReminder: async () => { throw new Error('not expected'); },
+      expireClaimInvitation: async () => { throw new Error('not expected'); },
+      evaluateClaimIntelligence: async () => { throw new Error('not expected'); },
+      executeClaimRecovery: async () => { throw new Error('not expected'); },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'claim-intelligence-tenant-mismatch',
+    queueName: 'marketplace.claim.lifecycle',
+    jobType: 'marketplace.claim.intelligence',
+    payload: { tenantId: 'tenant-2', invitationId: 'token-1', replaySafe: true },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'marketplace.claim.intelligence:tenant-1:token-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.claim.lifecycle', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(result.deadLetter.error.code, 'WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION');
+});

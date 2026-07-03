@@ -7,6 +7,7 @@ import type { CorrelationMetadata } from "@whisperm/types";
 export const createSellerInvitationServicePort = (
   prisma: PrismaPersistenceClient,
   env: NodeJS.ProcessEnv = process.env,
+  claimLifecycleScheduler?: ConstructorParameters<typeof SellerInvitationService>[0]["claimLifecycleScheduler"],
 ): SellerInvitationServicePort => {
   const repositories = createPrismaRepositories(prisma);
 
@@ -24,6 +25,7 @@ export const createSellerInvitationServicePort = (
   const service = new SellerInvitationService({
     ...repositories,
     notifications,
+    ...(claimLifecycleScheduler === undefined ? {} : { claimLifecycleScheduler }),
   } as ConstructorParameters<typeof SellerInvitationService>[0]);
 
   return {
