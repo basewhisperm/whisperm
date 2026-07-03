@@ -1,8 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService, MarketplaceDiscoveryService, campaignTargetingConfigSchema } from "@whisperm/services";
-import { PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, campaignTargetingConfigSchema } from "@whisperm/services";
+import { PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
@@ -1208,6 +1208,7 @@ if (isMainModule()) {
     const sellerInvitation = createSellerInvitationServicePort(persistence);
     const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
     const discoveryQueue = { async enqueueDiscovery(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true; readonly targeting: z.output<typeof campaignTargetingConfigSchema> }) { void input; } };
+    const qualificationQueue = { async enqueueQualification(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true }) { void input; } };
     const campaignRuntimeService = new CampaignRuntimeService({
       campaigns,
       executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
