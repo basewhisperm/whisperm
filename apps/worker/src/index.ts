@@ -1,8 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, campaignTargetingConfigSchema } from "@whisperm/services";
-import { PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord } from "@whisperm/services";
+import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
@@ -134,6 +134,7 @@ export interface ScoreRecomputationServicePort {
 }
 
 export interface ClaimLifecycleServicePort {
+  scheduleClaimLifecycle(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string): Promise<readonly unknown[]> | readonly unknown[];
   sendClaimReminder(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string, reminderType: "DAY_3" | "DAY_6"): Promise<unknown> | unknown;
   expireClaimInvitation(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string): Promise<unknown> | unknown;
   evaluateClaimIntelligence?(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string): Promise<unknown> | unknown;
@@ -541,6 +542,10 @@ export const createRenderConversionRetryHandler = (services: WorkerServices): Wo
 const claimLifecycleJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
   invitationId: z.string().min(1),
+  campaignId: z.string().min(1).optional(),
+  executionId: z.string().min(1).optional(),
+  correlationId: z.string().min(1).optional(),
+  replaySafe: z.literal(true).optional(),
   reminderType: z.enum(["DAY_3", "DAY_6"]).optional(),
 }).strict();
 
@@ -1185,6 +1190,113 @@ export const createMarketplaceQualificationExecutionPort = (input: { readonly qu
   },
 });
 
+const claimLifecycleQueueName = "marketplace.claim.lifecycle" as const;
+const lifecycleClaimTokenRecordSchema = z.object({
+  id: z.string().min(1),
+  tenantId: z.string().min(1),
+  marketplaceCaptureId: z.string().min(1),
+  tokenHash: z.string().min(1),
+  status: z.enum(["PENDING", "SENT", "FAILED", "OPENED", "EXPIRED", "CLAIMED", "ABANDONED"]),
+  sentAt: z.string().datetime().nullable().optional(),
+  expiresAt: z.string().datetime(),
+  reminderDay3SentAt: z.string().datetime().nullable().optional(),
+  reminderDay6SentAt: z.string().datetime().nullable().optional(),
+  expiredAt: z.string().datetime().nullable().optional(),
+  claimedAt: z.string().datetime().nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+}).strict();
+
+type QueueJobDelegate = Pick<PrismaPersistenceClient["queueJob"], "upsert">;
+
+const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
+  async schedule(job: ClaimLifecycleScheduleJob): Promise<void> {
+    if (queueJob.upsert === undefined) {
+      throw new WorkerRuntimeError({
+        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        message: "QueueJob upsert is not available for claim lifecycle scheduling",
+        status: 503,
+        retryable: true,
+        correlation: job.correlation,
+      });
+    }
+    const payload = {
+      tenantId: job.tenantId,
+      invitationId: job.invitationId,
+      ...(job.reminderType === undefined ? {} : { reminderType: job.reminderType }),
+      correlationId: job.correlation.correlationId,
+      replaySafe: true,
+    };
+    await queueJob.upsert({
+      where: { tenantId_queueName_jobKey: { tenantId: job.tenantId, queueName: claimLifecycleQueueName, jobKey: job.dedupeKey } },
+      create: {
+        tenantId: job.tenantId,
+        queueName: claimLifecycleQueueName,
+        jobName: job.jobType,
+        jobKey: job.dedupeKey,
+        state: "DELAYED",
+        payload,
+        maxAttempts: 3,
+        scheduledAt: new Date(job.runAt),
+        availableAt: new Date(job.runAt),
+        correlationId: job.correlation.correlationId,
+      },
+      update: {
+        payload,
+        scheduledAt: new Date(job.runAt),
+        availableAt: new Date(job.runAt),
+        correlationId: job.correlation.correlationId,
+      },
+    });
+  },
+});
+
+export const createClaimLifecycleServicePort = (prisma: PrismaPersistenceClient): ClaimLifecycleServicePort => {
+  const repositories = createPrismaRepositories(prisma);
+  const service = new MarketplaceClaimLifecycleService({
+    claimTokens: {
+      async findById(context, invitationId): Promise<MarketplaceClaimTokenRecord | null> {
+        const token = await repositories.marketplaceClaimTokens.findById(context, invitationId);
+        return token === null ? null : lifecycleClaimTokenRecordSchema.parse(token);
+      },
+      async update(context, invitationId, input): Promise<MarketplaceClaimTokenRecord> {
+        return lifecycleClaimTokenRecordSchema.parse(await repositories.marketplaceClaimTokens.update(context, invitationId, input));
+      },
+    },
+    marketplaceCaptures: repositories.marketplaceCaptures,
+    draftInventories: repositories.draftInventories,
+    businessGrowthOpportunities: {
+      async createOrUpdateFromMarketplaceCapture(context, capture) {
+        return repositories.businessGrowthOpportunities.createOrUpdateFromMarketplaceCapture(context, {
+          tenantId: context.tenantId,
+          marketplaceCaptureId: capture.id,
+          ...(capture.contactId == null ? {} : { contactId: capture.contactId }),
+          ...(capture.dealId == null ? {} : { dealId: capture.dealId }),
+          status: capture.status === "CLAIMED" ? "CLAIMED" : capture.status === "CONVERTED" ? "CONVERTED" : "NEEDS_REVIEW",
+          sourceUrl: capture.listingUrl,
+        });
+      },
+    },
+    auditLogs: repositories.auditLogs,
+    activities: repositories.activities,
+    scheduler: createClaimLifecycleScheduler(prisma.queueJob),
+    notifications: {
+      async sendClaimReminder(input) {
+        void input;
+        return { channel: input.preferredChannel ?? "WHATSAPP" };
+      },
+    },
+  });
+  return {
+    scheduleClaimLifecycle: (context, invitationId) => service.scheduleClaimLifecycle(context, invitationId),
+    sendClaimReminder: (context, invitationId, reminderType) => service.sendClaimReminder(context, invitationId, reminderType),
+    expireClaimInvitation: (context, invitationId) => service.expireClaimInvitation(context, invitationId),
+    evaluateClaimIntelligence: (context, invitationId) => service.evaluateClaimIntelligence(context, invitationId),
+    executeClaimRecovery: (context, invitationId) => service.executeClaimRecovery(context, invitationId),
+  };
+};
+
 export const createWorkerApplication = (dependencies: WorkerApplicationDependencies): WorkerApplication => new WorkerApplication(dependencies);
 
 export const runWorkerFromEnv = async (dependencies: Omit<WorkerApplicationDependencies, "config">): Promise<WorkerApplication> => {
@@ -1213,7 +1325,10 @@ if (isMainModule()) {
     const config = createWorkerBootstrapConfigFromEnv();
     const prisma = new PrismaClient();
     const persistence = prisma as unknown as PrismaPersistenceClient;
-    const sellerInvitation = createSellerInvitationServicePort(persistence);
+    const claimLifecycle = createClaimLifecycleServicePort(persistence);
+    const sellerInvitation = createSellerInvitationServicePort(persistence, process.env, {
+      scheduleClaimLifecycle: (context, invitationId) => claimLifecycle.scheduleClaimLifecycle(context, invitationId),
+    });
     const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
     const discoveryQueue = { async enqueueDiscovery(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true; readonly targeting: z.output<typeof campaignTargetingConfigSchema> }) { void input; } };
     const qualificationQueue = { async enqueueQualification(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true }) { void input; } };
@@ -1243,6 +1358,7 @@ if (isMainModule()) {
       ...createBootstrapOnlyWorkerDependencies(config),
       services: {
         ...createBootstrapOnlyWorkerServices(),
+        claimLifecycle,
         sellerInvitation,
         campaignRuntime,
         marketplaceDiscovery: createMarketplaceDiscoveryExecutionPort({ campaigns, discovery: new MarketplaceDiscoveryService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence) }) }),
