@@ -1,9 +1,15 @@
 import { NoopCampaignRuntimeWorker, type CampaignRuntimeWorker } from "@whisperm/campaign-runtime";
 import type {
+  AuditLogRepository,
+  BusinessGrowthOpportunityRecord,
   CampaignRuntimeExecutionRecord,
   CampaignRuntimeExecutionRepository,
   CampaignRuntimeExecutionTrigger,
+  DealRecord,
+  DealsRepository,
   PageRequest,
+  SellerAcquisitionCampaignMemberRecord,
+  SellerAcquisitionCampaignRecord,
   SellerAcquisitionCampaignRepository,
   SellerInvitationRepository,
   BusinessGrowthOpportunityRepository,
@@ -11,7 +17,14 @@ import type {
 import { PersistenceError } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
 import { DiscoveryOptimizationWorker } from "./marketplace-acquisition/discovery-optimization-worker.js";
-import { validateCampaignTargeting } from "./campaign-targeting.js";
+import {
+  GrowthLoopWorker,
+  type GrowthLoopTrigger,
+  type GrowthProviderPerformance,
+  type GrowthRecommendation,
+  type GrowthSignalSnapshot,
+} from "./marketplace-acquisition/growth-loop-worker.js";
+import { validateCampaignTargeting, targetingFromCampaignMetadata, mergeCampaignTargetingMetadata, campaignTargetingConfigSchema } from "./campaign-targeting.js";
 
 export interface StartCampaignExecutionInput {
   readonly campaignId: string;
@@ -53,6 +66,16 @@ export interface CampaignRuntimeOptimizationQueue {
     readonly tenantId: string;
     readonly campaignId: string;
     readonly executionId: string;
+    readonly correlationId?: string | undefined;
+    readonly replaySafe: true;
+  }): Promise<void> | void;
+}
+
+export interface CampaignRuntimeGrowthLoopQueue {
+  enqueueGrowthLoopEvaluation(input: {
+    readonly tenantId: string;
+    readonly campaignId: string;
+    readonly trigger: GrowthLoopTrigger;
     readonly correlationId?: string | undefined;
     readonly replaySafe: true;
   }): Promise<void> | void;
@@ -131,6 +154,101 @@ interface InvitationOptimizationStrategy {
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 const stringValue = (value: unknown): string | undefined => typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+const round4 = (value: number): number => Number(value.toFixed(4));
+const numeric = (value: unknown): number => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+const numericOrNull = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const result = numeric(value);
+  return Number.isFinite(result) ? result : null;
+};
+const numberMetric = (metrics: Readonly<Record<string, unknown>>, key: string): number => {
+  const value = metrics[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+};
+const asGrowthRecommendations = (metadata: unknown): readonly GrowthRecommendation[] => {
+  const value = isRecord(metadata) ? metadata.growthRecommendations : undefined;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.id !== "string" || typeof item.type !== "string" || typeof item.status !== "string") return [];
+    return [item as unknown as GrowthRecommendation];
+  });
+};
+const growthRecommendationSignature = (recommendation: GrowthRecommendation): string => JSON.stringify(recommendation.supportingMetrics ?? {});
+
+const mergeGrowthRecommendations = (existing: readonly GrowthRecommendation[], computed: readonly GrowthRecommendation[]): readonly GrowthRecommendation[] => {
+  const computedById = new Map(computed.map((item) => [item.id, item]));
+  const merged: GrowthRecommendation[] = [];
+  const consumed = new Set<string>();
+  for (const item of existing) {
+    if (item.status === "APPLIED") {
+      merged.push(item);
+      consumed.add(item.id);
+      continue;
+    }
+    if (item.status === "DISMISSED") {
+      const next = computedById.get(item.id);
+      if (next === undefined || growthRecommendationSignature(next) === growthRecommendationSignature(item)) {
+        merged.push(item);
+      } else {
+        merged.push(next);
+      }
+      consumed.add(item.id);
+    }
+  }
+  for (const item of computed) {
+    if (!consumed.has(item.id)) merged.push(item);
+  }
+  return merged;
+};
+
+const aggregateExecutionSignal = (executions: readonly CampaignRuntimeExecutionRecord[]): { readonly duplicateRate: number | null; readonly qualificationYield: number | null } => {
+  let discovered = 0;
+  let captured = 0;
+  let duplicate = 0;
+  let qualified = 0;
+  let judged = 0;
+  for (const execution of executions) {
+    const metrics = execution.metrics ?? {};
+    discovered += numberMetric(metrics, "discoveredCount");
+    captured += numberMetric(metrics, "capturedCount");
+    duplicate += numberMetric(metrics, "skippedDuplicateCount");
+    qualified += numberMetric(metrics, "qualifiedCount");
+    judged += numberMetric(metrics, "qualifiedCount") + numberMetric(metrics, "disqualifiedCount") + numberMetric(metrics, "needsReviewCount");
+  }
+  return {
+    duplicateRate: discovered > 0 ? round4(duplicate / discovered) : captured + duplicate > 0 ? round4(duplicate / (captured + duplicate)) : null,
+    qualificationYield: judged > 0 ? round4(qualified / judged) : null,
+  };
+};
+
+const buildProviderPerformance = (
+  opportunities: readonly BusinessGrowthOpportunityRecord[],
+  dealById: ReadonlyMap<string, DealRecord>,
+): readonly GrowthProviderPerformance[] => {
+  const groups = new Map<string, { wonDealsCount: number; attributedRevenue: number; memberCount: number }>();
+  for (const opportunity of opportunities) {
+    const key = opportunity.sourceKey ?? opportunity.sourceType ?? "UNKNOWN";
+    const current = groups.get(key) ?? { wonDealsCount: 0, attributedRevenue: 0, memberCount: 0 };
+    current.memberCount += 1;
+    const deal = opportunity.dealId == null ? undefined : dealById.get(opportunity.dealId);
+    if (deal !== undefined && deal.closedAt != null) {
+      current.wonDealsCount += 1;
+      current.attributedRevenue += numeric(deal.value);
+    }
+    groups.set(key, current);
+  }
+  return [...groups.entries()].map(([key, value]) => ({ key, wonDealsCount: value.wonDealsCount, attributedRevenue: round4(value.attributedRevenue), memberCount: value.memberCount }));
+};
+
+const MAX_GROWTH_SIGNAL_ITEMS = 500;
 const configuredChannels = (metadata: unknown): readonly InvitationChannel[] => {
   const raw = isRecord(metadata) ? metadata.invitationChannels ?? metadata.availableInvitationChannels : undefined;
   if (!Array.isArray(raw)) return invitationChannels;
@@ -216,6 +334,10 @@ export interface CampaignRuntimeServiceDependencies {
   readonly optimizationWorker?: DiscoveryOptimizationWorker | undefined;
   readonly sellerInvitations?: SellerInvitationRepository | undefined;
   readonly opportunities?: BusinessGrowthOpportunityRepository | undefined;
+  readonly deals?: Pick<DealsRepository, "findById"> | undefined;
+  readonly auditLogs?: AuditLogRepository | undefined;
+  readonly growthLoopWorker?: GrowthLoopWorker | undefined;
+  readonly growthLoopQueue?: CampaignRuntimeGrowthLoopQueue | undefined;
 }
 
 const activeStatuses = new Set(["QUEUED", "RUNNING"]);
@@ -249,10 +371,12 @@ const errorCode = (error: unknown): string => {
 export class CampaignRuntimeService {
   private readonly worker: CampaignRuntimeWorker;
   private readonly optimizationWorker: DiscoveryOptimizationWorker;
+  private readonly growthLoopWorker: GrowthLoopWorker;
 
   constructor(private readonly deps: CampaignRuntimeServiceDependencies) {
     this.worker = deps.worker ?? new NoopCampaignRuntimeWorker();
     this.optimizationWorker = deps.optimizationWorker ?? new DiscoveryOptimizationWorker();
+    this.growthLoopWorker = deps.growthLoopWorker ?? new GrowthLoopWorker();
   }
 
   async executeInvitation(context: TenantScoped, input: ExecuteInvitationInput): Promise<CampaignRuntimeExecutionRecord> {
@@ -657,5 +781,202 @@ export class CampaignRuntimeService {
 
   listCampaignExecutions(context: TenantScoped, campaignId: string, page?: PageRequest) {
     return this.deps.executions.listByCampaignId(context, campaignId, page);
+  }
+
+  /**
+   * Governance entrypoint for the growth loop (CS-019): enqueues evaluation when a
+   * queue is configured, otherwise computes inline -- mirroring `applyOptimization`.
+   */
+  async evaluateGrowthLoop(context: TenantScoped, input: { readonly campaignId: string; readonly trigger?: GrowthLoopTrigger | undefined }): Promise<SellerAcquisitionCampaignRecord> {
+    const campaign = await this.deps.campaigns.findById(context, input.campaignId);
+    if (campaign === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Seller acquisition campaign not found", status: 404 });
+    const trigger = input.trigger ?? "MANUAL";
+    if (this.deps.growthLoopQueue !== undefined) {
+      await this.deps.growthLoopQueue.enqueueGrowthLoopEvaluation({
+        tenantId: context.tenantId,
+        campaignId: campaign.id,
+        trigger,
+        correlationId: typeof (context as { readonly correlation?: { readonly correlationId?: unknown } }).correlation?.correlationId === "string" ? (context as { readonly correlation?: { readonly correlationId?: string } }).correlation?.correlationId : campaign.id,
+        replaySafe: true,
+      });
+      return this.deps.campaigns.update(context, campaign.id, {
+        metadata: { ...(campaign.metadata ?? {}), growthLoopStatus: "QUEUED", growthLoopTrigger: trigger, growthLoopQueuedAt: new Date().toISOString() },
+      });
+    }
+    return this.computeGrowthLoop(context, campaign, trigger);
+  }
+
+  /** Worker-side execution port: always computes, regardless of queue configuration. */
+  async executeGrowthLoopEvaluation(context: TenantScoped, input: { readonly campaignId: string; readonly trigger?: GrowthLoopTrigger | undefined }): Promise<SellerAcquisitionCampaignRecord> {
+    const campaign = await this.deps.campaigns.findById(context, input.campaignId);
+    if (campaign === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Seller acquisition campaign not found", status: 404 });
+    return this.computeGrowthLoop(context, campaign, input.trigger ?? "MANUAL");
+  }
+
+  async applyGrowthRecommendation(context: TenantScoped, input: { readonly campaignId: string; readonly recommendationId: string; readonly actorId: string }): Promise<SellerAcquisitionCampaignRecord> {
+    const { campaign, recommendation, index, recommendations } = await this.requireGrowthRecommendation(context, input.campaignId, input.recommendationId);
+    const now = new Date().toISOString();
+    const targetingUpdate = recommendation.targetingCandidate === undefined
+      ? undefined
+      : mergeCampaignTargetingMetadata(campaign.metadata, campaignTargetingConfigSchema.parse({ ...targetingFromCampaignMetadata(campaign.metadata) as Record<string, unknown>, ...recommendation.targetingCandidate }));
+    const scheduleCandidateValue = recommendation.scheduleCandidate?.scheduleCadence;
+    const scheduleCadence = typeof scheduleCandidateValue === "string" && ["HOURLY", "DAILY", "WEEKLY"].includes(scheduleCandidateValue) ? scheduleCandidateValue as "HOURLY" | "DAILY" | "WEEKLY" : undefined;
+    const applied: GrowthRecommendation = { ...recommendation, status: "APPLIED", appliedAt: now, appliedBy: input.actorId };
+    const nextRecommendations = recommendations.map((item, itemIndex) => (itemIndex === index ? applied : item));
+    const baseMetadata = targetingUpdate ?? campaign.metadata ?? {};
+    const updated = await this.deps.campaigns.update(context, campaign.id, {
+      metadata: { ...baseMetadata, growthRecommendations: nextRecommendations },
+      ...(scheduleCadence === undefined ? {} : { scheduleCadence }),
+    });
+    await this.auditGrowthRecommendation(context, campaign.id, "GROWTH_RECOMMENDATION_APPLIED", recommendation, { actorId: input.actorId });
+    return updated;
+  }
+
+  async dismissGrowthRecommendation(context: TenantScoped, input: { readonly campaignId: string; readonly recommendationId: string; readonly actorId: string; readonly reason?: string | undefined }): Promise<SellerAcquisitionCampaignRecord> {
+    const { campaign, recommendation, index, recommendations } = await this.requireGrowthRecommendation(context, input.campaignId, input.recommendationId);
+    const now = new Date().toISOString();
+    const dismissed: GrowthRecommendation = { ...recommendation, status: "DISMISSED", dismissedAt: now, dismissedBy: input.actorId, ...(input.reason === undefined ? {} : { dismissedReason: input.reason }) };
+    const nextRecommendations = recommendations.map((item, itemIndex) => (itemIndex === index ? dismissed : item));
+    const updated = await this.deps.campaigns.update(context, campaign.id, {
+      metadata: { ...(campaign.metadata ?? {}), growthRecommendations: nextRecommendations },
+    });
+    await this.auditGrowthRecommendation(context, campaign.id, "GROWTH_RECOMMENDATION_DISMISSED", recommendation, { actorId: input.actorId, reason: input.reason });
+    return updated;
+  }
+
+  private async requireGrowthRecommendation(context: TenantScoped, campaignId: string, recommendationId: string): Promise<{ readonly campaign: SellerAcquisitionCampaignRecord; readonly recommendation: GrowthRecommendation; readonly index: number; readonly recommendations: readonly GrowthRecommendation[] }> {
+    const campaign = await this.deps.campaigns.findById(context, campaignId);
+    if (campaign === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Seller acquisition campaign not found", status: 404 });
+    const recommendations = asGrowthRecommendations(campaign.metadata);
+    const index = recommendations.findIndex((item) => item.id === recommendationId);
+    const recommendation = index === -1 ? undefined : recommendations[index];
+    if (recommendation === undefined || index === -1) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Growth recommendation not found", status: 404 });
+    if (recommendation.status !== "PENDING") throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Growth recommendation is not pending", status: 409 });
+    return { campaign, recommendation, index, recommendations };
+  }
+
+  private async auditGrowthRecommendation(context: TenantScoped, campaignId: string, action: string, recommendation: GrowthRecommendation, metadata: Readonly<Record<string, unknown>>): Promise<void> {
+    if (this.deps.auditLogs === undefined) return;
+    const correlationId = typeof (context as { readonly correlation?: { readonly correlationId?: unknown } }).correlation?.correlationId === "string" ? (context as { readonly correlation?: { readonly correlationId?: string } }).correlation?.correlationId as string : campaignId;
+    await this.deps.auditLogs.append(context, {
+      tenantId: context.tenantId,
+      action,
+      targetType: "SELLER_ACQUISITION_CAMPAIGN",
+      targetId: campaignId,
+      correlationId,
+      metadata: { recommendationId: recommendation.id, type: recommendation.type, ...metadata },
+    });
+  }
+
+  private async computeGrowthLoop(context: TenantScoped, campaign: SellerAcquisitionCampaignRecord, trigger: GrowthLoopTrigger): Promise<SellerAcquisitionCampaignRecord> {
+    const now = new Date();
+    try {
+      const snapshot = await this.buildGrowthSignalSnapshot(context, campaign);
+      const result = this.growthLoopWorker.analyze({ campaign, snapshot, now });
+      const existing = asGrowthRecommendations(campaign.metadata);
+      const merged = result.growthLoopStatus === "INSUFFICIENT_DATA" ? existing : mergeGrowthRecommendations(existing, result.recommendations);
+      const previousRecomputeCount = numericOrNull(isRecord(campaign.metadata) ? campaign.metadata.growthRecomputeCount : undefined) ?? 0;
+      return await this.deps.campaigns.update(context, campaign.id, {
+        metadata: {
+          ...(campaign.metadata ?? {}),
+          growthLoopStatus: result.growthLoopStatus,
+          growthLoopTrigger: trigger,
+          lastGrowthEvaluatedAt: result.lastGrowthEvaluatedAt,
+          growthRecommendations: merged,
+          growthSignalSnapshot: snapshot,
+          growthCompleteness: result.completeness,
+          growthFailureCode: null,
+          growthFailureMessage: null,
+          growthRecomputeCount: previousRecomputeCount + 1,
+        },
+      });
+    } catch (error) {
+      const code = error instanceof PersistenceError ? error.code : errorCode(error);
+      const message = error instanceof PersistenceError ? error.message : sanitizeErrorMessage(error);
+      await this.deps.campaigns.update(context, campaign.id, {
+        metadata: { ...(campaign.metadata ?? {}), growthLoopStatus: "FAILED", growthLoopTrigger: trigger, growthFailureCode: code, growthFailureMessage: message, growthLoopFailedAt: now.toISOString() },
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async buildGrowthSignalSnapshot(context: TenantScoped, campaign: SellerAcquisitionCampaignRecord): Promise<GrowthSignalSnapshot> {
+    const members = await this.listAllCampaignMembers(context, campaign.id);
+    const dealIds = [...new Set(members.map((member) => member.dealId).filter((id): id is string => typeof id === "string"))];
+    const dealsRepo = this.deps.deals;
+    const deals = dealsRepo === undefined ? [] : (await Promise.all(dealIds.map((id) => dealsRepo.findById(context.tenantId, id)))).filter((deal): deal is DealRecord => deal !== null);
+    const dealById = new Map(deals.map((deal) => [deal.id, deal] as const));
+
+    const wonDeals = deals.filter((deal) => deal.closedAt != null);
+    const attributedRevenue = round4(wonDeals.reduce((sum, deal) => sum + numeric(deal.value), 0));
+    const currency = campaign.currency ?? wonDeals[0]?.currency ?? deals[0]?.currency ?? "USD";
+
+    const totalMembers = members.length;
+    const qualifiedStatuses = new Set(["QUALIFIED", "INVITED", "CLAIMED", "CONVERTED", "COMPLETED"]);
+    const invitedStatuses = new Set(["INVITED", "CLAIMED", "CONVERTED", "COMPLETED"]);
+    const claimedStatuses = new Set(["CLAIMED", "CONVERTED", "COMPLETED"]);
+    const convertedStatuses = new Set(["CONVERTED", "COMPLETED"]);
+    const qualifiedCount = members.filter((member) => qualifiedStatuses.has(member.status)).length;
+    const invitedCount = members.filter((member) => invitedStatuses.has(member.status)).length;
+    const claimedCount = members.filter((member) => claimedStatuses.has(member.status)).length;
+    const convertedCount = members.filter((member) => convertedStatuses.has(member.status)).length;
+
+    const conversionRate = totalMembers > 0 ? round4(convertedCount / totalMembers) : null;
+    const qualifiedToClaimRate = qualifiedCount > 0 ? round4(claimedCount / qualifiedCount) : null;
+    const claimToConversionRate = claimedCount > 0 ? round4(convertedCount / claimedCount) : null;
+
+    const executions = this.deps.executions === undefined ? [] : (await this.deps.executions.listByCampaignId(context, campaign.id, { limit: 20 })).items;
+    const { duplicateRate, qualificationYield } = aggregateExecutionSignal(executions);
+
+    const opportunities = await this.listAllCampaignOpportunities(context, campaign.id);
+    const providerPerformance = buildProviderPerformance(opportunities, dealById);
+
+    return {
+      campaignId: campaign.id,
+      generatedAt: new Date().toISOString(),
+      currency,
+      attributedRevenue,
+      wonDealsCount: wonDeals.length,
+      openDealsCount: Math.max(0, dealById.size - wonDeals.length),
+      totalDeals: dealById.size,
+      totalMembers,
+      qualifiedCount,
+      invitedCount,
+      claimedCount,
+      convertedCount,
+      conversionRate,
+      qualifiedToClaimRate,
+      claimToConversionRate,
+      duplicateRate,
+      qualificationYield,
+      goalRevenue: numericOrNull(campaign.goalRevenue),
+      goalSellerCount: campaign.goalSellerCount ?? null,
+      targetingSnapshot: (targetingFromCampaignMetadata(campaign.metadata) as Readonly<Record<string, unknown>> | undefined) ?? {},
+      scheduleSnapshot: { scheduleEnabled: campaign.scheduleEnabled, scheduleCadence: campaign.scheduleCadence ?? null },
+      providerPerformance,
+    };
+  }
+
+  private async listAllCampaignMembers(context: TenantScoped, campaignId: string): Promise<readonly SellerAcquisitionCampaignMemberRecord[]> {
+    const members: SellerAcquisitionCampaignMemberRecord[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.deps.campaigns.listMembers(context, campaignId, { limit: 100, ...(cursor === undefined ? {} : { cursor }) });
+      members.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor !== undefined && members.length < MAX_GROWTH_SIGNAL_ITEMS);
+    return members;
+  }
+
+  private async listAllCampaignOpportunities(context: TenantScoped, campaignId: string): Promise<readonly BusinessGrowthOpportunityRecord[]> {
+    if (this.deps.opportunities === undefined) return [];
+    const items: BusinessGrowthOpportunityRecord[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.deps.opportunities.findByCampaignId(context, campaignId, { limit: 100, ...(cursor === undefined ? {} : { cursor }) });
+      items.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor !== undefined && items.length < MAX_GROWTH_SIGNAL_ITEMS);
+    return items;
   }
 }
