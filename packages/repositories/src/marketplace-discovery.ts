@@ -123,6 +123,7 @@ export interface MarketplaceDiscoveryRepository {
   updateDiscoveredSellerQualification(context: TenantScoped, sellerId: string, input: { readonly status: DiscoveredSellerRecord["status"]; readonly qualificationScore: number; readonly qualificationPolicy?: Readonly<Record<string, unknown>>; readonly metadata?: Readonly<Record<string, unknown>> }): Promise<DiscoveredSellerRecord>;
   findDiscoveredSellerByListingUrl(context: TenantScoped, runId: string, listingUrl: string): Promise<DiscoveredSellerRecord | null>;
   findDiscoveredSellerByIdentityKey(context: TenantScoped, campaignId: string, sellerIdentityKey: string): Promise<DiscoveredSellerRecord | null>;
+  findDiscoveredSellerById(context: TenantScoped, sellerId: string): Promise<DiscoveredSellerRecord | null>;
   listDiscoveredSellersByRun(context: TenantScoped, runId: string, status?: DiscoveredSellerRecord["status"]): Promise<readonly DiscoveredSellerRecord[]>;
   listDiscoveredSellersByCampaign(context: TenantScoped, campaignId: string, status?: DiscoveredSellerRecord["status"]): Promise<readonly DiscoveredSellerRecord[]>;
   countDiscoveredSellersByCampaign(context: TenantScoped, campaignId: string, status?: DiscoveredSellerRecord["status"]): Promise<number>;
@@ -324,6 +325,12 @@ export class PrismaMarketplaceDiscoveryRepository implements MarketplaceDiscover
     const result = await this.sellers.findFirst({
       where: { tenantId: context.tenantId, campaignId, sellerIdentityKey },
     });
+    return result === null ? null : parseSeller(result);
+  }
+
+  async findDiscoveredSellerById(context: TenantScoped, sellerId: string): Promise<DiscoveredSellerRecord | null> {
+    ensureContext(context);
+    const result = await this.sellers.findFirst({ where: { tenantId: context.tenantId, id: sellerId } });
     return result === null ? null : parseSeller(result);
   }
 

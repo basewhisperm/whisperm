@@ -21,10 +21,16 @@ import {
 import {
   createDealCreateHandler,
   createDealDetailHandler,
+  createDealOutcomeHandler,
   createDealStageMoveHandler,
   createPipelineBoardHandler,
   type DealRouteDependencies,
 } from "./crm/deals.js";
+import {
+  createRevenueAttributionRecomputeHandler,
+  createRevenueAttributionStateHandler,
+  type RevenueAttributionRouteDependencies,
+} from "./crm/revenue-attribution.js";
 import { createInboundWebhookIngestionHandler, type InboundWebhookIngestionDependencies } from "./events/ingestion.js";
 import { createRenderSellerConversionHandler, type RenderSellerConversionRouteDependencies } from "./marketplace-acquisition/render-seller-conversion.js";
 import { createMarketplaceAcquisitionAnalyticsHandler, type MarketplaceAcquisitionAnalyticsRouteDependencies } from "./marketplace-acquisition/analytics.js";
@@ -100,6 +106,7 @@ export interface ApiServerDependencies extends InboundWebhookIngestionDependenci
   readonly contacts?: ContactRouteDependencies["contacts"] | undefined;
   readonly contactQuota?: ContactRouteDependencies["quota"] | undefined;
   readonly deals?: DealRouteDependencies["deals"] | undefined;
+  readonly revenueAttribution?: RevenueAttributionRouteDependencies["revenueAttribution"] | undefined;
   readonly activities?: ActivityRouteDependencies["activities"] | undefined;
   readonly dashboard?: DashboardRouteDependencies["dashboard"] | undefined;
   readonly reports?: ReportsRouteDependencies["reports"] | undefined;
@@ -275,6 +282,9 @@ const parseCrmRoute = (
         | "dealCreate"
         | "dealMoveStage"
         | "dealDetail"
+        | "dealRecordOutcome"
+        | "revenueAttributionState"
+        | "revenueAttributionRecompute"
         | "activityCreate"
         | "activityList"
         | "contactCreate"
@@ -298,6 +308,21 @@ const parseCrmRoute = (
   const dealMove = /^\/deals\/([^/?#]+)\/stage\/?$/u.exec(pathname);
   if (method === "PATCH" && dealMove !== null) {
     return { name: "dealMoveStage", params: { dealId: decodeURIComponent(dealMove[1] ?? "") } };
+  }
+
+  const dealOutcome = /^\/deals\/([^/?#]+)\/outcome\/?$/u.exec(pathname);
+  if (method === "PATCH" && dealOutcome !== null) {
+    return { name: "dealRecordOutcome", params: { dealId: decodeURIComponent(dealOutcome[1] ?? "") } };
+  }
+
+  const revenueAttributionRecompute = /^\/deals\/([^/?#]+)\/attribution\/recompute\/?$/u.exec(pathname);
+  if (method === "POST" && revenueAttributionRecompute !== null) {
+    return { name: "revenueAttributionRecompute", params: { dealId: decodeURIComponent(revenueAttributionRecompute[1] ?? "") } };
+  }
+
+  const revenueAttributionState = /^\/deals\/([^/?#]+)\/attribution\/?$/u.exec(pathname);
+  if (method === "GET" && revenueAttributionState !== null) {
+    return { name: "revenueAttributionState", params: { dealId: decodeURIComponent(revenueAttributionState[1] ?? "") } };
   }
 
   const contactActivities = /^\/contacts\/([^/?#]+)\/activities\/?$/u.exec(pathname);
@@ -337,6 +362,9 @@ const routeTemplate = (method: string, pathname: string): string => {
   const crmRoute = parseCrmRoute(method, pathname);
   if (crmRoute?.name === "pipelineBoard") return "/pipelines/:id/board";
   if (crmRoute?.name === "dealMoveStage") return "/deals/:id/stage";
+  if (crmRoute?.name === "dealRecordOutcome") return "/deals/:id/outcome";
+  if (crmRoute?.name === "revenueAttributionRecompute") return "/deals/:id/attribution/recompute";
+  if (crmRoute?.name === "revenueAttributionState") return "/deals/:id/attribution";
   if (crmRoute?.name === "dealDetail") return "/deals/:id";
   if (crmRoute?.name === "contactActivities") return "/contacts/:id/activities";
   if (crmRoute?.name === "dealActivities") return "/deals/:id/activities";
@@ -517,6 +545,12 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
     dependencies.deals === undefined ? undefined : createDealStageMoveHandler({ deals: dependencies.deals });
   const dealDetailHandler =
     dependencies.deals === undefined ? undefined : createDealDetailHandler({ deals: dependencies.deals });
+  const dealOutcomeHandler =
+    dependencies.deals === undefined ? undefined : createDealOutcomeHandler({ deals: dependencies.deals });
+  const revenueAttributionStateHandler =
+    dependencies.revenueAttribution === undefined ? undefined : createRevenueAttributionStateHandler({ revenueAttribution: dependencies.revenueAttribution });
+  const revenueAttributionRecomputeHandler =
+    dependencies.revenueAttribution === undefined ? undefined : createRevenueAttributionRecomputeHandler({ revenueAttribution: dependencies.revenueAttribution });
 
   const dashboardHandler =
     dependencies.dashboard === undefined ? undefined : createDashboardHandler({ dashboard: dependencies.dashboard });
@@ -696,6 +730,7 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           crmRoute.name === "contactActivities" ||
           crmRoute.name === "dealActivities";
         const isContactRoute = crmRoute.name === "contactCreate" || crmRoute.name === "contactList";
+        const isRevenueAttributionRoute = crmRoute.name === "revenueAttributionState" || crmRoute.name === "revenueAttributionRecompute";
 
         if (isContactRoute && dependencies.contacts === undefined) {
           reply.code(503).send({
@@ -706,7 +741,16 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
           return reply.toInjectResponse();
         }
 
-        if (!isActivityRoute && !isContactRoute && dependencies.deals === undefined) {
+        if (isRevenueAttributionRoute && dependencies.revenueAttribution === undefined) {
+          reply.code(503).send({
+            ok: false,
+            error: { code: "REVENUE_ATTRIBUTION_NOT_CONFIGURED", message: "Revenue attribution API is not configured" },
+            meta: { correlationId: request.correlationId },
+          });
+          return reply.toInjectResponse();
+        }
+
+        if (!isActivityRoute && !isContactRoute && !isRevenueAttributionRoute && dependencies.deals === undefined) {
           reply.code(503).send({
             ok: false,
             error: { code: "DEALS_NOT_CONFIGURED", message: "Deals API is not configured" },
@@ -730,6 +774,9 @@ export const createApiServer = (dependencies: ApiServerDependencies): ApiServer 
         if (crmRoute.name === "pipelineBoard" && pipelineBoardHandler !== undefined) await pipelineBoardHandler(request, reply);
         if (crmRoute.name === "dealCreate" && dealCreateHandler !== undefined) await dealCreateHandler(request, reply);
         if (crmRoute.name === "dealMoveStage" && dealStageMoveHandler !== undefined) await dealStageMoveHandler(request, reply);
+        if (crmRoute.name === "dealRecordOutcome" && dealOutcomeHandler !== undefined) await dealOutcomeHandler(request, reply);
+        if (crmRoute.name === "revenueAttributionState" && revenueAttributionStateHandler !== undefined) await revenueAttributionStateHandler(request, reply);
+        if (crmRoute.name === "revenueAttributionRecompute" && revenueAttributionRecomputeHandler !== undefined) await revenueAttributionRecomputeHandler(request, reply);
         if (crmRoute.name === "dealDetail" && dealDetailHandler !== undefined) await dealDetailHandler(request, reply);
         if (crmRoute.name === "activityCreate" && activityCreateHandler !== undefined) await activityCreateHandler(request, reply);
         if (crmRoute.name === "contactCreate" && contactCreateHandler !== undefined) await contactCreateHandler(request, reply);

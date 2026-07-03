@@ -31,6 +31,7 @@ import { IconArrowRight, IconBookmark } from "@tabler/icons-react";
 
 import {
   type CaptureConfidence,
+  type RevenueAttributionSnapshot,
   type SellerAcquisitionHealthStatus,
   type SellerAcquisitionNextAction,
   type SellerAcquisitionRecord,
@@ -508,6 +509,16 @@ export function AcquisitionWorkbench({
   const allEligibleSelected = bulkEligibleRecords.length > 0 && selectedBulkRecords.length === bulkEligibleRecords.length;
   const stages = [...new Set(records.map((r) => r.currentStage).filter(Boolean))];
 
+  const attributedSnapshots = filteredRecords
+    .map((record) => revenueAttribution(record))
+    .filter((snapshot): snapshot is RevenueAttributionSnapshot => snapshot !== null);
+  const wonDealsCount = attributedSnapshots.length;
+  const attributedRevenueTotal = attributedSnapshots.reduce((sum, snapshot) => {
+    const numeric = Number(snapshot.revenueAmount ?? 0);
+    return sum + (Number.isFinite(numeric) ? numeric : 0);
+  }, 0);
+  const attributedRevenueCurrency = attributedSnapshots.find((snapshot) => snapshot.revenueCurrency !== undefined)?.revenueCurrency ?? "USD";
+
   const commandCenterStats = [
     { label: "Total sellers", value: filteredRollups.length },
     { label: "Needs Review", value: filteredRecords.filter((record) => confidence(record) === "LOW" || qualityIssues(record).length >= 2).length },
@@ -515,6 +526,8 @@ export function AcquisitionWorkbench({
     { label: "Waiting Claim", value: filteredRecords.filter((record) => record.nextAction === "WAIT_FOR_CLAIM").length },
     { label: "Ready Conversion", value: filteredRecords.filter((record) => ["CONVERT_SELLER", "CONVERT_INVENTORY", "COMPLETE_ACQUISITION"].includes(record.nextAction)).length },
     { label: "Completed", value: filteredRecords.filter((record) => record.healthStatus === "COMPLETED").length },
+    { label: "Won Deals", value: wonDealsCount },
+    { label: "Attributed Revenue", value: formatCurrencyAmount(attributedRevenueTotal, attributedRevenueCurrency) },
   ] as const;
 
   const toggleBulkRecord = useCallback((captureId: string) => {
@@ -860,6 +873,61 @@ function crmConversionFailure(record: SellerAcquisitionRecord): string | null {
   return [code, message].filter(Boolean).join(": ");
 }
 
+// Reads the attribution snapshot Runtime/Worker already computed and persisted onto
+// the deal; this component never derives or recomputes attribution itself.
+function revenueAttribution(record: SellerAcquisitionRecord): RevenueAttributionSnapshot | null {
+  const snapshot = record.deal?.deal.metadata?.revenueAttribution;
+  if (typeof snapshot !== "object" || snapshot === null) return null;
+  const value = snapshot as Partial<RevenueAttributionSnapshot>;
+  if (typeof value.attributionStatus !== "string" || typeof value.attributionCompleteness !== "string") return null;
+  return value as RevenueAttributionSnapshot;
+}
+
+function formatCurrencyAmount(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
+  } catch {
+    return `${amount} ${currency}`.trim();
+  }
+}
+
+function formatRevenueAmount(snapshot: RevenueAttributionSnapshot): string {
+  if (snapshot.revenueAmount === undefined) return "—";
+  const numeric = Number(snapshot.revenueAmount);
+  if (!Number.isFinite(numeric)) return `${snapshot.revenueAmount} ${snapshot.revenueCurrency ?? ""}`.trim();
+  return formatCurrencyAmount(numeric, snapshot.revenueCurrency ?? "USD");
+}
+
+function attributionCompletenessTone(completeness: RevenueAttributionSnapshot["attributionCompleteness"]): string {
+  if (completeness === "FAILED") return "text-red-700 bg-red-50";
+  if (completeness === "PARTIAL") return "text-amber-700 bg-amber-50";
+  return "text-emerald-700 bg-emerald-50";
+}
+
+function RevenueAttributionDetail({ snapshot }: { readonly snapshot: RevenueAttributionSnapshot | null }) {
+  if (snapshot === null) {
+    return <p className="text-sm text-muted-foreground">No revenue attributed yet.</p>;
+  }
+  return (
+    <div className="space-y-2 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={attributionCompletenessTone(snapshot.attributionCompleteness)}>{snapshot.attributionCompleteness}</Badge>
+        <Badge>{formatRevenueAmount(snapshot)}</Badge>
+      </div>
+      <p><strong className="text-foreground">Campaign:</strong> {snapshot.campaignId ?? "Not linked"}</p>
+      <p><strong className="text-foreground">Marketplace/source:</strong> {snapshot.marketplaceSource ?? snapshot.providerKey ?? "Unknown"}</p>
+      <p><strong className="text-foreground">Qualification:</strong> {snapshot.qualificationStatus ?? "—"} {snapshot.qualificationScore ? `(${snapshot.qualificationScore})` : ""}</p>
+      {snapshot.missingLinks.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {snapshot.missingLinks.map((link) => (
+            <Badge key={link} tone="bg-amber-50 text-amber-700">Missing: {link}</Badge>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function WorkbenchSection({ title, children }: { readonly title: string; readonly children: ReactNode }) {
   return (
     <section className="rounded-2xl bg-secondary p-4" style={{ border: "0.5px solid var(--color-border)" }}>
@@ -1136,6 +1204,10 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
               <CheckLine key={item.label} label={item.label} detail={item.detail} passed={item.done} />
             ))}
           </div>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="Revenue attribution">
+          <RevenueAttributionDetail snapshot={revenueAttribution(record)} />
         </WorkbenchSection>
 
         <WorkbenchSection title="Extract quality issues">

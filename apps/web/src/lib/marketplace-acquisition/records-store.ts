@@ -34,8 +34,22 @@ export interface SellerAcquisitionContact {
   readonly company?: string | null;
 }
 
+export interface RevenueAttributionSnapshot {
+  readonly attributionStatus: string;
+  readonly attributedAt?: string;
+  readonly revenueAmount?: string;
+  readonly revenueCurrency?: string;
+  readonly campaignId?: string;
+  readonly marketplaceSource?: string;
+  readonly providerKey?: string;
+  readonly qualificationScore?: string;
+  readonly qualificationStatus?: string;
+  readonly attributionCompleteness: "COMPLETE" | "PARTIAL" | "FAILED";
+  readonly missingLinks: readonly string[];
+}
+
 export interface SellerAcquisitionDeal {
-  readonly deal: { readonly id: string; readonly title?: string | null };
+  readonly deal: { readonly id: string; readonly title?: string | null; readonly metadata?: Readonly<Record<string, unknown>> | null };
 }
 
 export interface DraftInventoryRecord {
@@ -73,7 +87,7 @@ export interface SellerAcquisitionPortfolioSummary {
 export interface SellerRelationshipTimelineEvent {
   readonly id: string;
   readonly occurredAt: string;
-  readonly kind: "DISCOVERY" | "QUALIFICATION" | "INVITATION" | "CLAIM" | "CRM";
+  readonly kind: "DISCOVERY" | "QUALIFICATION" | "INVITATION" | "CLAIM" | "CRM" | "REVENUE";
   readonly label: string;
   readonly captureId: string;
   readonly campaignId?: string;
@@ -89,6 +103,10 @@ export interface SellerRelationshipMemory {
   readonly hasClaimed: boolean;
   readonly wasPreviouslyDisqualified: boolean;
   readonly hasConverted: boolean;
+  readonly hasRevenueAttributed?: boolean;
+  readonly attributedRevenueAmount?: string;
+  readonly attributedRevenueCurrency?: string;
+  readonly attributionCompleteness?: "COMPLETE" | "PARTIAL" | "FAILED";
   readonly historyCompleteness: "COMPLETE" | "PARTIAL";
   readonly timelineGenerationStatus: "SUCCESS" | "PARTIAL";
   readonly timelineGenerationFailures: readonly string[];

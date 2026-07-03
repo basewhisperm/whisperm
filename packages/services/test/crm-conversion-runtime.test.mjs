@@ -36,6 +36,7 @@ function makeService(overrides = {}) {
     auditLogs: { async append(ctx, input) { assert.equal(ctx.tenantId, input.tenantId); state.audits.push(input); return { id: `audit-${state.audits.length}`, ...input, createdAt: now.toISOString() }; } },
     activities: { async create(ctx, input) { state.activities.push(input); return { id: `activity-${state.activities.length}`, ...input, createdAt: now.toISOString(), updatedAt: now.toISOString() }; } },
     scheduler: { async schedule(job) { state.jobs.push(job); } },
+    revenueAttribution: state.revenueAttribution,
   });
   return { service, state };
 }
@@ -64,6 +65,18 @@ test('worker runtime conversion creates contact and deal through existing owners
   assert.equal(retry.idempotent, true);
   assert.equal(state.contacts.length, 1);
   assert.equal(state.deals.length, 1);
+});
+
+test('CRM conversion completion triggers configured revenue attribution evaluation for the linked deal', async () => {
+  const evaluations = [];
+  const { service } = makeService({
+    revenueAttribution: { async evaluateForDeal(evalContext, input) { evaluations.push({ evalContext, input }); return { status: 'NOT_ELIGIBLE', dealId: input.dealId, idempotent: true }; } },
+  });
+  const result = await service.executeConversion(context, { tenantId: 'tenant-1', claimTokenId: 'token-1', marketplaceCaptureId: 'capture-1' });
+  assert.equal(result.status, 'CONVERTED');
+  assert.equal(evaluations.length, 1);
+  assert.equal(evaluations[0].input.dealId, result.dealId);
+  assert.equal(evaluations[0].input.tenantId, 'tenant-1');
 });
 
 test('tenant isolation violations and insufficient contact data are observable terminal failures', async () => {

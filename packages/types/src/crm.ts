@@ -164,6 +164,17 @@ export const moveDealStageRequestSchema = z.object({
 }).strict();
 export type MoveDealStageRequest = z.output<typeof moveDealStageRequestSchema>;
 
+export const recordDealOutcomeRequestSchema = z.object({
+  value: z.number().nonnegative().nullable().optional(),
+  currency: z.string().min(3).max(3).optional(),
+  closedAt: isoDateSchema.nullable().optional(),
+  updatedAt: isoDateSchema,
+}).strict().refine((input) => input.value !== undefined || input.closedAt !== undefined, {
+  message: "Deal outcome update requires a revenue value or a closedAt date",
+  path: ["value"],
+});
+export type RecordDealOutcomeRequest = z.output<typeof recordDealOutcomeRequestSchema>;
+
 export const dealDetailSchema = z.object({
   deal: z.object({
     id: idSchema,

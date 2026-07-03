@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ActivityRepository, AuditLogRepository, BusinessGrowthOpportunityRecord, BusinessGrowthOpportunityRepository, ContactRepository, DealsRepository, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, MarketplaceClaimTokenRepository, PipelineRepository, PipelineStageRecord } from "@whisperm/repositories";
 import { MARKETPLACE_ACQUISITION_PIPELINE_KEY, type PersistenceCorrelationMetadata, type TenantScoped } from "@whisperm/types";
 import { BusinessGrowthOpportunityService } from "./business-growth-opportunity.js";
+import type { RevenueAttributionTriggerPort } from "./revenue-attribution.js";
 
 const idSchema = z.string().min(1);
 const completedCaptureStatuses = new Set(["CLAIMED", "CONVERTED"]);
@@ -29,6 +30,7 @@ export interface CrmConversionRuntimeDependencies {
   readonly auditLogs: AuditLogRepository;
   readonly activities?: ActivityRepository | undefined;
   readonly scheduler?: CrmConversionScheduler | undefined;
+  readonly revenueAttribution?: RevenueAttributionTriggerPort | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -108,6 +110,7 @@ export class CrmConversionRuntimeService {
       await this.deps.businessGrowthOpportunities.linkDeal(scope, opportunity.id, dealId);
       await this.deps.businessGrowthOpportunities.updateConversionStatus?.(scope, opportunity.id, "CONVERTED");
       await this.record(scope, context, capture, { status: "CONVERTED", contactId, dealId, crmConversionStatus: "CONVERTED", crmConversionCompletedAt: this.nowIso(), crmConversionOpportunityId: opportunity.id, crmConversionContactId: contactId, crmConversionDealId: dealId });
+      await this.deps.revenueAttribution?.evaluateForDeal(context, { tenantId: scope.tenantId, dealId });
       await this.audit(scope, context, "MARKETPLACE_CRM_CONVERSION_COMPLETED", capture.id, { claimTokenId: parsed.claimTokenId, contactId, dealId, opportunityId: opportunity.id, idempotencyKey: ready.idempotencyKey });
       await this.activity(context, contactId, dealId, "Marketplace seller converted to CRM", { eventType: "MARKETPLACE_CRM_CONVERSION_COMPLETED", marketplaceCaptureId: capture.id, claimTokenId: parsed.claimTokenId, contactId, dealId, opportunityId: opportunity.id });
       return { status: "CONVERTED", claimTokenId: parsed.claimTokenId, marketplaceCaptureId: capture.id, contactId, dealId, opportunityId: opportunity.id, ...(opportunity.campaignId == null ? {} : { campaignId: opportunity.campaignId }), idempotencyKey: ready.idempotencyKey, idempotent: false };

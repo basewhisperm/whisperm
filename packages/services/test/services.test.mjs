@@ -51,7 +51,8 @@ const createRepositories = (overrides = {}) => {
       async updateStageWithOptimisticLock(workspaceId, dealId, stageId, expectedUpdatedAt) { push("deals", "updateStageWithOptimisticLock", [workspaceId, dealId, stageId, expectedUpdatedAt]); return { previousStageId: "stage-old", deal: { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: stageId, ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: "2026-05-29T00:01:00.000Z" } }; },
       async findDetailById(workspaceId, dealId) { push("deals", "findDetailById", [workspaceId, dealId]); return { deal: { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: "stage-a", ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: now }, contact: { id: "contact-1", firstName: "Lead", lastName: "One", email: "lead@example.com" }, owner: null, activity: [] }; },
       async updateStage(workspaceId, dealId, stageId) { push("deals", "updateStage", [workspaceId, dealId, stageId]); return { id: dealId, tenantId: workspaceId, pipelineId: "pipeline-a", pipelineStageId: stageId, title: "Deal", value: "100", currency: "USD", createdAt: now, updatedAt: now }; },
-      async findByContact(workspaceId, contactId) { push("deals", "findByContact", [workspaceId, contactId]); return []; }
+      async findByContact(workspaceId, contactId) { push("deals", "findByContact", [workspaceId, contactId]); return []; },
+      async update(workspaceId, dealId, input) { push("deals", "update", [workspaceId, dealId, input]); return { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: "stage-a", ownerId: null, title: "Deal", value: input.value ?? "100", currency: input.currency ?? "USD", probability: 50, closedAt: input.closedAt ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: "2026-05-29T00:02:00.000Z" }; }
     },
     activities: {
       async create(scope, input) { push("activities", "create", [scope, input]); return { id: "activity-1", tenantId: scope.tenantId, contactId: input.contactId ?? null, dealId: input.dealId ?? null, createdById: input.createdById, type: input.type, note: input.note ?? null, occurredAt: input.occurredAt ?? now, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
@@ -167,7 +168,8 @@ test("idempotent campaign publishing returns the existing job without duplicate 
       async updateStageWithOptimisticLock(workspaceId, dealId, stageId, expectedUpdatedAt) { push("deals", "updateStageWithOptimisticLock", [workspaceId, dealId, stageId, expectedUpdatedAt]); return { previousStageId: "stage-old", deal: { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: stageId, ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: "2026-05-29T00:01:00.000Z" } }; },
       async findDetailById(workspaceId, dealId) { push("deals", "findDetailById", [workspaceId, dealId]); return { deal: { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: "stage-a", ownerId: null, title: "Deal", value: "100", currency: "USD", probability: 50, createdAt: now, updatedAt: now }, contact: { id: "contact-1", firstName: "Lead", lastName: "One", email: "lead@example.com" }, owner: null, activity: [] }; },
       async updateStage(workspaceId, dealId, stageId) { push("deals", "updateStage", [workspaceId, dealId, stageId]); return { id: dealId, tenantId: workspaceId, pipelineId: "pipeline-a", pipelineStageId: stageId, title: "Deal", value: "100", currency: "USD", createdAt: now, updatedAt: now }; },
-      async findByContact(workspaceId, contactId) { push("deals", "findByContact", [workspaceId, contactId]); return []; }
+      async findByContact(workspaceId, contactId) { push("deals", "findByContact", [workspaceId, contactId]); return []; },
+      async update(workspaceId, dealId, input) { push("deals", "update", [workspaceId, dealId, input]); return { id: dealId, tenantId: workspaceId, contactId: "contact-1", pipelineId: "pipeline-a", pipelineStageId: "stage-a", ownerId: null, title: "Deal", value: input.value ?? "100", currency: input.currency ?? "USD", probability: 50, closedAt: input.closedAt ?? null, metadata: input.metadata ?? {}, createdAt: now, updatedAt: "2026-05-29T00:02:00.000Z" }; }
     },
     activities: {
       async create(scope, input) { push("activities", "create", [scope, input]); return { id: "activity-1", tenantId: scope.tenantId, contactId: input.contactId ?? null, dealId: input.dealId ?? null, createdById: input.createdById, type: input.type, note: input.note ?? null, occurredAt: input.occurredAt ?? now, metadata: input.metadata ?? {}, createdAt: now, updatedAt: now }; },
@@ -470,4 +472,38 @@ test("deal detail returns deal contact and activity", async () => {
   assert.equal(detail.deal.id, "deal-1");
   assert.equal(detail.contact.email, "lead@example.com");
   assert.deepEqual(detail.activity, []);
+});
+
+test("recording a deal outcome persists revenue and triggers configured revenue attribution runtime", async () => {
+  const repositories = createRepositories();
+  const evaluations = [];
+  const services = createWhispeRMServices({
+    ...repositories,
+    revenueAttribution: {
+      async evaluateForDeal(evalContext, input) {
+        evaluations.push({ evalContext, input });
+        return { status: "ATTRIBUTED", dealId: input.dealId, idempotent: false };
+      },
+    },
+  });
+
+  const deal = await services.deals.recordOutcome(context, "deal-1", { value: 500, currency: "USD", closedAt: now, expectedUpdatedAt: now });
+
+  assert.equal(deal.value, 500);
+  assert.equal(deal.closedAt, now);
+  assert.deepEqual(repositories.calls.find((call) => call.repo === "deals" && call.method === "update").args, ["tenant-a", "deal-1", { value: 500, currency: "USD", closedAt: now, expectedUpdatedAt: now }]);
+  assert.equal(repositories.calls.some((call) => call.repo === "events" && call.method === "appendOutbox" && call.args[1].eventType === "deal.outcome_recorded"), true);
+  assert.equal(evaluations.length, 1);
+  assert.equal(evaluations[0].input.dealId, "deal-1");
+  assert.equal(evaluations[0].input.tenantId, "tenant-a");
+});
+
+test("recording a deal outcome without value or closedAt is rejected", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  await assert.rejects(
+    services.deals.recordOutcome(context, "deal-1", { currency: "USD", expectedUpdatedAt: now }),
+    (error) => error instanceof ServiceError && error.code === "SERVICE_VALIDATION_FAILED",
+  );
 });
