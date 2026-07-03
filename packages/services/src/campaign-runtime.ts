@@ -112,6 +112,83 @@ const deliveredStatuses = new Set(["SENT", "DELIVERED", "COMPLETED"]);
 const retryableStates = new Set(["FAILED", "DEAD_LETTERED", "RETRY_SCHEDULED"]);
 const defaultInvitationMaxRetries = 3;
 const invitationBackoffMs = [5 * 60_000, 30 * 60_000, 2 * 60 * 60_000] as const;
+const invitationChannels = ["WHATSAPP", "SMS", "EMAIL"] as const;
+type InvitationChannel = typeof invitationChannels[number];
+
+interface InvitationOptimizationStrategy {
+  readonly selectedChannel: InvitationChannel;
+  readonly selectedProvider: string;
+  readonly recommendedSendTime: string;
+  readonly retryScheduleMs: readonly number[];
+  readonly maxRetries: number;
+  readonly shouldDelay: boolean;
+  readonly shouldSkip: boolean;
+  readonly shouldEscalate: boolean;
+  readonly confidence: number;
+  readonly reason: string;
+  readonly suppressionReason?: string | undefined;
+}
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
+const stringValue = (value: unknown): string | undefined => typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+const configuredChannels = (metadata: unknown): readonly InvitationChannel[] => {
+  const raw = isRecord(metadata) ? metadata.invitationChannels ?? metadata.availableInvitationChannels : undefined;
+  if (!Array.isArray(raw)) return invitationChannels;
+  const channels = raw.filter((item): item is InvitationChannel => invitationChannels.includes(item as InvitationChannel));
+  return channels.length > 0 ? channels : invitationChannels;
+};
+
+const providerHealthPenalty = (metadata: unknown, channel: InvitationChannel): number => {
+  const health = isRecord(metadata) && isRecord(metadata.providerHealth) ? stringValue(metadata.providerHealth[channel])?.toUpperCase() : undefined;
+  if (health === "UNHEALTHY" || health === "DOWN") return 60;
+  if (health === "DEGRADED" || health === "RATE_LIMITED") return 25;
+  return 0;
+};
+
+const scoreChannel = (channel: InvitationChannel, invitations: readonly { readonly channel: string; readonly status: string; readonly metadata?: unknown }[], campaignMetadata: unknown): number => {
+  const base = channel === "WHATSAPP" ? 30 : channel === "SMS" ? 20 : 10;
+  const healthPenalty = providerHealthPenalty(campaignMetadata, channel);
+  const history = invitations.filter((invitation) => invitation.channel === channel);
+  const successes = history.filter((invitation) => invitation.status === "SENT" || invitation.status === "OPENED" || (isRecord(invitation.metadata) && invitation.metadata.providerOutcome === "DELIVERED")).length;
+  const failures = history.filter((invitation) => invitation.status === "FAILED" || (isRecord(invitation.metadata) && (invitation.metadata.providerOutcome === "PROVIDER_FAILED" || invitation.metadata.failureCode !== undefined))).length;
+  return base + successes * 35 - failures * 30 - healthPenalty;
+};
+
+const buildInvitationOptimizationStrategy = (input: {
+  readonly preferredChannel?: InvitationChannel | undefined;
+  readonly campaignMetadata: unknown;
+  readonly invitations: readonly { readonly channel: string; readonly status: string; readonly metadata?: unknown }[];
+  readonly now: Date;
+}): InvitationOptimizationStrategy => {
+  const alreadyConverted = input.invitations.some((invitation) => isRecord(invitation.metadata) && (invitation.metadata.claimedAt !== undefined || invitation.metadata.conversionStatus === "CONVERTED"));
+  const activeDuplicate = input.invitations.some((invitation) => invitation.status === "SENT" || invitation.status === "OPENED");
+  const available = configuredChannels(input.campaignMetadata);
+  const preferred = input.preferredChannel !== undefined && available.includes(input.preferredChannel) ? input.preferredChannel : undefined;
+  const ranked = [...available].sort((a, b) => scoreChannel(b, input.invitations, input.campaignMetadata) - scoreChannel(a, input.invitations, input.campaignMetadata));
+  const selectedChannel = preferred ?? ranked[0] ?? "WHATSAPP";
+  const selectedProvider = stringValue(isRecord(input.campaignMetadata) && isRecord(input.campaignMetadata.invitationProviders) ? input.campaignMetadata.invitationProviders[selectedChannel] : undefined) ?? selectedChannel;
+  const unhealthy = providerHealthPenalty(input.campaignMetadata, selectedChannel) >= 60;
+  const retryScheduleMs = unhealthy ? [30 * 60_000, 2 * 60 * 60_000] : invitationBackoffMs;
+  const maxRetries = unhealthy ? 2 : defaultInvitationMaxRetries;
+  const shouldSkip = alreadyConverted || activeDuplicate;
+  const reason = shouldSkip
+    ? alreadyConverted ? "Relationship memory shows seller already converted; invitation suppressed." : "Relationship memory shows an active prior invitation; duplicate suppressed."
+    : preferred !== undefined ? "Campaign/runtime preferred channel is available and governed by provider health."
+    : "Selected from relationship delivery history, provider health, and campaign configuration.";
+  return {
+    selectedChannel,
+    selectedProvider,
+    recommendedSendTime: input.now.toISOString(),
+    retryScheduleMs,
+    maxRetries,
+    shouldDelay: unhealthy && !shouldSkip,
+    shouldSkip,
+    shouldEscalate: ranked.length > 1 && providerHealthPenalty(input.campaignMetadata, ranked[0] ?? selectedChannel) >= 60,
+    confidence: Math.max(0.25, Math.min(0.95, (scoreChannel(selectedChannel, input.invitations, input.campaignMetadata) + 70) / 140)),
+    reason,
+    ...(shouldSkip ? { suppressionReason: alreadyConverted ? "SELLER_ALREADY_CONVERTED" : "DUPLICATE_INVITATION_PREVENTED" } : {}),
+  };
+};
 
 export const nextInvitationRetryAt = (retryCount: number, now: Date = new Date()): string => {
   const index = Math.max(0, Math.min(retryCount - 1, invitationBackoffMs.length - 1));
@@ -189,20 +266,41 @@ export class CampaignRuntimeService {
       throw new PersistenceError({ code: "PERSISTENCE_VALIDATION_FAILED", message: "Seller acquisition record is not qualified for invitation", status: 422 });
     }
 
+    const priorInvitations = await this.deps.sellerInvitations?.listSellerInvitationsByMarketplaceCaptureId(context, input.opportunityId) ?? [];
+    const strategy = buildInvitationOptimizationStrategy({
+      preferredChannel: input.preferredChannel,
+      campaignMetadata: campaign.metadata,
+      invitations: priorInvitations,
+      now: new Date(),
+    });
+
     const execution = await this.deps.executions.create(context, {
       tenantId: context.tenantId,
       campaignId: input.campaignId,
       trigger: "MANUAL",
-      status: "QUEUED",
+      status: strategy.shouldSkip ? "COMPLETED" : "QUEUED",
+      completedAt: strategy.shouldSkip ? strategy.recommendedSendTime : undefined,
       metrics: {
-        invitationExecutionState: "PENDING",
+        invitationExecutionState: strategy.shouldSkip ? "SUPPRESSED" : "PENDING",
         opportunityId: input.opportunityId,
         invitationId: input.invitationId ?? null,
         initiatedBy: input.initiatedBy ?? null,
         retryCount: 0,
-        maxRetries: defaultInvitationMaxRetries,
+        maxRetries: strategy.maxRetries,
+        selectedStrategy: "RELATIONSHIP_RUNTIME_OPTIMIZED",
+        selectedChannel: strategy.selectedChannel,
+        selectedProvider: strategy.selectedProvider,
+        recommendedSendTime: strategy.recommendedSendTime,
+        retryStrategy: { intervalsMs: strategy.retryScheduleMs, maxRetries: strategy.maxRetries, providerFailover: strategy.shouldEscalate },
+        optimizationReason: strategy.reason,
+        optimizationConfidence: strategy.confidence,
+        shouldDelayInvitation: strategy.shouldDelay,
+        shouldEscalateInvitation: strategy.shouldEscalate,
+        suppressionReason: strategy.suppressionReason ?? null,
       },
     });
+
+    if (strategy.shouldSkip) return execution;
 
     await this.deps.invitationQueue?.enqueueInvitation({
       tenantId: context.tenantId,
@@ -210,7 +308,7 @@ export class CampaignRuntimeService {
       opportunityId: input.opportunityId,
       executionId: execution.id,
       invitationId: input.invitationId,
-      preferredChannel: input.preferredChannel,
+      preferredChannel: strategy.selectedChannel,
       correlationId: input.correlationId,
       replaySafe: true,
     });
@@ -489,7 +587,9 @@ export class CampaignRuntimeService {
     const retryCount = delivered ? previousRetryCount : previousRetryCount + 1;
     const shouldScheduleRetry = !delivered && (input.retryable ?? false) && retryCount < maxRetries;
     const terminalFailure = !delivered && !shouldScheduleRetry;
-    const nextRetryAt = shouldScheduleRetry ? nextInvitationRetryAt(retryCount, new Date(now)) : undefined;
+    const retryStrategy = isRecord(existing.metrics?.retryStrategy) && Array.isArray(existing.metrics.retryStrategy.intervalsMs) ? existing.metrics.retryStrategy.intervalsMs : undefined;
+    const optimizedDelay = retryStrategy?.[Math.max(0, retryCount - 1)];
+    const nextRetryAt = shouldScheduleRetry ? (typeof optimizedDelay === "number" ? new Date(new Date(now).getTime() + optimizedDelay).toISOString() : nextInvitationRetryAt(retryCount, new Date(now))) : undefined;
 
     const finalMetrics = {
       ...metrics,

@@ -160,8 +160,12 @@ const invitationRuntimeStatus = (invitation: { readonly status: string; readonly
   const lastAttempted = typeof metadata.lastAttemptAt === "string" ? metadata.lastAttemptAt : typeof metadata.lastAttemptedAt === "string" ? metadata.lastAttemptedAt : invitation.updatedAt;
   const retryCount = typeof metadata.retryCount === "number" ? ` · retries ${metadata.retryCount}/${typeof metadata.maxRetries === "number" ? metadata.maxRetries : "?"}` : "";
   const nextRetry = typeof metadata.nextRetryAt === "string" ? ` · next retry ${metadata.nextRetryAt}` : "";
+  const optimization = typeof metadata.optimizationReason === "string" ? ` · optimized: ${metadata.optimizationReason}` : "";
+  const selected = typeof metadata.selectedChannel === "string" ? ` · recommended ${metadata.selectedChannel}${typeof metadata.selectedProvider === "string" ? ` via ${metadata.selectedProvider}` : ""}` : "";
+  const retryStrategy = typeof metadata.retryStrategy === "object" && metadata.retryStrategy !== null && "maxRetries" in metadata.retryStrategy ? ` · retry strategy max ${String((metadata.retryStrategy as { readonly maxRetries?: unknown }).maxRetries ?? "?")}` : "";
+  const suppression = typeof metadata.suppressionReason === "string" ? ` · suppressed: ${metadata.suppressionReason}` : "";
   const failure = typeof metadata.failureMessage === "string" ? ` — ${metadata.failureMessage}` : "";
-  return `${invitation.channel} ${state}${lastAttempted ? ` (last attempted ${lastAttempted})` : ""}${retryCount}${nextRetry}${failure}`;
+  return `${invitation.channel} ${state}${lastAttempted ? ` (last attempted ${lastAttempted})` : ""}${selected}${optimization}${retryCount}${nextRetry}${retryStrategy}${suppression}${failure}`;
 };
 
 async function fetchSellerAcquisitionRecords(recordsPath: string): Promise<readonly SellerAcquisitionRecord[]> {
