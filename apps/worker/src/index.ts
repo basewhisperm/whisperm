@@ -696,7 +696,7 @@ export const createMarketplaceDiscoveryHandler = (services: WorkerServices): Wor
         { tenantId: payload.tenantId, correlation: context.correlation },
         { executionId: payload.executionId, status: "COMPLETED", ...result },
       );
-      return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId, status: "COMPLETED", ...result, correlationId: context.correlation.correlationId });
+      return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId, status: "SUCCEEDED", ...result, correlationId: context.correlation.correlationId });
     } catch (error) {
       await services.campaignRuntime.recordDiscoveryResult(
         { tenantId: payload.tenantId, correlation: context.correlation },
@@ -806,7 +806,7 @@ export const createWorkerDefinitions = (input: {
       name: "marketplace-discovery-worker",
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.discovery", deadLetterQueueName: "marketplace.discovery.dlq" }),
       jobTypes: ["marketplace.discovery.execute"],
-      handler: createDiscoveryExecutionHandler(input.services),
+      handler: createMarketplaceDiscoveryHandler(input.services),
     },
     {
       name: "publish-worker",
