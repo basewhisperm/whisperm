@@ -1,10 +1,12 @@
 import { AcquisitionCommandCenter } from "@/components/marketplace-acquisition/acquisition-command-center";
 import { AcquisitionWorkbench } from "@/components/marketplace-acquisition/acquisition-workbench";
+import { RuntimeHealthPanel } from "@/components/marketplace-acquisition/runtime-health-panel";
 
 export default function MarketplaceAcquisitionPage() {
   return (
     <div className="space-y-6">
       <AcquisitionCommandCenter />
+      <RuntimeHealthPanel />
       <AcquisitionWorkbench
         mode="global"
         recordsPath="/api/marketplace-acquisition/records"

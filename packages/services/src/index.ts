@@ -2263,3 +2263,18 @@ export type {
   AcquisitionSourcePerformance,
   GetCommandCenterSnapshotInput,
 } from "./acquisition-command-center.js";
+
+export { AcquisitionRuntimeHealthService } from "./acquisition-runtime-health.js";
+export type {
+  AcquisitionRuntimeHealthDependencies,
+  AcquisitionRuntimeHealthSnapshot,
+  OperationsAction,
+  OperationsActionType,
+  ProviderHealth,
+  RuntimeFailure,
+  RuntimeFailureSeverity,
+  RuntimeHealthStatus,
+  RuntimeProvider,
+  RuntimeUnit,
+  RuntimeUnitHealth,
+} from "./acquisition-runtime-health.js";
