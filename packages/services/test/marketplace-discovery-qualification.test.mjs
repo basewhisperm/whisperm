@@ -104,6 +104,21 @@ test('confidence score affects qualification state', () => {
   assert.ok(high.confidence.overallConfidence > low.confidence.overallConfidence);
 });
 
+
+test('qualification rejects sellers outside governed targeting fit', () => {
+  const result = new SellerQualificationService().qualify(baseEntry({ targetingCategory: 'Motorcycles' }));
+  assert.equal(result.status, 'REJECTED');
+  assert.ok(result.reasons.includes('OUTSIDE_CAMPAIGN_SCOPE'));
+});
+
+test('discovery persists targeting snapshot on run and seller observability', async () => {
+  const { repo, service } = serviceWithRepo();
+  await service.runDiscovery(context, runInput([baseEntry()], { targeting: { marketplaceSourceKey: 'JIJI', keyword: 'Toyota', category: 'Cars', executionLimit: 10, exclusionTerms: [] } }));
+  assert.equal(repo.runs[0].config.targetingSnapshot.keyword, 'Toyota');
+  assert.equal(repo.runs[0].metadata.targetingSnapshot.category, 'Cars');
+  assert.equal(repo.sellers[0].metadata.targetingSnapshot.executionLimit, 10);
+});
+
 test('duplicate listing records duplicate reason', async () => {
   const { repo, service } = serviceWithRepo();
   await service.runDiscovery(context, runInput([baseEntry(), baseEntry()]));

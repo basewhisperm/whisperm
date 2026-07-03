@@ -23,6 +23,17 @@ interface SellerAcquisitionCampaign {
   scheduleTimezone?: string | null;
   nextRunAt?: string | null;
   lastRunAt?: string | null;
+  metadata?: { readonly targeting?: CampaignTargetingState | null } | null;
+}
+
+interface CampaignTargetingState {
+  readonly marketplaceSourceId?: string;
+  readonly marketplaceSourceKey?: string;
+  readonly category?: string;
+  readonly location?: string;
+  readonly keyword?: string;
+  readonly executionLimit?: number;
+  readonly exclusionTerms?: readonly string[];
 }
 
 interface CampaignFormState {
@@ -35,6 +46,12 @@ interface CampaignFormState {
   scheduleCadence: "HOURLY" | "DAILY" | "WEEKLY";
   scheduleTimezone: string;
   nextRunAt: string;
+  marketplaceSourceKey: string;
+  category: string;
+  location: string;
+  keyword: string;
+  executionLimit: string;
+  exclusionTerms: string;
 }
 
 const EMPTY_FORM: CampaignFormState = {
@@ -47,6 +64,12 @@ const EMPTY_FORM: CampaignFormState = {
   scheduleCadence: "DAILY",
   scheduleTimezone: "UTC",
   nextRunAt: "",
+  marketplaceSourceKey: "JIJI",
+  category: "",
+  location: "",
+  keyword: "",
+  executionLimit: "50",
+  exclusionTerms: "",
 };
 
 const STATUSES: readonly CampaignStatus[] = ["DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "ARCHIVED"];
@@ -89,6 +112,14 @@ function formPayload(form: CampaignFormState) {
     scheduleCadence: form.scheduleEnabled ? form.scheduleCadence : null,
     scheduleTimezone: form.scheduleEnabled ? form.scheduleTimezone.trim() || "UTC" : null,
     nextRunAt: form.scheduleEnabled ? form.nextRunAt || null : null,
+    targeting: {
+      marketplaceSourceKey: form.marketplaceSourceKey.trim(),
+      category: form.category.trim() || undefined,
+      location: form.location.trim() || undefined,
+      keyword: form.keyword.trim() || undefined,
+      executionLimit: form.executionLimit.trim() ? Number.parseInt(form.executionLimit, 10) : 50,
+      exclusionTerms: form.exclusionTerms.split(",").map((term) => term.trim()).filter(Boolean),
+    },
   };
 }
 
@@ -160,6 +191,12 @@ export default function SellerAcquisitionCampaignsPage() {
       scheduleCadence: campaign.scheduleCadence ?? "DAILY",
       scheduleTimezone: campaign.scheduleTimezone ?? "UTC",
       nextRunAt: campaign.nextRunAt ?? "",
+      marketplaceSourceKey: campaign.metadata?.targeting?.marketplaceSourceKey ?? campaign.metadata?.targeting?.marketplaceSourceId ?? "JIJI",
+      category: campaign.metadata?.targeting?.category ?? "",
+      location: campaign.metadata?.targeting?.location ?? "",
+      keyword: campaign.metadata?.targeting?.keyword ?? "",
+      executionLimit: campaign.metadata?.targeting?.executionLimit == null ? "50" : String(campaign.metadata.targeting.executionLimit),
+      exclusionTerms: campaign.metadata?.targeting?.exclusionTerms?.join(", ") ?? "",
     });
     setModalMode("edit");
   }
@@ -299,6 +336,11 @@ export default function SellerAcquisitionCampaignsPage() {
                 <div><dt className="text-muted-foreground">Next Run</dt><dd className="font-medium text-foreground">{formatDateTime(campaign.nextRunAt)}</dd></div>
                 <div><dt className="text-muted-foreground">Last Run</dt><dd className="font-medium text-foreground">{formatDateTime(campaign.lastRunAt)}</dd></div>
               </dl>
+              <div className="mt-4 rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
+                <p className="font-semibold text-foreground">Targeting: {campaign.metadata?.targeting?.marketplaceSourceKey ?? campaign.metadata?.targeting?.marketplaceSourceId ?? "Not configured"}</p>
+                <p>{[campaign.metadata?.targeting?.keyword, campaign.metadata?.targeting?.category, campaign.metadata?.targeting?.location].filter(Boolean).join(" · ") || "Add keyword, category, or location before runtime discovery."}</p>
+                <p>Limit: {campaign.metadata?.targeting?.executionLimit ?? "—"}</p>
+              </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
                 <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={`/marketplace-acquisition/campaigns/${campaign.id}/workbench`}>
@@ -341,6 +383,15 @@ export default function SellerAcquisitionCampaignsPage() {
               </label>
               <Field label="Timezone" value={form.scheduleTimezone} onChange={(value) => setForm({ ...form, scheduleTimezone: value })} />
               <Field label="Next Run (ISO)" value={form.nextRunAt} onChange={(value) => setForm({ ...form, nextRunAt: value })} />
+              <div className="rounded-xl bg-secondary/60 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Discovery targeting</p>
+                <Field label="Marketplace/source" value={form.marketplaceSourceKey} onChange={(value) => setForm({ ...form, marketplaceSourceKey: value })} />
+                <Field label="Keyword/search phrase" value={form.keyword} onChange={(value) => setForm({ ...form, keyword: value })} />
+                <Field label="Category" value={form.category} onChange={(value) => setForm({ ...form, category: value })} />
+                <Field label="Location/region" value={form.location} onChange={(value) => setForm({ ...form, location: value })} />
+                <Field label="Execution limit" inputMode="numeric" value={form.executionLimit} onChange={(value) => setForm({ ...form, executionLimit: value })} />
+                <Field label="Exclusion terms (comma-separated)" value={form.exclusionTerms} onChange={(value) => setForm({ ...form, exclusionTerms: value })} />
+              </div>
               <label className="block text-sm font-medium text-muted-foreground">
                 Status
                 <select className="mt-1 h-10 w-full rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse" value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as CampaignStatus })}>

@@ -7,6 +7,7 @@ import type {
 } from "@whisperm/repositories";
 import type { BusinessGrowthOpportunityService } from "../business-growth-opportunity.js";
 import { SellerQualificationService, type QualificationPolicy } from "./qualification-service.js";
+import type { CampaignTargetingConfig } from "../campaign-targeting.js";
 import { SellerDedupeService, computeSellerIdentityKey } from "./dedupe-service.js";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +43,7 @@ export interface StartDiscoveryRunInput {
   readonly qualificationPolicy?: QualificationPolicy;
   readonly deferQualification?: boolean;
   readonly discoveryCreditsRemaining: number;
+  readonly targeting?: CampaignTargetingConfig | undefined;
 }
 
 export interface DiscoveryRunResult {
@@ -87,7 +89,7 @@ export class MarketplaceDiscoveryService {
       campaignId: input.campaignId,
       marketplaceSourceId: input.marketplaceSourceId,
       mode: input.mode,
-      config: { marketplaceSourceKey: input.marketplaceSourceKey },
+      config: { marketplaceSourceKey: input.marketplaceSourceKey, targetingSnapshot: input.targeting ?? null },
     });
 
     const startedAtMs = Date.now();
@@ -182,6 +184,12 @@ export class MarketplaceDiscoveryService {
           {
             listingUrl: entry.listingUrl,
             marketplaceSourceKey: input.marketplaceSourceKey,
+            campaignTargetMarketplaces: input.targeting === undefined ? undefined : [input.targeting.marketplaceSourceKey ?? input.targeting.marketplaceSourceId ?? input.marketplaceSourceKey],
+            targetingCategory: input.targeting?.category ?? null,
+            targetingLocation: input.targeting?.location ?? null,
+            targetingKeyword: input.targeting?.keyword ?? null,
+            targetingPriceMin: input.targeting?.priceMin ?? null,
+            targetingPriceMax: input.targeting?.priceMax ?? null,
             phone: entry.phone ?? null,
             email: entry.email ?? null,
             sellerName: entry.sellerName ?? null,
@@ -227,7 +235,11 @@ export class MarketplaceDiscoveryService {
           ...(entry.location !== undefined ? { location: entry.location } : {}),
           ...(entry.images !== undefined ? { images: [...entry.images] } : {}),
           rawData: entry as unknown as Readonly<Record<string, unknown>>,
-          metadata: qualification === undefined ? { qualificationStatus: "PENDING", marketplaceSourceKey: input.marketplaceSourceKey, reasons: [] } : { marketplaceSourceKey: input.marketplaceSourceKey, reasons: qualification.reasons, confidence: qualification.confidence },
+          metadata: {
+            reasons: qualification?.reasons ?? [],
+            confidence: qualification?.confidence ?? 0,
+            targetingSnapshot: input.targeting ?? null,
+          },
         };
 
         const seller = await this.deps.discoveryRepo.createDiscoveredSeller(repoContext, sellerInput);
@@ -258,6 +270,7 @@ export class MarketplaceDiscoveryService {
           promoted: 0,
           averageConfidence: sellersFound - sellersDuplicate > 0 ? Math.round(confidenceTotal / (sellersFound - sellersDuplicate)) : 0,
           elapsedTime: Date.now() - startedAtMs,
+          targetingSnapshot: input.targeting ?? null,
           reconciliationGap: "Discovery runs are persisted by the existing discovery service; broad Campaign Runtime execution migration remains a follow-up.",
         },
       });
@@ -292,6 +305,7 @@ export class MarketplaceDiscoveryService {
           promoted: 0,
           averageConfidence: sellersFound - sellersDuplicate > 0 ? Math.round(confidenceTotal / (sellersFound - sellersDuplicate)) : 0,
           elapsedTime: Date.now() - startedAtMs,
+          targetingSnapshot: input.targeting ?? null,
           reconciliationGap: "Discovery runs are persisted by the existing discovery service; broad Campaign Runtime execution migration remains a follow-up.",
         },
       });
