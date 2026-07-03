@@ -136,6 +136,8 @@ export interface ScoreRecomputationServicePort {
 export interface ClaimLifecycleServicePort {
   sendClaimReminder(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string, reminderType: "DAY_3" | "DAY_6"): Promise<unknown> | unknown;
   expireClaimInvitation(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string): Promise<unknown> | unknown;
+  evaluateClaimIntelligence?(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string): Promise<unknown> | unknown;
+  executeClaimRecovery?(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, invitationId: string): Promise<unknown> | unknown;
 }
 
 export interface RenderConversionRetryServicePort { retryRenderConversion(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly conversionId: string }): Promise<{ readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }> | { readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }; }
@@ -569,6 +571,12 @@ export const createClaimLifecycleHandler = (services: WorkerServices): WorkerJob
       await services.claimLifecycle.sendClaimReminder({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId, payload.reminderType);
     } else if (context.job.jobType === "marketplace.claim.expire") {
       await services.claimLifecycle.expireClaimInvitation({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId);
+    } else if (context.job.jobType === "marketplace.claim.intelligence") {
+      if (services.claimLifecycle.evaluateClaimIntelligence === undefined || services.claimLifecycle.executeClaimRecovery === undefined) {
+        throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Claim intelligence jobs require evaluation and recovery ports", status: 503, retryable: true, correlation: context.correlation });
+      }
+      await services.claimLifecycle.evaluateClaimIntelligence({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId);
+      await services.claimLifecycle.executeClaimRecovery({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId);
     } else {
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: `Unsupported claim lifecycle job type ${context.job.jobType}`, status: 400, correlation: context.correlation });
     }
@@ -829,7 +837,7 @@ export const createWorkerDefinitions = (input: {
     {
       name: "claim-lifecycle-worker",
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "marketplace.claim.lifecycle", deadLetterQueueName: "marketplace.claim.lifecycle.dlq" }),
-      jobTypes: ["marketplace.claim.reminder", "marketplace.claim.expire"],
+      jobTypes: ["marketplace.claim.reminder", "marketplace.claim.expire", "marketplace.claim.intelligence"],
       handler: createClaimLifecycleHandler(input.services),
     },
     {

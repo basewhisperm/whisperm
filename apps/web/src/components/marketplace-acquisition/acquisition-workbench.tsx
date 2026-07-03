@@ -62,6 +62,7 @@ import {
   searchText,
   sellerName,
   sellerRelationshipTimelineItems,
+  claimIntelligenceItems,
   source,
   title,
   location,
@@ -907,6 +908,14 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
           <p className="text-sm text-muted-foreground">
             {invitationRuntimeStatus(sellerLatestInvitation)}
           </p>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="Claim intelligence">
+          <div className="space-y-2">
+            {claimIntelligenceItems(record).map((item) => (
+              <CheckLine key={item.label} label={item.label} detail={item.detail} passed={item.done} />
+            ))}
+          </div>
         </WorkbenchSection>
 
         <WorkbenchSection title="Seller relationship memory">

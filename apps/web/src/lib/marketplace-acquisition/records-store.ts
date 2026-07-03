@@ -105,7 +105,7 @@ export interface SellerAcquisitionRecord {
   readonly portfolio?: SellerAcquisitionPortfolioSummary;
   readonly latestInvitation: SellerInvitationRecord | null;
   readonly invitationHistory: readonly SellerInvitationRecord[];
-  readonly claimTokenStatus: { readonly status: string; readonly expiresAt?: string | null } | null;
+  readonly claimTokenStatus: { readonly status: string; readonly expiresAt?: string | null; readonly sentAt?: string | null; readonly updatedAt?: string | null; readonly claimedAt?: string | null; readonly metadata?: Readonly<Record<string, unknown>> | null } | null;
   readonly ownershipAttestation: unknown | null;
   readonly sellerConversion: unknown | null;
   readonly inventoryConversion: unknown | null;

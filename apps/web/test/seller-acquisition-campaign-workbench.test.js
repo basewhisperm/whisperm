@@ -94,3 +94,12 @@ test("workbench renders seller relationship memory from API projection", () => {
   assert.match(domain, /relationshipMemory\?\.timeline/u);
   assert.match(domain, /Date\.parse\(a\.occurredAt\)/u);
 });
+
+test('workbench renders claim intelligence state from API projection', () => {
+  const source = component;
+  const domain = readFileSync('src/lib/marketplace-acquisition/workbench-domain.ts', 'utf8');
+  assert.match(source, /Claim intelligence/);
+  assert.match(source, /claimIntelligenceItems\(record\)/);
+  assert.match(domain, /claimIntelligenceRecoveryActionStatus/);
+  assert.match(domain, /Stalled reason/);
+});
