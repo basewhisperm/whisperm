@@ -11,6 +11,9 @@ const pageRequestSchema = z.object({ limit: z.number().int().min(1).max(100).opt
 export const businessGrowthOpportunityStatusSchema = z.enum(["IDENTIFIED", "QUALIFIED", "NEEDS_REVIEW", "REJECTED", "INVITED", "CLAIMED", "CONVERTED", "ARCHIVED"]);
 export type BusinessGrowthOpportunityStatus = z.output<typeof businessGrowthOpportunityStatusSchema>;
 
+export const attributionCompletenessSchema = z.enum(["COMPLETE", "PARTIAL", "FAILED"]);
+export type AttributionCompleteness = z.output<typeof attributionCompletenessSchema>;
+
 export const businessGrowthOpportunityRecordSchema = z.object({
   id: z.string().min(1),
   tenantId: z.string().min(1),
@@ -27,10 +30,23 @@ export const businessGrowthOpportunityRecordSchema = z.object({
   sourceType: z.string().min(1).nullable().optional(),
   sourceUrl: z.string().min(1).nullable().optional(),
   sourceKey: z.string().min(1).nullable().optional(),
+  attributedRevenueAmount: decimalLikeSchema.nullable().optional(),
+  attributedRevenueCurrency: z.string().min(1).nullable().optional(),
+  revenueAttributedAt: isoDateSchema.nullable().optional(),
+  attributionCompleteness: attributionCompletenessSchema.nullable().optional(),
+  attributionMissingLinks: z.array(z.string()).nullable().optional(),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema,
 }).strict();
 export type BusinessGrowthOpportunityRecord = z.output<typeof businessGrowthOpportunityRecordSchema>;
+
+export interface RecordRevenueAttributionInput {
+  readonly attributedAt: string;
+  readonly revenueAmount?: number | string | undefined;
+  readonly revenueCurrency?: string | undefined;
+  readonly completeness: AttributionCompleteness;
+  readonly missingLinks: readonly string[];
+}
 
 export interface OpportunityQualificationInput {
   readonly status: string;
@@ -59,12 +75,14 @@ export interface BusinessGrowthOpportunityRepository {
   createOrUpdateFromDiscoveredSeller(context: TenantScoped, input: CreateOrUpdateBusinessGrowthOpportunityInput & { readonly discoveredSellerId: string }): Promise<BusinessGrowthOpportunityRecord>;
   findByMarketplaceCaptureId(context: TenantScoped, marketplaceCaptureId: string): Promise<BusinessGrowthOpportunityRecord | null>;
   findByDiscoveredSellerId(context: TenantScoped, discoveredSellerId: string): Promise<BusinessGrowthOpportunityRecord | null>;
+  findByDealId(context: TenantScoped, dealId: string): Promise<BusinessGrowthOpportunityRecord | null>;
   findByCampaignId(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<BusinessGrowthOpportunityRecord>>;
   linkContact(context: TenantScoped, opportunityId: string, contactId: string): Promise<BusinessGrowthOpportunityRecord>;
   linkDeal(context: TenantScoped, opportunityId: string, dealId: string): Promise<BusinessGrowthOpportunityRecord>;
   linkDraftInventory(context: TenantScoped, opportunityId: string, draftInventoryId: string): Promise<BusinessGrowthOpportunityRecord>;
   updateQualification(context: TenantScoped, opportunityId: string, qualification: OpportunityQualificationInput): Promise<BusinessGrowthOpportunityRecord>;
   updateConversionStatus?(context: TenantScoped, opportunityId: string, status: BusinessGrowthOpportunityStatus): Promise<BusinessGrowthOpportunityRecord>;
+  recordRevenueAttribution(context: TenantScoped, opportunityId: string, input: RecordRevenueAttributionInput): Promise<BusinessGrowthOpportunityRecord>;
 }
 
 type PrismaWhere = Readonly<Record<string, unknown>>;
@@ -148,6 +166,12 @@ export class PrismaBusinessGrowthOpportunityRepository implements BusinessGrowth
     return result === null ? null : parseRecord(result);
   }
 
+  async findByDealId(context: TenantScoped, dealId: string): Promise<BusinessGrowthOpportunityRecord | null> {
+    ensureContext(context);
+    const result = await this.opportunities.findFirst({ where: { tenantId: context.tenantId, dealId }, orderBy: { id: "asc" } });
+    return result === null ? null : parseRecord(result);
+  }
+
   async findByCampaignId(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<BusinessGrowthOpportunityRecord>> {
     ensureContext(context);
     const args = pageArgs(page);
@@ -176,6 +200,22 @@ export class PrismaBusinessGrowthOpportunityRepository implements BusinessGrowth
   async updateConversionStatus(context: TenantScoped, opportunityId: string, status: BusinessGrowthOpportunityStatus): Promise<BusinessGrowthOpportunityRecord> {
     ensureContext(context);
     return this.update(context, opportunityId, { tenantId: context.tenantId, status });
+  }
+
+  async recordRevenueAttribution(context: TenantScoped, opportunityId: string, input: RecordRevenueAttributionInput): Promise<BusinessGrowthOpportunityRecord> {
+    ensureContext(context);
+    try {
+      return parseRecord(await this.opportunities.update({
+        where: { tenantId: context.tenantId, id: opportunityId },
+        data: dataWithDefined({
+          attributedRevenueAmount: input.revenueAmount === undefined ? undefined : String(input.revenueAmount),
+          attributedRevenueCurrency: input.revenueCurrency,
+          revenueAttributedAt: input.attributedAt,
+          attributionCompleteness: input.completeness,
+          attributionMissingLinks: [...input.missingLinks],
+        }),
+      }));
+    } catch (error) { return mapError(error); }
   }
 
   private async create(input: CreateOrUpdateBusinessGrowthOpportunityInput): Promise<BusinessGrowthOpportunityRecord> {

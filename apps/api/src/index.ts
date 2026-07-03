@@ -60,7 +60,9 @@ export type {
   ReadinessCheck,
 } from "./server.js";
 
-export { createDealCreateHandler, createDealDetailHandler, createDealStageMoveHandler, createPipelineBoardHandler } from "./crm/deals.js";
+export { createDealCreateHandler, createDealDetailHandler, createDealOutcomeHandler, createDealStageMoveHandler, createPipelineBoardHandler } from "./crm/deals.js";
+export { createRevenueAttributionRecomputeHandler, createRevenueAttributionStateHandler } from "./crm/revenue-attribution.js";
+export type { RevenueAttributionRouteContext, RevenueAttributionRouteDependencies, RevenueAttributionServicePort } from "./crm/revenue-attribution.js";
 export { createDashboardHandler, createDashboardService } from "./crm/dashboard.js";
 export { createReportsHandler, createReportsService, resolveReportPeriod, reportPeriods } from "./crm/reports.js";
 export type { ActivityRouteContext, ActivityRouteDependencies, ActivityServicePort } from "./crm/activities.js";

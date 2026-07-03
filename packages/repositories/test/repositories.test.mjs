@@ -3,10 +3,12 @@ import test from "node:test";
 
 import {
   PersistenceError,
+  PrismaBusinessGrowthOpportunityRepository,
   PrismaDashboardRepository,
   PrismaDealsRepository,
   PrismaEventRepository,
   PrismaFollowUpDigestRepository,
+  PrismaMarketplaceDiscoveryRepository,
   PrismaReportsRepository,
   PrismaPipelineRepository,
   PrismaTenantRepository,
@@ -68,7 +70,8 @@ const createClient = () => {
   const names = [
     "tenant", "tenantUser", "contact", "leadEvent", "contentItem", "contentVariant", "publishJob", "workflowExecution",
     "workflowStepExecution", "eventIngestion", "outboxEvent", "inboxEvent", "idempotencyKey", "aiExecution", "auditLog",
-    "pipeline", "pipelineStage", "deal", "activity", "subscription"
+    "pipeline", "pipelineStage", "deal", "activity", "subscription", "businessGrowthOpportunity",
+    "marketplaceDiscoveryRun", "discoveredMarketplaceSeller"
   ];
   return Object.fromEntries(names.map((name) => [name, createDelegate(name)]));
 };
@@ -512,6 +515,92 @@ test("stage move uses tenant scoped optimistic lock and rejects stale updates", 
     (error) => error instanceof PersistenceError && error.status === 409
   );
   assert.deepEqual(prisma.deal.calls.find((call) => call.method === "updateMany").args.where, { tenantId: "tenant-a", id: "deal-1", updatedAt: new Date(now) });
+});
+
+test("deal outcome update uses tenant scoped optimistic lock to record revenue fields", async () => {
+  const prisma = createClient();
+  prisma.deal.findFirst = async (args) => {
+    prisma.deal.calls.push({ name: "deal", method: "findFirst", args });
+    return { id: "deal-1", tenantId: "tenant-a", pipelineId: "pipeline-a", pipelineStageId: "stage-a", title: "Deal", value: "500", currency: "USD", closedAt: now, metadata: { revenueAttribution: { attributionStatus: "ATTRIBUTED" } }, createdAt: now, updatedAt: now };
+  };
+  const deals = new PrismaDealsRepository(prisma);
+
+  const deal = await deals.update("tenant-a", "deal-1", { value: 500, currency: "USD", closedAt: now, expectedUpdatedAt: now });
+
+  assert.equal(deal.value, "500");
+  assert.equal(deal.closedAt, now);
+  const updateManyCall = prisma.deal.calls.find((call) => call.method === "updateMany");
+  assert.deepEqual(updateManyCall.args.where, { tenantId: "tenant-a", id: "deal-1", updatedAt: new Date(now) });
+  assert.deepEqual(updateManyCall.args.data, { value: 500, currency: "USD", closedAt: now });
+});
+
+test("deal outcome update rejects stale optimistic lock", async () => {
+  const prisma = createClient();
+  prisma.deal.updateMany = async (args) => {
+    prisma.deal.calls.push({ name: "deal", method: "updateMany", args });
+    return { count: 0 };
+  };
+  const deals = new PrismaDealsRepository(prisma);
+
+  await assert.rejects(
+    deals.update("tenant-a", "deal-1", { value: 500, expectedUpdatedAt: now }),
+    (error) => error instanceof PersistenceError && error.status === 409
+  );
+});
+
+test("business growth opportunity findByDealId is tenant scoped", async () => {
+  const prisma = createClient();
+  prisma.businessGrowthOpportunity.findFirst = async (args) => {
+    prisma.businessGrowthOpportunity.calls.push({ name: "businessGrowthOpportunity", method: "findFirst", args });
+    return { id: "opp-1", tenantId: "tenant-a", dealId: "deal-1", status: "CONVERTED", createdAt: now, updatedAt: now };
+  };
+  const opportunities = new PrismaBusinessGrowthOpportunityRepository(prisma);
+
+  const result = await opportunities.findByDealId({ tenantId: "tenant-a" }, "deal-1");
+
+  assert.equal(result.id, "opp-1");
+  assert.deepEqual(prisma.businessGrowthOpportunity.calls[0].args.where, { tenantId: "tenant-a", dealId: "deal-1" });
+});
+
+test("business growth opportunity records revenue attribution outcome", async () => {
+  const prisma = createClient();
+  prisma.businessGrowthOpportunity.update = async (args) => {
+    prisma.businessGrowthOpportunity.calls.push({ name: "businessGrowthOpportunity", method: "update", args });
+    return { id: "opp-1", tenantId: "tenant-a", status: "CONVERTED", createdAt: now, updatedAt: now, ...args.data };
+  };
+  const opportunities = new PrismaBusinessGrowthOpportunityRepository(prisma);
+
+  await opportunities.recordRevenueAttribution({ tenantId: "tenant-a" }, "opp-1", {
+    attributedAt: now,
+    revenueAmount: "500",
+    revenueCurrency: "USD",
+    completeness: "PARTIAL",
+    missingLinks: ["CAMPAIGN"],
+  });
+
+  const call = prisma.businessGrowthOpportunity.calls.find((item) => item.method === "update");
+  assert.deepEqual(call.args.where, { tenantId: "tenant-a", id: "opp-1" });
+  assert.deepEqual(call.args.data, {
+    attributedRevenueAmount: "500",
+    attributedRevenueCurrency: "USD",
+    revenueAttributedAt: now,
+    attributionCompleteness: "PARTIAL",
+    attributionMissingLinks: ["CAMPAIGN"],
+  });
+});
+
+test("marketplace discovery findDiscoveredSellerById is tenant scoped", async () => {
+  const prisma = createClient();
+  prisma.discoveredMarketplaceSeller.findFirst = async (args) => {
+    prisma.discoveredMarketplaceSeller.calls.push({ name: "discoveredMarketplaceSeller", method: "findFirst", args });
+    return { id: "seller-1", tenantId: "tenant-a", discoveryRunId: "run-1", campaignId: "campaign-1", marketplaceSourceId: "source-1", status: "PROMOTED", qualificationScore: 80, listingUrl: "https://market.test/1", createdAt: now, updatedAt: now };
+  };
+  const discovery = new PrismaMarketplaceDiscoveryRepository(prisma);
+
+  const result = await discovery.findDiscoveredSellerById({ tenantId: "tenant-a" }, "seller-1");
+
+  assert.equal(result.discoveryRunId, "run-1");
+  assert.deepEqual(prisma.discoveredMarketplaceSeller.calls[0].args.where, { tenantId: "tenant-a", id: "seller-1" });
 });
 
 test("activity create is tenant-scoped transactional and writes contact touch audit and outbox", async () => {

@@ -1358,6 +1358,11 @@ model BusinessGrowthOpportunity {
   sourceType           String?
   sourceUrl            String?
   sourceKey            String?
+  attributedRevenueAmount   Decimal?                   @db.Decimal(18, 4)
+  attributedRevenueCurrency String?
+  revenueAttributedAt       DateTime?
+  attributionCompleteness   String?
+  attributionMissingLinks   Json?
   createdAt            DateTime                        @default(now())
   updatedAt            DateTime                        @updatedAt
 

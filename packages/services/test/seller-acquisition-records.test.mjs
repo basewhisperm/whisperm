@@ -21,7 +21,7 @@ const service = (state) => new SellerAcquisitionRecordService({
     async list(scope, page) { assert.equal(scope.tenantId, tenantId); assert.equal(page.limit, 100); return { items: [state.capture, ...(state.otherCaptures ?? [])] }; },
   },
   contacts: { async findById(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.contact?.id ? state.contact : null; } },
-  deals: { async findDetailById() { return null; } },
+  deals: { async findDetailById(workspaceId, dealId) { assert.equal(workspaceId, tenantId); return state.deal?.deal.id === dealId ? state.deal : null; } },
   draftInventories: { async findByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return state.draft?.marketplaceCaptureId === id ? state.draft : null; } },
   sellerInvitations: { async listSellerInvitationsByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return (state.invitations ?? []).filter((row) => row.marketplaceCaptureId === id); } },
   marketplaceClaimTokens: { async listClaimTokensByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return (state.tokens ?? []).filter((row) => row.marketplaceCaptureId === id); } },
@@ -152,6 +152,31 @@ test('relationship memory spans duplicate seller captures across marketplaces an
   assert.ok(memory.timeline.find((event) => event.label.includes('invitation sent')));
   assert.ok(memory.timeline.find((event) => event.label === 'Seller claimed'));
   assert.ok(memory.timeline.find((event) => event.label === 'Seller converted'));
+});
+
+test('relationship memory surfaces revenue attribution event and summary from the linked deal', async () => {
+  const revenueAttribution = {
+    attributionStatus: 'ATTRIBUTED',
+    attributedAt: '2026-06-21T00:00:00.000Z',
+    revenueAmount: '500',
+    revenueCurrency: 'USD',
+    campaignId: 'campaign-a',
+    marketplaceSource: 'MARKET',
+    attributionCompleteness: 'COMPLETE',
+    missingLinks: [],
+  };
+  const deal = { deal: { id: 'deal-1', tenantId, title: 'Bike deal', value: '500', currency: 'USD', closedAt: '2026-06-21T00:00:00.000Z', metadata: { revenueAttribution }, createdAt: now, updatedAt: now }, contact: null, owner: null, activity: [] };
+  const result = await record({ capture: capture({ dealId: 'deal-1', status: 'CONVERTED' }), contact: contact(), draft: draft(), attestation: attestation(), conversions: [conversion('SELLER'), conversion('INVENTORY')], deal });
+
+  assert.equal(result.deal.deal.id, 'deal-1');
+  assert.equal(result.relationshipMemory.hasRevenueAttributed, true);
+  assert.equal(result.relationshipMemory.attributedRevenueAmount, '500');
+  assert.equal(result.relationshipMemory.attributedRevenueCurrency, 'USD');
+  assert.equal(result.relationshipMemory.attributionCompleteness, 'COMPLETE');
+  const revenueEvent = result.relationshipMemory.timeline.find((event) => event.kind === 'REVENUE');
+  assert.ok(revenueEvent);
+  assert.equal(revenueEvent.metadata.revenueAmount, '500');
+  assert.equal(revenueEvent.metadata.completeness, 'COMPLETE');
 });
 
 test('runtime relationship context exposes prior invitation and qualification state', async () => {

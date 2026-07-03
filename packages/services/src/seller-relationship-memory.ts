@@ -6,7 +6,8 @@ export type SellerRelationshipEventKind =
   | "QUALIFICATION"
   | "INVITATION"
   | "CLAIM"
-  | "CRM";
+  | "CRM"
+  | "REVENUE";
 
 export interface SellerRelationshipTimelineEvent {
   readonly id: string;
@@ -27,6 +28,10 @@ export interface SellerRelationshipMemory {
   readonly hasClaimed: boolean;
   readonly wasPreviouslyDisqualified: boolean;
   readonly hasConverted: boolean;
+  readonly hasRevenueAttributed: boolean;
+  readonly attributedRevenueAmount?: string | undefined;
+  readonly attributedRevenueCurrency?: string | undefined;
+  readonly attributionCompleteness?: "COMPLETE" | "PARTIAL" | "FAILED" | undefined;
   readonly historyCompleteness: "COMPLETE" | "PARTIAL";
   readonly timelineGenerationStatus: "SUCCESS" | "PARTIAL";
   readonly timelineGenerationFailures: readonly string[];
@@ -58,6 +63,35 @@ export const canonicalSellerKeyForRecord = (record: SellerAcquisitionRecord): st
   const marketplaceIdentity = text(metadata.marketplaceIdentifier) ?? text(metadata.marketplaceSellerId);
   if (marketplaceIdentity !== null) return `marketplace:${sourceOf(record).toLowerCase()}:${marketplaceIdentity.toLowerCase()}`;
   return `capture:${record.capture.id}`;
+};
+
+interface RevenueAttributionSummary {
+  readonly attributionStatus: string;
+  readonly attributedAt?: string | undefined;
+  readonly evaluatedAt?: string | undefined;
+  readonly revenueAmount?: string | undefined;
+  readonly revenueCurrency?: string | undefined;
+  readonly campaignId?: string | undefined;
+  readonly marketplaceSource?: string | undefined;
+  readonly opportunityId?: string | undefined;
+  readonly attributionCompleteness: "COMPLETE" | "PARTIAL" | "FAILED";
+}
+
+const revenueAttributionOf = (record: SellerAcquisitionRecord): RevenueAttributionSummary | null => {
+  const metadata = isRecord(record.deal?.deal.metadata) ? record.deal.deal.metadata : null;
+  const snapshot = metadata !== null && isRecord(metadata.revenueAttribution) ? metadata.revenueAttribution : null;
+  if (snapshot === null || typeof snapshot.attributionStatus !== "string" || typeof snapshot.attributionCompleteness !== "string") return null;
+  return {
+    attributionStatus: snapshot.attributionStatus,
+    attributedAt: text(snapshot.attributedAt) ?? undefined,
+    evaluatedAt: text(snapshot.evaluatedAt) ?? undefined,
+    revenueAmount: text(snapshot.revenueAmount) ?? undefined,
+    revenueCurrency: text(snapshot.revenueCurrency) ?? undefined,
+    campaignId: text(snapshot.campaignId) ?? undefined,
+    marketplaceSource: text(snapshot.marketplaceSource) ?? undefined,
+    opportunityId: text(snapshot.opportunityId) ?? undefined,
+    attributionCompleteness: snapshot.attributionCompleteness as "COMPLETE" | "PARTIAL" | "FAILED",
+  };
 };
 
 const campaignIdOf = (record: SellerAcquisitionRecord): string | null => {
@@ -93,6 +127,8 @@ const timelineForRecord = (record: SellerAcquisitionRecord): readonly SellerRela
   if (conversionStatus === "CONVERTED") events.push({ id: `${captureId}:crm-converted`, occurredAt: date(captureMetadata.crmConversionCompletedAt) ?? record.capture.updatedAt ?? record.capture.createdAt, kind: "CRM", label: "CRM conversion completed", captureId, campaignId, metadata: { status: conversionStatus, contactId: text(captureMetadata.crmConversionContactId), dealId: text(captureMetadata.crmConversionDealId) } });
   if (conversionStatus === "CONVERSION_FAILED" || conversionStatus === "NEEDS_MANUAL_REVIEW") events.push({ id: `${captureId}:crm-conversion-failed`, occurredAt: date(captureMetadata.crmConversionFailedAt) ?? record.capture.updatedAt ?? record.capture.createdAt, kind: "CRM", label: conversionStatus === "NEEDS_MANUAL_REVIEW" ? "CRM conversion needs manual review" : "CRM conversion failed", captureId, campaignId, metadata: { status: conversionStatus, failureCode: text(captureMetadata.crmConversionFailureCode), failureMessage: text(captureMetadata.crmConversionFailureMessage) } });
   if (record.sellerConversion !== null) events.push({ id: `${captureId}:render-seller-converted`, occurredAt: date((record.sellerConversion as { readonly convertedAt?: unknown }).convertedAt) ?? date((record.sellerConversion as { readonly completedAt?: unknown }).completedAt) ?? record.capture.updatedAt ?? record.capture.createdAt, kind: "CRM", label: "Seller converted", captureId, campaignId, metadata: { status: "CONVERTED" } });
+  const revenueAttribution = revenueAttributionOf(record);
+  if (revenueAttribution !== null) events.push({ id: `${captureId}:revenue-attributed`, occurredAt: revenueAttribution.attributedAt ?? revenueAttribution.evaluatedAt ?? record.capture.updatedAt ?? record.capture.createdAt, kind: "REVENUE", label: `Revenue attributed (${revenueAttribution.attributionCompleteness.toLowerCase()})`, captureId, campaignId: revenueAttribution.campaignId ?? campaignId, metadata: { revenueAmount: revenueAttribution.revenueAmount ?? null, revenueCurrency: revenueAttribution.revenueCurrency ?? null, completeness: revenueAttribution.attributionCompleteness, marketplaceSource: revenueAttribution.marketplaceSource ?? null } });
   return events.sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
 };
 
@@ -100,6 +136,8 @@ export const buildSellerRelationshipMemory = (records: readonly SellerAcquisitio
   const first = records[0];
   const timeline = records.flatMap(timelineForRecord).sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
   const failures = first === undefined ? ["NO_SELLER_RECORDS"] : [];
+  const revenueAttributions = records.flatMap((record) => revenueAttributionOf(record) ?? []);
+  const latestRevenueAttribution = revenueAttributions[revenueAttributions.length - 1];
   return {
     canonicalSellerKey: first === undefined ? "seller:unknown" : canonicalSellerKeyForRecord(first),
     captureIds: unique(records.flatMap((record) => record.portfolio?.captureIds ?? [record.capture.id])),
@@ -109,6 +147,10 @@ export const buildSellerRelationshipMemory = (records: readonly SellerAcquisitio
     hasClaimed: records.some((record) => record.ownershipAttestation !== null || record.claimTokenStatus?.status === "CLAIMED" || record.claimTokenStatus?.status === "ACCEPTED"),
     wasPreviouslyDisqualified: records.some((record) => qualificationStatusOf(record) === "DISQUALIFIED"),
     hasConverted: records.some((record) => record.sellerConversion !== null || record.healthStatus === "COMPLETED"),
+    hasRevenueAttributed: revenueAttributions.length > 0,
+    attributedRevenueAmount: latestRevenueAttribution?.revenueAmount,
+    attributedRevenueCurrency: latestRevenueAttribution?.revenueCurrency,
+    attributionCompleteness: latestRevenueAttribution?.attributionCompleteness,
     historyCompleteness: failures.length === 0 ? "COMPLETE" : "PARTIAL",
     timelineGenerationStatus: failures.length === 0 ? "SUCCESS" : "PARTIAL",
     timelineGenerationFailures: failures,

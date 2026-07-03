@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord } from "@whisperm/services";
+import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord } from "@whisperm/services";
 import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
@@ -157,6 +157,8 @@ export interface GrowthLoopExecutionPort {
   ): Promise<unknown> | unknown;
 }
 
+export interface RevenueAttributionRuntimePort { computeAttribution(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly dealId: string; readonly force?: boolean | undefined }): Promise<{ readonly status: string; readonly dealId: string }> | { readonly status: string; readonly dealId: string }; }
+
 
 export interface SellerInvitationServicePort {
   sendInvitation(
@@ -212,6 +214,7 @@ export interface WorkerServices {
   readonly claimLifecycle?: ClaimLifecycleServicePort | undefined;
   readonly renderConversionRetry?: RenderConversionRetryServicePort | undefined;
   readonly crmConversionRuntime?: CrmConversionRuntimePort | undefined;
+  readonly revenueAttribution?: RevenueAttributionRuntimePort | undefined;
   readonly sellerInvitation?: SellerInvitationServicePort | undefined;
   readonly campaignRuntime?: CampaignRuntimeExecutionPort | undefined;
   readonly marketplaceDiscovery?: MarketplaceDiscoveryExecutionPort | undefined;
@@ -639,6 +642,22 @@ export const createGrowthLoopHandler = (services: WorkerServices): WorkerJobHand
   },
 });
 
+const revenueAttributionJobPayloadSchema = z.object({ tenantId: z.string().min(1), dealId: z.string().min(1), force: z.boolean().optional() }).strict();
+
+export const createRevenueAttributionHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.revenueAttribution === undefined) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Revenue attribution runtime service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+    }
+    const payload = revenueAttributionJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Revenue attribution job tenantId must match execution context", status: 403, correlation: context.correlation });
+    }
+    const result = await services.revenueAttribution.computeAttribution({ tenantId: payload.tenantId, correlation: context.correlation }, payload);
+    return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, dealId: payload.dealId, status: result.status, correlationId: context.correlation.correlationId });
+  },
+});
+
 const claimLifecycleJobPayloadSchema = z.object({
   tenantId: z.string().min(1),
   invitationId: z.string().min(1),
@@ -950,6 +969,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: crmConversionQueueName, deadLetterQueueName: `${crmConversionQueueName}.dlq` }),
       jobTypes: [crmConversionJobType],
       handler: createCrmConversionHandler(input.services),
+    },
+    {
+      name: "revenue-attribution-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: revenueAttributionQueueName, deadLetterQueueName: `${revenueAttributionQueueName}.dlq` }),
+      jobTypes: [revenueAttributionJobType],
+      handler: createRevenueAttributionHandler(input.services),
     },
     {
       name: "render-conversion-retry-worker",

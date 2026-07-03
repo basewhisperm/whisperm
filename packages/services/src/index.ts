@@ -20,6 +20,19 @@ export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalytics
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
 export { CrmConversionRuntimeService, CrmConversionRuntimeError, crmConversionJobType, crmConversionQueueName } from "./crm-conversion-runtime.js";
 export type { CrmConversionContext, CrmConversionJob, CrmConversionResult, CrmConversionRuntimeDependencies, CrmConversionStatus, CrmConversionFailureCode } from "./crm-conversion-runtime.js";
+export { RevenueAttributionRuntimeService, RevenueAttributionRuntimeError, revenueAttributionJobType, revenueAttributionQueueName } from "./revenue-attribution.js";
+export type {
+  AttributionCompleteness,
+  RevenueAttributionContext,
+  RevenueAttributionFailureCode,
+  RevenueAttributionJob,
+  RevenueAttributionResult,
+  RevenueAttributionRuntimeDependencies,
+  RevenueAttributionScheduler,
+  RevenueAttributionSnapshot,
+  RevenueAttributionStatus,
+  RevenueAttributionTriggerPort,
+} from "./revenue-attribution.js";
 export { SellerClaimPortalService, SellerClaimPortalError } from "./seller-claim-portal.js";
 export { RenderSellerConversionService, RenderSellerConversionError } from "./render-seller-conversion.js";
 export type { RenderSellerConversionContext, RenderSellerConversionDependencies, RenderSellerConversionResult } from "./render-seller-conversion.js";
@@ -88,6 +101,7 @@ import {
   type DealRecord,
   dealRecordSchema,
   type DealsRepository,
+  type UpdateDealInput,
   type PipelineRepository,
   type BoardPaginationRequest,
   type PipelineBoardRecord,
@@ -150,6 +164,7 @@ import {
   MARKETPLACE_ACQUISITION_PIPELINE_KEY,
 } from "@whisperm/types";
 import { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
+import type { RevenueAttributionTriggerPort } from "./revenue-attribution.js";
 export { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
 export { MarketplaceDiscoveryService } from './marketplace-acquisition/discovery-service.js';
 export type { DiscoveryServiceContext, DiscoveryServiceDependencies, DiscoveryRunResult, ManualSeedEntry, StartDiscoveryRunInput } from './marketplace-acquisition/discovery-service.js';
@@ -314,6 +329,7 @@ export interface ContactPlanReader {
 export interface ServiceDependencies extends ServiceRepositories {
   readonly transactions?: ServiceTransactionManager | undefined;
   readonly contactPlans?: ContactPlanReader | undefined;
+  readonly revenueAttribution?: RevenueAttributionTriggerPort | undefined;
 }
 
 export interface DomainEventInput {
@@ -1135,6 +1151,15 @@ export class BillingService {
 const boardPageInputSchema = z.object({ limit: z.number().int().min(1).max(100).optional(), cursors: z.record(idSchema, idSchema.optional()).optional() }).strict();
 const createDealInputSchema = z.object({ tenantId: idSchema, pipelineStageId: idSchema, contactId: idSchema.nullable().optional(), ownerId: idSchema.nullable().optional(), externalId: idSchema.nullable().optional(), title: idSchema, value: z.union([z.number(), z.string()]).nullable().optional(), currency: z.string().min(3).max(3).optional(), probability: z.number().int().min(0).max(100).nullable().optional(), closedAt: isoDateSchema.nullable().optional(), metadata: metadataSchema.nullable().optional() }).strict();
 const moveDealStageInputSchema = z.object({ stageId: idSchema, expectedUpdatedAt: isoDateSchema }).strict();
+const recordDealOutcomeInputSchema = z.object({
+  value: z.union([z.number(), z.string()]).nullable().optional(),
+  currency: z.string().min(3).max(3).optional(),
+  closedAt: isoDateSchema.nullable().optional(),
+  expectedUpdatedAt: isoDateSchema,
+}).strict().refine((input) => input.value !== undefined || input.closedAt !== undefined, {
+  message: "Deal outcome update requires a revenue value or a closedAt date",
+  path: ["value"],
+});
 
 const dealToCard = (deal: DealRecord): DealCardRecord => dealCardRecordSchema.parse({
   id: deal.id,
@@ -2091,6 +2116,26 @@ export class DealService {
     const context = ensureContext(contextInput);
     const detail = await this.deps.deals.findDetailById(context.tenantId, idSchema.parse(dealId));
     return ensureFound(detail, context, "DEAL", dealId);
+  }
+
+  /**
+   * Deal ownership records won/closed outcomes and revenue amounts. This is the
+   * only write path that flips a deal into revenue-attribution eligibility
+   * (closedAt set and/or value present), so it triggers evaluation afterward.
+   */
+  async recordOutcome(contextInput: ServiceContext, dealId: string, input: { readonly value?: number | string | null | undefined; readonly currency?: string | undefined; readonly closedAt?: string | null | undefined; readonly expectedUpdatedAt: string }): Promise<DealRecord> {
+    const context = ensureContext(contextInput);
+    const data = exactInput(parseContract(recordDealOutcomeInputSchema, input, context.correlation));
+    const deal = await runWrite(this.deps, context, async (repositories) => {
+      const updated = dealRecordSchema.parse(await repositories.deals.update(context.tenantId, idSchema.parse(dealId), data as UpdateDealInput));
+      await appendAudit(repositories, context, { action: "DEAL_OUTCOME_RECORDED", targetType: "DEAL", targetId: updated.id, metadata: { value: updated.value ?? null, currency: updated.currency, closedAt: updated.closedAt ?? null } });
+      await appendDomainEvent(repositories, context, { aggregateType: "DEAL", aggregateId: updated.id, eventType: "deal.outcome_recorded", idempotencyKey: `deal:${updated.id}:outcome_recorded:${updated.updatedAt}`, payload: { tenantId: updated.tenantId, dealId: updated.id, value: updated.value ?? null, currency: updated.currency, closedAt: updated.closedAt ?? null } });
+      return updated;
+    });
+    if (this.deps.revenueAttribution !== undefined) {
+      await this.deps.revenueAttribution.evaluateForDeal({ tenantId: context.tenantId, actorId: context.actorId, correlation: context.correlation }, { tenantId: context.tenantId, dealId: deal.id });
+    }
+    return deal;
   }
 }
 

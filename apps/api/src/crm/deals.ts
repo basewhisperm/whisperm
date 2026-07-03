@@ -1,8 +1,10 @@
 import {
   createDealRequestSchema,
   moveDealStageRequestSchema,
+  recordDealOutcomeRequestSchema,
   type CreateDealRequest,
   type MoveDealStageRequest,
+  type RecordDealOutcomeRequest,
   type PersistenceCorrelationMetadata,
 } from "@whisperm/types";
 
@@ -35,6 +37,8 @@ export interface DealServicePort {
   }): Promise<unknown> | unknown;
   moveStage(context: DealRouteContext, dealId: string, input: { readonly stageId: string; readonly expectedUpdatedAt: string }): Promise<unknown> | unknown;
   detail(context: DealRouteContext, dealId: string): Promise<unknown> | unknown;
+  /** Deal ownership records won/closed outcomes and revenue; this is the only write path that makes a deal revenue-attribution eligible. */
+  recordOutcome(context: DealRouteContext, dealId: string, input: { readonly value?: number | null | undefined; readonly currency?: string | undefined; readonly closedAt?: string | null | undefined; readonly expectedUpdatedAt: string }): Promise<unknown> | unknown;
 }
 
 export interface DealRouteDependencies {
@@ -111,6 +115,13 @@ const toMoveInput = (body: MoveDealStageRequest) => ({
   expectedUpdatedAt: body.updatedAt,
 });
 
+const toRecordOutcomeInput = (body: RecordDealOutcomeRequest) => ({
+  ...(body.value === undefined ? {} : { value: body.value }),
+  ...(body.currency === undefined ? {} : { currency: body.currency }),
+  ...(body.closedAt === undefined ? {} : { closedAt: body.closedAt }),
+  expectedUpdatedAt: body.updatedAt,
+});
+
 const normalizeDetailPayload = (detail: unknown): unknown => {
   if (typeof detail !== "object" || detail === null || !("deal" in detail)) {
     return detail;
@@ -166,4 +177,11 @@ export const createDealDetailHandler = (dependencies: DealRouteDependencies) => 
   const context = dealRouteContext(request);
   const detail = await dependencies.deals.detail(context, routeParam(request, "dealId"));
   sendSuccess(reply, normalizeDetailPayload(detail), context.correlation.correlationId);
+};
+
+export const createDealOutcomeHandler = (dependencies: DealRouteDependencies) => async (request: DealFastifyRequest, reply: FastifyReplyLike): Promise<void> => {
+  const context = dealRouteContext(request);
+  const body = recordDealOutcomeRequestSchema.parse(request.body);
+  const deal = await dependencies.deals.recordOutcome(context, routeParam(request, "dealId"), toRecordOutcomeInput(body));
+  sendSuccess(reply, deal, context.correlation.correlationId);
 };
