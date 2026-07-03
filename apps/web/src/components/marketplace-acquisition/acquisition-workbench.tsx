@@ -153,6 +153,165 @@ async function fetchDiscoveryRuntimeState(campaignId: string): Promise<Discovery
   return latestDiscoveryState(executions);
 }
 
+// ---------------------------------------------------------------------------
+// Growth loop (CS-019) -- read-only view + governed apply/dismiss actions.
+// This component never computes recommendations; it only renders what the
+// CampaignRuntimeService already persisted and coordinates recompute/apply/
+// dismiss requests through the growth API routes.
+// ---------------------------------------------------------------------------
+
+interface GrowthRecommendationState {
+  readonly id: string;
+  readonly type: string;
+  readonly reason: string;
+  readonly severity: string;
+  readonly confidence: string;
+  readonly status: string;
+  readonly supportingMetrics?: Record<string, unknown> | undefined;
+  readonly targetingCandidate?: Record<string, unknown> | undefined;
+  readonly scheduleCandidate?: Record<string, unknown> | undefined;
+  readonly appliedAt?: string | undefined;
+  readonly dismissedAt?: string | undefined;
+}
+
+interface GrowthLoopState {
+  readonly growthLoopStatus: string;
+  readonly growthLoopTrigger: string | null;
+  readonly lastGrowthEvaluatedAt: string | null;
+  readonly growthCompleteness: number | null;
+  readonly growthFailureMessage: string | null;
+  readonly growthSignalSnapshot: Record<string, unknown> | null;
+  readonly growthRecommendations: readonly GrowthRecommendationState[];
+}
+
+const asGrowthLoopState = (payload: unknown): GrowthLoopState | null => {
+  const data = (payload as { readonly data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return null;
+  const record = data as Record<string, unknown>;
+  return {
+    growthLoopStatus: typeof record.growthLoopStatus === "string" ? record.growthLoopStatus : "NOT_EVALUATED",
+    growthLoopTrigger: typeof record.growthLoopTrigger === "string" ? record.growthLoopTrigger : null,
+    lastGrowthEvaluatedAt: typeof record.lastGrowthEvaluatedAt === "string" ? record.lastGrowthEvaluatedAt : null,
+    growthCompleteness: typeof record.growthCompleteness === "number" ? record.growthCompleteness : null,
+    growthFailureMessage: typeof record.growthFailureMessage === "string" ? record.growthFailureMessage : null,
+    growthSignalSnapshot: typeof record.growthSignalSnapshot === "object" && record.growthSignalSnapshot !== null ? record.growthSignalSnapshot as Record<string, unknown> : null,
+    growthRecommendations: Array.isArray(record.growthRecommendations) ? record.growthRecommendations.filter((item): item is GrowthRecommendationState => typeof item === "object" && item !== null && typeof (item as { readonly id?: unknown }).id === "string") : [],
+  };
+};
+
+async function fetchGrowthLoopState(campaignId: string): Promise<GrowthLoopState | null> {
+  const response = await fetch(`/api/marketplace-acquisition/campaigns/${encodeURIComponent(campaignId)}/growth`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Growth loop state could not be loaded.");
+  return asGrowthLoopState(payload);
+}
+
+async function recomputeGrowthLoop(campaignId: string): Promise<GrowthLoopState | null> {
+  const response = await fetch(`/api/marketplace-acquisition/campaigns/${encodeURIComponent(campaignId)}/growth`, { method: "POST" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Growth loop recompute failed.");
+  return asGrowthLoopState(payload);
+}
+
+async function actOnGrowthRecommendation(campaignId: string, recommendationId: string, action: "APPLY" | "DISMISS"): Promise<void> {
+  const response = await fetch(`/api/marketplace-acquisition/campaigns/${encodeURIComponent(campaignId)}/growth/recommendations/${encodeURIComponent(recommendationId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Growth recommendation update failed.");
+}
+
+function GrowthLoopSection({ campaignId, growthLoop, onRefresh }: {
+  readonly campaignId: string;
+  readonly growthLoop: GrowthLoopState;
+  readonly onRefresh: (next: GrowthLoopState | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const snapshot = growthLoop.growthSignalSnapshot;
+
+  const recompute = async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      onRefresh(await recomputeGrowthLoop(campaignId));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Growth loop recompute failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const act = async (recommendationId: string, action: "APPLY" | "DISMISS") => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await actOnGrowthRecommendation(campaignId, recommendationId, action);
+      onRefresh(await fetchGrowthLoopState(campaignId));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Growth recommendation update failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pending = growthLoop.growthRecommendations.filter((item) => item.status === "PENDING");
+  const decided = growthLoop.growthRecommendations.filter((item) => item.status !== "PENDING");
+
+  return (
+    <section className="mt-4 rounded-xl bg-secondary p-3" aria-label="Revenue-informed growth loop">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Growth loop</p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-muted-foreground">{growthLoop.growthLoopStatus}{growthLoop.lastGrowthEvaluatedAt ? ` · ${growthLoop.lastGrowthEvaluatedAt}` : ""}</p>
+          <button className="h-8 rounded-lg bg-background px-3 text-xs font-semibold text-foreground disabled:opacity-50" style={{ border: "0.5px solid var(--color-border)" }} disabled={busy} onClick={() => void recompute()} type="button">
+            {busy ? "Working…" : "Recompute"}
+          </button>
+        </div>
+      </div>
+      {growthLoop.growthFailureMessage ? <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{growthLoop.growthFailureMessage}</p> : null}
+      {actionError ? <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">{actionError}</p> : null}
+      {snapshot ? (
+        <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
+          <div className="rounded-xl bg-background p-3"><p className="font-semibold text-foreground">{String(snapshot.attributedRevenue ?? 0)} {String(snapshot.currency ?? "")}</p><p className="text-muted-foreground">attributed revenue</p></div>
+          <div className="rounded-xl bg-background p-3"><p className="font-semibold text-foreground">{String(snapshot.wonDealsCount ?? 0)}</p><p className="text-muted-foreground">won deals</p></div>
+          <div className="rounded-xl bg-background p-3"><p className="font-semibold text-foreground">{snapshot.conversionRate === null || snapshot.conversionRate === undefined ? "—" : `${Math.round(Number(snapshot.conversionRate) * 100)}%`}</p><p className="text-muted-foreground">conversion rate</p></div>
+          <div className="rounded-xl bg-background p-3"><p className="font-semibold text-foreground">{String(snapshot.totalMembers ?? 0)}</p><p className="text-muted-foreground">sellers in scope</p></div>
+        </div>
+      ) : null}
+      {pending.length > 0 ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {pending.map((recommendation) => (
+            <div key={recommendation.id} className="rounded-xl bg-background p-3" style={{ border: "0.5px solid var(--color-border)" }}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-foreground">{recommendation.type.replaceAll("_", " ")}</p>
+                <Badge tone={recommendation.severity === "ACTIONABLE" ? "bg-amber-50 text-amber-700" : recommendation.severity === "WARNING" ? "bg-red-50 text-red-700" : undefined}>{recommendation.severity}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{recommendation.reason}</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">Confidence: {recommendation.confidence}</p>
+              <div className="mt-3 flex gap-2">
+                <button className="h-8 flex-1 rounded-lg bg-whisper px-3 text-xs font-semibold text-white disabled:opacity-50" disabled={busy} onClick={() => void act(recommendation.id, "APPLY")} type="button">Apply</button>
+                <button className="h-8 flex-1 rounded-lg bg-secondary px-3 text-xs font-semibold text-foreground disabled:opacity-50" disabled={busy} onClick={() => void act(recommendation.id, "DISMISS")} type="button">Dismiss</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : <p className="mt-3 text-xs text-muted-foreground">No pending growth recommendations.</p>}
+      {decided.length > 0 ? (
+        <div className="mt-3 space-y-1">
+          {decided.map((recommendation) => (
+            <p key={recommendation.id} className="text-[11px] text-muted-foreground">
+              {recommendation.type.replaceAll("_", " ")} — {recommendation.status}{recommendation.appliedAt ? ` at ${recommendation.appliedAt}` : recommendation.dismissedAt ? ` at ${recommendation.dismissedAt}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 const invitationRuntimeStatus = (invitation: { readonly status: string; readonly channel: string; readonly metadata?: unknown; readonly updatedAt?: string } | null): string => {
   if (invitation === null) return "No invitation sent";
   const metadata = typeof invitation.metadata === "object" && invitation.metadata !== null ? invitation.metadata as Record<string, unknown> : {};
@@ -267,6 +426,7 @@ export function AcquisitionWorkbench({
   const [searchQuery, setSearchQuery] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [discoveryRuntime, setDiscoveryRuntime] = useState<DiscoveryRuntimeState | null>(null);
+  const [growthLoop, setGrowthLoop] = useState<GrowthLoopState | null>(null);
 
   const scopedRecordsPath = useMemo(() => {
     if (campaignId === undefined || campaignId.trim().length === 0) return recordsPath;
@@ -305,6 +465,15 @@ export function AcquisitionWorkbench({
     fetchDiscoveryRuntimeState(campaignId)
       .then((state) => { if (!cancelled) setDiscoveryRuntime(state); })
       .catch(() => { if (!cancelled) setDiscoveryRuntime(null); });
+    return () => { cancelled = true; };
+  }, [campaignId, mode]);
+
+  useEffect(() => {
+    if (mode !== "campaign" || campaignId === undefined) return;
+    let cancelled = false;
+    fetchGrowthLoopState(campaignId)
+      .then((state) => { if (!cancelled) setGrowthLoop(state); })
+      .catch(() => { if (!cancelled) setGrowthLoop(null); });
     return () => { cancelled = true; };
   }, [campaignId, mode]);
 
@@ -468,6 +637,14 @@ export function AcquisitionWorkbench({
               </div>
             ) : <p className="mt-2 text-xs text-muted-foreground">No recommendations yet.</p>}
           </div>
+        </section>
+      ) : null}
+
+      {mode === "campaign" && campaignId !== undefined && growthLoop !== null ? (
+        <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Revenue-informed growth loop">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Revenue attribution → growth recommendations</p>
+          <p className="mt-1 text-xs text-muted-foreground">Deterministic, revenue-informed recommendations for scaling, pausing, or retargeting this campaign. Applying a recommendation is the only path that changes campaign targeting or scheduling.</p>
+          <GrowthLoopSection campaignId={campaignId} growthLoop={growthLoop} onRefresh={setGrowthLoop} />
         </section>
       ) : null}
 

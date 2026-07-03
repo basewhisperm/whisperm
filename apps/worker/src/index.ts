@@ -143,7 +143,19 @@ export interface ClaimLifecycleServicePort {
 
 export interface RenderConversionRetryServicePort { retryRenderConversion(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly conversionId: string }): Promise<{ readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }> | { readonly conversionId: string; readonly status: string; readonly attemptCount: number; readonly nextAttemptAt: string | null }; }
 
-export interface CrmConversionRuntimePort { executeConversion(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly claimTokenId: string; readonly marketplaceCaptureId: string }): Promise<{ readonly status: string; readonly contactId?: string; readonly dealId?: string; readonly opportunityId?: string; readonly idempotencyKey: string }> | { readonly status: string; readonly contactId?: string; readonly dealId?: string; readonly opportunityId?: string; readonly idempotencyKey: string }; }
+export interface CrmConversionRuntimePort { executeConversion(context: { readonly tenantId: string; readonly correlation: CorrelationMetadata }, input: { readonly tenantId: string; readonly claimTokenId: string; readonly marketplaceCaptureId: string }): Promise<{ readonly status: string; readonly contactId?: string; readonly dealId?: string; readonly opportunityId?: string; readonly campaignId?: string; readonly idempotencyKey: string }> | { readonly status: string; readonly contactId?: string; readonly dealId?: string; readonly opportunityId?: string; readonly campaignId?: string; readonly idempotencyKey: string }; }
+
+/** CS-019 growth loop: `triggerEvaluation` is the governance entrypoint (may enqueue or compute inline); `executeEvaluation` always computes and is what the growth-loop worker job calls after dequeue. */
+export interface GrowthLoopExecutionPort {
+  triggerEvaluation(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly campaignId: string; readonly trigger: string },
+  ): Promise<unknown> | unknown;
+  executeEvaluation(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly campaignId: string; readonly trigger: string },
+  ): Promise<unknown> | unknown;
+}
 
 
 export interface SellerInvitationServicePort {
@@ -205,6 +217,7 @@ export interface WorkerServices {
   readonly marketplaceDiscovery?: MarketplaceDiscoveryExecutionPort | undefined;
   readonly marketplaceQualification?: MarketplaceQualificationExecutionPort | undefined;
   readonly discoveryExecution?: DiscoveryExecutionServicePort | undefined;
+  readonly growthLoop?: GrowthLoopExecutionPort | undefined;
 }
 
 export interface QueueRegistration {
@@ -555,7 +568,74 @@ export const createCrmConversionHandler = (services: WorkerServices): WorkerJobH
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "CRM conversion job tenantId must match execution context", status: 403, correlation: context.correlation });
     }
     const result = await services.crmConversionRuntime.executeConversion({ tenantId: payload.tenantId, correlation: context.correlation }, payload);
+    if (result.status === "CONVERTED" && result.campaignId !== undefined && services.growthLoop !== undefined) {
+      // Revenue attribution just completed for this campaign: trigger a governed growth-loop
+      // evaluation. Best-effort -- growth signals are a downstream recommendation surface and
+      // must never block or fail the CRM conversion job itself.
+      try {
+        await services.growthLoop.triggerEvaluation({ tenantId: payload.tenantId, correlation: context.correlation }, { campaignId: result.campaignId, trigger: "REVENUE_ATTRIBUTION_COMPLETED" });
+      } catch {
+        // Growth loop is safely recomputable later (manual recompute, scheduled review); swallow.
+      }
+    }
     return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, claimTokenId: payload.claimTokenId, marketplaceCaptureId: payload.marketplaceCaptureId, status: result.status, contactId: result.contactId, dealId: result.dealId, opportunityId: result.opportunityId, idempotencyKey: result.idempotencyKey, correlationId: context.correlation.correlationId });
+  },
+});
+
+export const growthLoopQueueName = "marketplace.growth.loop" as const;
+export const growthLoopJobType = "marketplace.growth.loop.evaluate" as const;
+const growthLoopTriggerValues = ["MANUAL", "REVENUE_ATTRIBUTION_COMPLETED", "CAMPAIGN_EXECUTION_COMPLETED", "SCHEDULED_REVIEW"] as const;
+const growthLoopJobPayloadSchema = z.object({
+  tenantId: z.string().min(1),
+  campaignId: z.string().min(1),
+  trigger: z.enum(growthLoopTriggerValues).default("MANUAL"),
+  correlationId: z.string().min(1).optional(),
+  replaySafe: z.literal(true).optional(),
+}).strict().passthrough();
+
+const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+const growthLoopSummary = (campaign: unknown): Readonly<Record<string, unknown>> => {
+  const metadata = isPlainObject(campaign) && isPlainObject(campaign.metadata) ? campaign.metadata : {};
+  const recommendations = Array.isArray(metadata.growthRecommendations) ? metadata.growthRecommendations : [];
+  return {
+    growthLoopStatus: typeof metadata.growthLoopStatus === "string" ? metadata.growthLoopStatus : "UNKNOWN",
+    ...(typeof metadata.lastGrowthEvaluatedAt === "string" ? { lastGrowthEvaluatedAt: metadata.lastGrowthEvaluatedAt } : {}),
+    recommendationCount: recommendations.length,
+    highSeverityCount: recommendations.filter((item) => isPlainObject(item) && item.severity === "ACTIONABLE").length,
+  };
+};
+
+const transientGrowthLoopErrorCodes = new Set(["PERSISTENCE_TRANSIENT", "PERSISTENCE_LEASE_CONFLICT", "PERSISTENCE_LOCK_CONFLICT"]);
+
+const mapGrowthLoopError = (error: unknown, correlation: CorrelationMetadata): WorkerRuntimeError => {
+  if (error instanceof WorkerRuntimeError) return error;
+  const code = typeof error === "object" && error !== null && "code" in error ? String((error as { readonly code: unknown }).code) : undefined;
+  const retryable = code !== undefined && transientGrowthLoopErrorCodes.has(code);
+  return new WorkerRuntimeError({
+    code: "WORKER_RUNTIME_VALIDATION_FAILED",
+    message: error instanceof Error ? error.message : "Growth loop evaluation failed",
+    status: retryable ? 503 : 409,
+    retryable,
+    correlation,
+  });
+};
+
+export const createGrowthLoopHandler = (services: WorkerServices): WorkerJobHandler => ({
+  async execute(context) {
+    if (services.growthLoop === undefined) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Growth loop service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+    }
+    const payload = growthLoopJobPayloadSchema.parse(context.job.payload);
+    if (payload.tenantId !== context.tenantId) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Growth loop job tenantId must match execution context", status: 403, correlation: context.correlation });
+    }
+    try {
+      const result = await services.growthLoop.executeEvaluation({ tenantId: payload.tenantId, correlation: context.correlation }, { campaignId: payload.campaignId, trigger: payload.trigger });
+      return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, trigger: payload.trigger, ...growthLoopSummary(result), correlationId: context.correlation.correlationId });
+    } catch (error) {
+      throw mapGrowthLoopError(error, context.correlation);
+    }
   },
 });
 
@@ -906,6 +986,12 @@ export const createWorkerDefinitions = (input: {
       queue: createQueueContract({ tenantId: input.tenantId, queueName: "scheduler", deadLetterQueueName: "scheduler.dlq", capabilities: placeholderQueueCapabilities }),
       jobTypes: ["scheduler.tick"],
       handler: createSchedulerTickHandler(input.services),
+    },
+    {
+      name: "growth-loop-worker",
+      queue: createQueueContract({ tenantId: input.tenantId, queueName: growthLoopQueueName, deadLetterQueueName: `${growthLoopQueueName}.dlq` }),
+      jobTypes: [growthLoopJobType],
+      handler: createGrowthLoopHandler(input.services),
     },
   ];
 
@@ -1278,6 +1364,38 @@ const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
   },
 });
 
+const createGrowthLoopScheduler = (queueJob: QueueJobDelegate) => ({
+  async enqueueGrowthLoopEvaluation(job: { readonly tenantId: string; readonly campaignId: string; readonly trigger: string; readonly correlationId?: string | undefined; readonly replaySafe: true }): Promise<void> {
+    if (queueJob.upsert === undefined) {
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "QueueJob upsert is not available for growth loop scheduling", status: 503, retryable: true, correlation: { correlationId: job.correlationId ?? job.campaignId } });
+    }
+    const jobKey = `${job.tenantId}:${job.campaignId}`;
+    const payload = { tenantId: job.tenantId, campaignId: job.campaignId, trigger: job.trigger, correlationId: job.correlationId ?? jobKey, replaySafe: true };
+    const now = new Date();
+    await queueJob.upsert({
+      where: { tenantId_queueName_jobKey: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobKey } },
+      create: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobName: growthLoopJobType, jobKey, state: "PENDING", payload, maxAttempts: 3, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
+      update: { payload, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
+    });
+  },
+});
+
+export const createGrowthLoopServicePort = (prisma: PrismaPersistenceClient): GrowthLoopExecutionPort => {
+  const repositories = createPrismaRepositories(prisma);
+  const service = new CampaignRuntimeService({
+    campaigns: repositories.sellerAcquisitionCampaigns,
+    executions: new PrismaCampaignRuntimeExecutionRepository(prisma),
+    opportunities: repositories.businessGrowthOpportunities,
+    deals: repositories.deals,
+    auditLogs: repositories.auditLogs,
+    growthLoopQueue: createGrowthLoopScheduler(prisma.queueJob),
+  });
+  return {
+    triggerEvaluation: (context, input) => service.evaluateGrowthLoop(context, { campaignId: input.campaignId, trigger: input.trigger as never }),
+    executeEvaluation: (context, input) => service.executeGrowthLoopEvaluation(context, { campaignId: input.campaignId, trigger: input.trigger as never }),
+  };
+};
+
 export const createClaimLifecycleServicePort = (prisma: PrismaPersistenceClient): ClaimLifecycleServicePort => {
   const repositories = createPrismaRepositories(prisma);
   const service = new MarketplaceClaimLifecycleService({
@@ -1389,6 +1507,7 @@ if (isMainModule()) {
         campaignRuntime,
         marketplaceDiscovery: createMarketplaceDiscoveryExecutionPort({ campaigns, discovery: new MarketplaceDiscoveryService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence) }) }),
         marketplaceQualification: createMarketplaceQualificationExecutionPort({ qualification: new MarketplaceQualificationExecutionService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence), businessGrowthOpportunities: new BusinessGrowthOpportunityService({ opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence) }) }) }),
+        growthLoop: createGrowthLoopServicePort(persistence),
       },
     });
     await new Promise<void>((resolve) => {

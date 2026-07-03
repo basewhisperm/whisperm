@@ -11,7 +11,9 @@ export { SellerRelationshipMemoryService, buildSellerRelationshipMemory, canonic
 export { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
 export { CampaignRuntimeService, nextInvitationRetryAt } from "./campaign-runtime.js";
 export { DiscoveryOptimizationWorker } from "./marketplace-acquisition/discovery-optimization-worker.js";
-export type { CampaignRuntimeServiceDependencies, StartCampaignExecutionInput, ExecuteInvitationInput, CampaignRuntimeInvitationQueue, CampaignRuntimeQualificationQueue, CampaignRuntimeOptimizationQueue, RecordInvitationResultInput, RecordQualificationResultInput } from "./campaign-runtime.js";
+export { GrowthLoopWorker, growthRecommendationTypeValues } from "./marketplace-acquisition/growth-loop-worker.js";
+export type { CampaignRuntimeServiceDependencies, StartCampaignExecutionInput, ExecuteInvitationInput, CampaignRuntimeInvitationQueue, CampaignRuntimeQualificationQueue, CampaignRuntimeOptimizationQueue, CampaignRuntimeGrowthLoopQueue, RecordInvitationResultInput, RecordQualificationResultInput } from "./campaign-runtime.js";
+export type { GrowthLoopStatus, GrowthLoopTrigger, GrowthRecommendation, GrowthRecommendationType, GrowthRecommendationSeverity, GrowthRecommendationConfidence, GrowthRecommendationLifecycleStatus, GrowthSignalSnapshot, GrowthProviderPerformance, GrowthLoopAnalysisResult } from "./marketplace-acquisition/growth-loop-worker.js";
 export type { SellerAcquisitionHealthStatus, SellerAcquisitionMissingRequirement, SellerAcquisitionNextAction, SellerAcquisitionRecord, SellerAcquisitionRecordDependencies } from "./seller-acquisition-records.js";
 export type { SellerRelationshipMemory, SellerRelationshipMemoryServiceDependencies, SellerRelationshipTimelineEvent } from "./seller-relationship-memory.js";
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";

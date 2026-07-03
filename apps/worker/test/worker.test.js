@@ -104,8 +104,8 @@ test('registers event ingestion, score recomputation, notification, claim lifecy
 
   const registrations = await app.start();
 
-  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'marketplace.crm.conversion', 'render.conversion.retry', 'marketplace.invite', 'marketplace.discovery', 'marketplace.qualification', 'publish', 'scheduler']);
-  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'marketplace.crm.conversion.execute', 'render.conversion.retry', 'marketplace.invite.send', 'marketplace.discovery.execute', 'marketplace.qualification.execute', 'publish.dispatch', 'scheduler.tick']);
+  assert.deepEqual(registrations.map((registration) => registration.queue.queueName), ['event.ingestion', 'crm.scoring', 'notification', 'marketplace.claim.lifecycle', 'marketplace.crm.conversion', 'render.conversion.retry', 'marketplace.invite', 'marketplace.discovery', 'marketplace.qualification', 'publish', 'scheduler', 'marketplace.growth.loop']);
+  assert.deepEqual(registrations.map((registration) => registration.worker.jobTypes[0]), ['event.ingestion', 'crm.score.recompute', 'notification.trial_reminder', 'marketplace.claim.reminder', 'marketplace.crm.conversion.execute', 'render.conversion.retry', 'marketplace.invite.send', 'marketplace.discovery.execute', 'marketplace.qualification.execute', 'publish.dispatch', 'scheduler.tick', 'marketplace.growth.loop.evaluate']);
   assert.equal(app.getReadiness().status, 'HEALTHY');
   assert.equal(queues.isWorkerActive('event-ingestion-worker'), true);
   assert.equal(queues.isWorkerActive('score-recomputation-worker'), true);
@@ -117,6 +117,7 @@ test('registers event ingestion, score recomputation, notification, claim lifecy
   assert.equal(queues.isWorkerActive('marketplace-qualification-worker'), true);
   assert.equal(queues.isWorkerActive('publish-worker'), true);
   assert.equal(queues.isWorkerActive('scheduler-worker'), true);
+  assert.equal(queues.isWorkerActive('growth-loop-worker'), true);
 });
 
 test('event ingestion worker propagates tenant and correlation through DI service', async () => {
@@ -644,4 +645,147 @@ test('claim lifecycle worker rejects cross-tenant claim jobs', async () => {
 
   assert.equal(result.status, 'DEAD_LETTERED');
   assert.equal(result.deadLetter.error.code, 'WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION');
+});
+
+test('growth loop worker executes through service port and reports a growth summary', async () => {
+  const { ports } = createRuntimePorts();
+  const calls = [];
+  const app = createApp({
+    events: { async ingest() { throw new Error('unused'); } },
+    growthLoop: {
+      async executeEvaluation(context, input) {
+        calls.push({ context, input });
+        return { metadata: { growthLoopStatus: 'COMPLETED', lastGrowthEvaluatedAt: '2026-01-01T00:00:00.000Z', growthRecommendations: [{ type: 'SCALE_CAMPAIGN', severity: 'ACTIONABLE' }, { type: 'PRIORITIZE_PROVIDER', severity: 'INFO' }] } };
+      },
+      async triggerEvaluation() { throw new Error('not expected'); },
+    },
+  }, ports);
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'growth-loop-1',
+    queueName: 'marketplace.growth.loop',
+    jobType: 'marketplace.growth.loop.evaluate',
+    payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'REVENUE_ATTRIBUTION_COMPLETED', replaySafe: true },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'growth-loop:tenant-1:campaign-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.growth.loop', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(calls[0].context.tenantId, 'tenant-1');
+  assert.equal(calls[0].input.campaignId, 'campaign-1');
+  assert.equal(calls[0].input.trigger, 'REVENUE_ATTRIBUTION_COMPLETED');
+  assert.equal(result.result.growthLoopStatus, 'COMPLETED');
+  assert.equal(result.result.recommendationCount, 2);
+  assert.equal(result.result.highSeverityCount, 1);
+});
+
+test('growth loop worker rejects cross-tenant jobs as a terminal (non-retryable) failure', async () => {
+  const { ports } = createRuntimePorts();
+  const queues = new InMemoryQueueRuntime();
+  const app = createApp({
+    events: { async ingest() { throw new Error('unused'); } },
+    growthLoop: {
+      async executeEvaluation() { throw new Error('not expected'); },
+      async triggerEvaluation() { throw new Error('not expected'); },
+    },
+  }, ports, queues);
+  await app.start();
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'growth-loop-tenant-mismatch',
+    queueName: 'marketplace.growth.loop',
+    jobType: 'marketplace.growth.loop.evaluate',
+    payload: { tenantId: 'tenant-2', campaignId: 'campaign-1', trigger: 'MANUAL', replaySafe: true },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'growth-loop:tenant-1:campaign-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.growth.loop', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(result.deadLetter.error.code, 'WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION');
+});
+
+test('growth loop worker retries transient persistence failures instead of dead-lettering', async () => {
+  const { ports } = createRuntimePorts();
+  const app = createApp({
+    events: { async ingest() { throw new Error('unused'); } },
+    growthLoop: {
+      async executeEvaluation() { const error = new Error('db unavailable'); error.code = 'PERSISTENCE_TRANSIENT'; throw error; },
+      async triggerEvaluation() { throw new Error('not expected'); },
+    },
+  }, ports);
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'growth-loop-transient',
+    queueName: 'marketplace.growth.loop',
+    jobType: 'marketplace.growth.loop.evaluate',
+    payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', replaySafe: true },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'growth-loop:tenant-1:campaign-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.growth.loop', priority: 'NORMAL' },
+    retryPolicy: {
+      tenantId: 'tenant-1',
+      maxAttempts: 3,
+      backoff: { kind: 'FIXED', baseDelayMs: 1000, maxDelayMs: 1000, multiplier: 1, jitter: false },
+      retryableErrorCodes: [],
+      nonRetryableErrorCodes: [],
+      deadLetterAfterMaxAttempts: true,
+      replaySafe: true,
+    },
+  }) });
+
+  assert.equal(result.status, 'RETRY_SCHEDULED');
+});
+
+test('crm conversion worker triggers a revenue-informed growth loop evaluation after a fresh conversion', async () => {
+  const growthCalls = [];
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) },
+    crmConversionRuntime: {
+      executeConversion: async () => ({ status: 'CONVERTED', contactId: 'contact-1', dealId: 'deal-1', opportunityId: 'opp-1', campaignId: 'campaign-1', idempotencyKey: 'crm-key-1' }),
+    },
+    growthLoop: {
+      async triggerEvaluation(context, input) { growthCalls.push({ context, input }); return {}; },
+      async executeEvaluation() { throw new Error('not expected'); },
+    },
+  }, runtime.ports);
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'crm-conversion-growth-1',
+    queueName: 'marketplace.crm.conversion',
+    jobType: 'marketplace.crm.conversion.execute',
+    payload: { tenantId: 'tenant-1', claimTokenId: 'token-1', marketplaceCaptureId: 'capture-1' },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'tenant-1:crm-conversion-growth-1', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.crm.conversion', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(growthCalls.length, 1);
+  assert.equal(growthCalls[0].input.campaignId, 'campaign-1');
+  assert.equal(growthCalls[0].input.trigger, 'REVENUE_ATTRIBUTION_COMPLETED');
+});
+
+test('crm conversion worker does not fail the conversion job when growth loop triggering fails', async () => {
+  const runtime = createRuntimePorts();
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'ingestion-1', tenantId: 'tenant-1' }) },
+    crmConversionRuntime: {
+      executeConversion: async () => ({ status: 'CONVERTED', contactId: 'contact-1', dealId: 'deal-1', opportunityId: 'opp-1', campaignId: 'campaign-1', idempotencyKey: 'crm-key-1' }),
+    },
+    growthLoop: {
+      async triggerEvaluation() { throw new Error('growth loop unavailable'); },
+      async executeEvaluation() { throw new Error('not expected'); },
+    },
+  }, runtime.ports);
+
+  const result = await app.processJob({ job: createJob({
+    jobId: 'crm-conversion-growth-2',
+    queueName: 'marketplace.crm.conversion',
+    jobType: 'marketplace.crm.conversion.execute',
+    payload: { tenantId: 'tenant-1', claimTokenId: 'token-1', marketplaceCaptureId: 'capture-1' },
+    idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'tenant-1:crm-conversion-growth-2', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+    scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.crm.conversion', priority: 'NORMAL' },
+  }) });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(result.result.status, 'CONVERTED');
 });

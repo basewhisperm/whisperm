@@ -39,6 +39,7 @@ export interface CrmConversionResult {
   readonly contactId?: string | undefined;
   readonly dealId?: string | undefined;
   readonly opportunityId?: string | undefined;
+  readonly campaignId?: string | undefined;
   readonly idempotencyKey: string;
   readonly idempotent: boolean;
   readonly failureCode?: CrmConversionFailureCode | undefined;
@@ -109,7 +110,7 @@ export class CrmConversionRuntimeService {
       await this.record(scope, context, capture, { status: "CONVERTED", contactId, dealId, crmConversionStatus: "CONVERTED", crmConversionCompletedAt: this.nowIso(), crmConversionOpportunityId: opportunity.id, crmConversionContactId: contactId, crmConversionDealId: dealId });
       await this.audit(scope, context, "MARKETPLACE_CRM_CONVERSION_COMPLETED", capture.id, { claimTokenId: parsed.claimTokenId, contactId, dealId, opportunityId: opportunity.id, idempotencyKey: ready.idempotencyKey });
       await this.activity(context, contactId, dealId, "Marketplace seller converted to CRM", { eventType: "MARKETPLACE_CRM_CONVERSION_COMPLETED", marketplaceCaptureId: capture.id, claimTokenId: parsed.claimTokenId, contactId, dealId, opportunityId: opportunity.id });
-      return { status: "CONVERTED", claimTokenId: parsed.claimTokenId, marketplaceCaptureId: capture.id, contactId, dealId, opportunityId: opportunity.id, idempotencyKey: ready.idempotencyKey, idempotent: false };
+      return { status: "CONVERTED", claimTokenId: parsed.claimTokenId, marketplaceCaptureId: capture.id, contactId, dealId, opportunityId: opportunity.id, ...(opportunity.campaignId == null ? {} : { campaignId: opportunity.campaignId }), idempotencyKey: ready.idempotencyKey, idempotent: false };
     } catch (cause) {
       const mapped = cause instanceof CrmConversionRuntimeError ? cause : this.error(context, "TRANSIENT_PERSISTENCE_FAILURE", cause instanceof Error ? cause.message : "CRM conversion failed", 503, true);
       await this.record(scope, context, capture, { crmConversionStatus: mapped.retryable ? "CONVERSION_FAILED" : "NEEDS_MANUAL_REVIEW", crmConversionFailedAt: this.nowIso(), crmConversionFailureCode: mapped.code, crmConversionFailureMessage: mapped.message });
