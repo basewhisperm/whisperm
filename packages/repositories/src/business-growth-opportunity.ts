@@ -64,6 +64,7 @@ export interface BusinessGrowthOpportunityRepository {
   linkDeal(context: TenantScoped, opportunityId: string, dealId: string): Promise<BusinessGrowthOpportunityRecord>;
   linkDraftInventory(context: TenantScoped, opportunityId: string, draftInventoryId: string): Promise<BusinessGrowthOpportunityRecord>;
   updateQualification(context: TenantScoped, opportunityId: string, qualification: OpportunityQualificationInput): Promise<BusinessGrowthOpportunityRecord>;
+  updateConversionStatus?(context: TenantScoped, opportunityId: string, status: BusinessGrowthOpportunityStatus): Promise<BusinessGrowthOpportunityRecord>;
 }
 
 type PrismaWhere = Readonly<Record<string, unknown>>;
@@ -170,6 +171,11 @@ export class PrismaBusinessGrowthOpportunityRepository implements BusinessGrowth
   async updateQualification(context: TenantScoped, opportunityId: string, qualification: OpportunityQualificationInput): Promise<BusinessGrowthOpportunityRecord> {
     ensureContext(context);
     return this.update(context, opportunityId, { tenantId: context.tenantId, qualificationStatus: qualification.status, qualificationScore: qualification.score, qualificationReasons: qualification.reasons, status: statusFromQualification(qualification.status, undefined) });
+  }
+
+  async updateConversionStatus(context: TenantScoped, opportunityId: string, status: BusinessGrowthOpportunityStatus): Promise<BusinessGrowthOpportunityRecord> {
+    ensureContext(context);
+    return this.update(context, opportunityId, { tenantId: context.tenantId, status });
   }
 
   private async create(input: CreateOrUpdateBusinessGrowthOpportunityInput): Promise<BusinessGrowthOpportunityRecord> {

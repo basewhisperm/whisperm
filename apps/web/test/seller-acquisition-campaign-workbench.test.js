@@ -103,3 +103,11 @@ test('workbench renders claim intelligence state from API projection', () => {
   assert.match(domain, /claimIntelligenceRecoveryActionStatus/);
   assert.match(domain, /Stalled reason/);
 });
+
+test('workbench renders CRM conversion state from capture metadata without executing conversion', () => {
+  assert.match(component, /CRM conversion/u);
+  assert.match(component, /crmConversionStatus\(record\)/u);
+  assert.match(component, /crmConversionContactId/u);
+  assert.match(component, /crmConversionDealId/u);
+  assert.doesNotMatch(component, /executeConversion\(/u);
+});

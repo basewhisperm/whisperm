@@ -662,6 +662,27 @@ function Badge({ children, tone }: { readonly children: ReactNode; readonly tone
   );
 }
 
+
+function metadataText(record: SellerAcquisitionRecord, key: string): string | null {
+  const value = record.capture.metadata?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function crmConversionStatus(record: SellerAcquisitionRecord): string {
+  return metadataText(record, "crmConversionStatus") ?? (record.capture.status === "CONVERTED" ? "CONVERTED" : record.capture.status === "CLAIMED" ? "CONVERSION_READY" : "NOT_READY");
+}
+
+function crmLinkedId(record: SellerAcquisitionRecord, metadataKey: string, fallback?: string | null): string {
+  return metadataText(record, metadataKey) ?? fallback ?? "Not linked";
+}
+
+function crmConversionFailure(record: SellerAcquisitionRecord): string | null {
+  const code = metadataText(record, "crmConversionFailureCode");
+  const message = metadataText(record, "crmConversionFailureMessage");
+  if (code === null && message === null) return null;
+  return [code, message].filter(Boolean).join(": ");
+}
+
 function WorkbenchSection({ title, children }: { readonly title: string; readonly children: ReactNode }) {
   return (
     <section className="rounded-2xl bg-secondary p-4" style={{ border: "0.5px solid var(--color-border)" }}>
@@ -919,6 +940,16 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
             {claimIntelligenceItems(record).map((item) => (
               <CheckLine key={item.label} label={item.label} detail={item.detail} passed={item.done} />
             ))}
+          </div>
+        </WorkbenchSection>
+
+
+        <WorkbenchSection title="CRM conversion">
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p><strong className="text-foreground">Status:</strong> {crmConversionStatus(record)}</p>
+            <p><strong className="text-foreground">Contact:</strong> {crmLinkedId(record, "crmConversionContactId", record.contact?.id)}</p>
+            <p><strong className="text-foreground">Deal:</strong> {crmLinkedId(record, "crmConversionDealId", record.deal?.deal.id)}</p>
+            {crmConversionFailure(record) === null ? null : <p className="font-semibold text-red-700">{crmConversionFailure(record)}</p>}
           </div>
         </WorkbenchSection>
 

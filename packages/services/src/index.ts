@@ -16,6 +16,8 @@ export type { SellerAcquisitionHealthStatus, SellerAcquisitionMissingRequirement
 export type { SellerRelationshipMemory, SellerRelationshipMemoryServiceDependencies, SellerRelationshipTimelineEvent } from "./seller-relationship-memory.js";
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
+export { CrmConversionRuntimeService, CrmConversionRuntimeError, crmConversionJobType, crmConversionQueueName } from "./crm-conversion-runtime.js";
+export type { CrmConversionContext, CrmConversionJob, CrmConversionResult, CrmConversionRuntimeDependencies, CrmConversionStatus, CrmConversionFailureCode } from "./crm-conversion-runtime.js";
 export { SellerClaimPortalService, SellerClaimPortalError } from "./seller-claim-portal.js";
 export { RenderSellerConversionService, RenderSellerConversionError } from "./render-seller-conversion.js";
 export type { RenderSellerConversionContext, RenderSellerConversionDependencies, RenderSellerConversionResult } from "./render-seller-conversion.js";
