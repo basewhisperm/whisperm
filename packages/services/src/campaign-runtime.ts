@@ -10,6 +10,7 @@ import type {
 } from "@whisperm/repositories";
 import { PersistenceError } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
+import { validateCampaignTargeting } from "./campaign-targeting.js";
 
 export interface StartCampaignExecutionInput {
   readonly campaignId: string;
@@ -32,6 +33,7 @@ export interface CampaignRuntimeDiscoveryQueue {
     readonly executionId: string;
     readonly correlationId?: string | undefined;
     readonly replaySafe: true;
+    readonly targeting: import("./campaign-targeting.js").CampaignTargetingConfig;
   }): Promise<void> | void;
 }
 
@@ -219,15 +221,29 @@ export class CampaignRuntimeService {
       throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Campaign runtime execution is already active", status: 409 });
     }
 
+    const targetingValidation = validateCampaignTargeting(campaign.metadata);
+    const targetingMetrics = {
+      targetingStatus: targetingValidation.status,
+      targetingSnapshot: targetingValidation.targeting ?? null,
+      targetingFailureReason: targetingValidation.failureReason ?? null,
+    };
+
     const execution = await this.deps.executions.create(context, {
       tenantId: context.tenantId,
       campaignId: input.campaignId,
       trigger: input.trigger ?? "MANUAL",
-      status: "QUEUED",
-      metrics: {},
+      status: targetingValidation.status === "VALID" ? "QUEUED" : "FAILED",
+      failedAt: targetingValidation.status === "VALID" ? undefined : new Date().toISOString(),
+      errorCode: targetingValidation.status === "VALID" ? undefined : "CAMPAIGN_TARGETING_INVALID",
+      errorMessage: targetingValidation.failureReason,
+      metrics: targetingMetrics,
     });
 
-    const running = await this.deps.executions.update(context, execution.id, { status: "RUNNING", startedAt: new Date().toISOString(), metrics: { discoveryStatus: "PENDING", discoveredCount: 0, capturedCount: 0, skippedDuplicateCount: 0 } });
+    if (targetingValidation.status !== "VALID" || targetingValidation.targeting === undefined) {
+      return execution;
+    }
+
+    const running = await this.deps.executions.update(context, execution.id, { status: "RUNNING", startedAt: new Date().toISOString(), metrics: { ...targetingMetrics, discoveryStatus: "PENDING", discoveredCount: 0, capturedCount: 0, skippedDuplicateCount: 0 } });
 
     if (this.deps.discoveryQueue !== undefined) {
       await this.deps.discoveryQueue.enqueueDiscovery({
@@ -235,10 +251,11 @@ export class CampaignRuntimeService {
         campaignId: input.campaignId,
         executionId: running.id,
         replaySafe: true,
+        targeting: targetingValidation.targeting,
       });
       return this.deps.executions.update(context, running.id, {
         status: "RUNNING",
-        metrics: { ...(running.metrics ?? {}), discoveryStatus: "RUNNING", discoveryStartedAt: running.startedAt ?? new Date().toISOString() },
+        metrics: { ...(running.metrics ?? {}), discoveryStatus: "RUNNING", discoveryStartedAt: running.startedAt ?? new Date().toISOString(), targetingSnapshot: targetingValidation.targeting },
       });
     }
 
@@ -248,6 +265,7 @@ export class CampaignRuntimeService {
         campaignId: input.campaignId,
         executionId: running.id,
         trigger: running.trigger,
+        targeting: targetingValidation.targeting,
       });
       if (result.status === "FAILED") {
         return this.deps.executions.update(context, running.id, {

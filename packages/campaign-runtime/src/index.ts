@@ -880,6 +880,7 @@ export const campaignRuntimeWorkerInputSchema = z.object({
   campaignId: z.string().min(1),
   executionId: z.string().min(1),
   trigger: campaignRuntimeExecutionTriggerSchema,
+  targeting: z.record(z.string(), z.unknown()).optional(),
   correlation: correlationMetadataSchema.optional()
 }).strict();
 export type CampaignRuntimeWorkerInput = z.output<typeof campaignRuntimeWorkerInputSchema>;

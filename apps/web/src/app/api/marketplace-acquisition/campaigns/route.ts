@@ -5,7 +5,7 @@ import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
-import { SellerAcquisitionCampaignService } from "@whisperm/services";
+import { SellerAcquisitionCampaignService, campaignTargetingConfigSchema, mergeCampaignTargetingMetadata } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
@@ -20,6 +20,7 @@ const campaignScheduleSchema = z.object({
   scheduleCadence: z.enum(["HOURLY", "DAILY", "WEEKLY"]).nullable().optional(),
   scheduleTimezone: z.string().min(1).nullable().optional(),
   nextRunAt: z.string().datetime().nullable().optional(),
+  targeting: campaignTargetingConfigSchema.nullable().optional(),
 }).strict();
 
 const normalizeCampaignInput = (body: unknown) => {
@@ -29,7 +30,8 @@ const normalizeCampaignInput = (body: unknown) => {
   if (data.scheduleEnabled === true && (data.scheduleCadence ?? null) === null) {
     return { success: false as const, error: { issues: [{ message: "Schedule cadence is required when scheduling is enabled." }] } };
   }
-  return { success: true as const, data: { ...data, scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
+  const { targeting, ...campaignData } = data;
+  return { success: true as const, data: { ...campaignData, ...(targeting === undefined ? {} : { metadata: mergeCampaignTargetingMetadata(undefined, targeting === null ? null : campaignTargetingConfigSchema.parse(targeting)) }), scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
 };
 
 const parseLimit = (value: string | null): number | undefined => {

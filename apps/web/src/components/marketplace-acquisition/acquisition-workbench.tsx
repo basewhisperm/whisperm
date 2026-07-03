@@ -82,6 +82,9 @@ interface DiscoveryRuntimeState {
   readonly qualificationFailedCount: number;
   readonly qualificationFailureMessage?: string | undefined;
   readonly failureMessage?: string | undefined;
+  readonly targetingStatus?: string | null | undefined;
+  readonly targetingSnapshot?: { readonly marketplaceSourceKey?: string; readonly marketplaceSourceId?: string; readonly keyword?: string; readonly category?: string; readonly location?: string; readonly executionLimit?: number } | null | undefined;
+  readonly targetingFailureReason?: string | null | undefined;
 }
 
 const latestDiscoveryState = (executions: readonly { readonly status: string; readonly startedAt?: string | null; readonly completedAt?: string | null; readonly failedAt?: string | null; readonly errorMessage?: string | null; readonly metrics?: Record<string, unknown> | null }[]): DiscoveryRuntimeState | null => {
@@ -101,6 +104,9 @@ const latestDiscoveryState = (executions: readonly { readonly status: string; re
     qualificationFailureMessage: typeof metrics.qualificationFailureMessage === "string" ? metrics.qualificationFailureMessage : undefined,
     lastExecutionTime: execution.completedAt ?? execution.failedAt ?? execution.startedAt ?? undefined,
     failureMessage: typeof metrics.failureMessage === "string" ? metrics.failureMessage : execution.errorMessage ?? undefined,
+    targetingStatus: typeof metrics.targetingStatus === "string" ? metrics.targetingStatus : null,
+    targetingSnapshot: typeof metrics.targetingSnapshot === "object" && metrics.targetingSnapshot !== null ? metrics.targetingSnapshot as DiscoveryRuntimeState["targetingSnapshot"] : null,
+    targetingFailureReason: typeof metrics.targetingFailureReason === "string" ? metrics.targetingFailureReason : null,
   };
 };
 
@@ -394,13 +400,12 @@ export function AcquisitionWorkbench({
               <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.skippedDuplicateCount}</p><p className="text-muted-foreground">duplicates</p></div>
             </div>
           </div>
-          <div className="mt-4 grid gap-2 text-center text-xs md:grid-cols-5" aria-label="Qualification execution state">
-            <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.qualificationStatus ?? "Not run"}</p><p className="text-muted-foreground">qualification</p></div>
-            <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.qualifiedCount}</p><p className="text-muted-foreground">qualified</p></div>
-            <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.disqualifiedCount}</p><p className="text-muted-foreground">blocked</p></div>
-            <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.needsReviewCount}</p><p className="text-muted-foreground">needs review</p></div>
-            <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{discoveryRuntime.qualificationFailedCount}</p><p className="text-muted-foreground">failed</p></div>
+          <div className="mt-3 rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
+            <p className="font-semibold text-foreground">Targeting {discoveryRuntime.targetingStatus ?? "not recorded"}</p>
+            <p>{discoveryRuntime.targetingSnapshot ? [discoveryRuntime.targetingSnapshot.marketplaceSourceKey ?? discoveryRuntime.targetingSnapshot.marketplaceSourceId, discoveryRuntime.targetingSnapshot.keyword, discoveryRuntime.targetingSnapshot.category, discoveryRuntime.targetingSnapshot.location].filter(Boolean).join(" · ") : "No targeting snapshot recorded."}</p>
+            <p>Execution limit: {discoveryRuntime.targetingSnapshot?.executionLimit ?? "—"}</p>
           </div>
+          {discoveryRuntime.targetingFailureReason ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{discoveryRuntime.targetingFailureReason}</p> : null}
           {discoveryRuntime.failureMessage ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.failureMessage}</p> : null}
           {discoveryRuntime.qualificationFailureMessage ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{discoveryRuntime.qualificationFailureMessage}</p> : null}
         </section>
