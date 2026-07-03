@@ -2250,3 +2250,16 @@ export type { DiscoveryExecutionWorkerDependencies } from './marketplace-acquisi
 
 export { campaignTargetingConfigSchema, validateCampaignTargeting, mergeCampaignTargetingMetadata } from "./campaign-targeting.js";
 export type { CampaignTargetingConfig } from "./campaign-targeting.js";
+
+export { AcquisitionCommandCenterService } from "./acquisition-command-center.js";
+export type {
+  AcquisitionActionSeverity,
+  AcquisitionActionType,
+  AcquisitionCommandCenterAction,
+  AcquisitionCommandCenterDependencies,
+  AcquisitionCommandCenterSnapshot,
+  AcquisitionReadinessWarning,
+  AcquisitionReadinessWarningCode,
+  AcquisitionSourcePerformance,
+  GetCommandCenterSnapshotInput,
+} from "./acquisition-command-center.js";
