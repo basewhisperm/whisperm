@@ -101,3 +101,11 @@ test("campaign runtime executions API coordinates only and does not calculate op
   assert.doesNotMatch(route, /DiscoveryOptimizationWorker/u);
   assert.doesNotMatch(route, /optimizationRecommendations\s*=/u);
 });
+
+test("campaign workbench visualizes invitation optimization state without calculating it", () => {
+  assert.match(component, /recommended \$\{metadata\.selectedChannel\}/u);
+  assert.match(component, /optimized: \$\{metadata\.optimizationReason\}/u);
+  assert.match(component, /retry strategy max/u);
+  assert.match(component, /suppressed: \$\{metadata\.suppressionReason\}/u);
+  assert.doesNotMatch(component, /buildInvitationOptimizationStrategy/u);
+});

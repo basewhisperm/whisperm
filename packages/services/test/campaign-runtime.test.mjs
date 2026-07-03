@@ -371,3 +371,76 @@ test('executeInvitation blocks records with non-qualified opportunity state', as
     /not qualified for invitation/,
   );
 });
+
+test('seller relationship history influences invitation channel selection', async () => {
+  const calls = [];
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    invitationQueue: { async enqueueInvitation(input) { calls.push(input); } },
+    sellerInvitations: {
+      async listSellerInvitationsByMarketplaceCaptureId() { return [
+        { id: 'invite-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', channel: 'WHATSAPP', status: 'FAILED', metadata: { providerOutcome: 'PROVIDER_FAILED' }, createdAt: now, updatedAt: now },
+        { id: 'invite-2', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', channel: 'SMS', status: 'FAILED', metadata: { providerOutcome: 'PROVIDER_FAILED' }, createdAt: now, updatedAt: now },
+        { id: 'invite-3', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', channel: 'EMAIL', status: 'FAILED', metadata: { providerOutcome: 'PROVIDER_FAILED' }, createdAt: now, updatedAt: now },
+      ]; },
+    },
+  });
+  const execution = await runtime.executeInvitation({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1', opportunityId: 'capture-1' });
+  assert.equal(calls[0].preferredChannel, 'WHATSAPP');
+  assert.equal(execution.metrics.selectedChannel, 'WHATSAPP');
+  assert.match(execution.metrics.optimizationReason, /relationship delivery history/i);
+});
+
+test('successful historical channels are preferred and failed channels are deprioritized', async () => {
+  const calls = [];
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    invitationQueue: { async enqueueInvitation(input) { calls.push(input); } },
+    sellerInvitations: {
+      async listSellerInvitationsByMarketplaceCaptureId() { return [
+        { id: 'invite-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', channel: 'WHATSAPP', status: 'FAILED', metadata: { providerOutcome: 'PROVIDER_FAILED' }, createdAt: now, updatedAt: now },
+        { id: 'invite-2', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', channel: 'SMS', status: 'EXPIRED', metadata: { providerOutcome: 'DELIVERED' }, createdAt: now, updatedAt: now },
+      ]; },
+    },
+  });
+  const execution = await runtime.executeInvitation({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1', opportunityId: 'capture-1' });
+  assert.equal(calls[0].preferredChannel, 'SMS');
+  assert.equal(execution.metrics.selectedChannel, 'SMS');
+});
+
+test('provider health affects provider selection and retry optimization integrates with reliable delivery', async () => {
+  const calls = [];
+  const executions = new MemoryExecutions();
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign({ metadata: { providerHealth: { WHATSAPP: 'UNHEALTHY' }, invitationProviders: { SMS: 'twilio' } } })]),
+    executions,
+    invitationQueue: { async enqueueInvitation(input) { calls.push(input); } },
+    sellerInvitations: { async listSellerInvitationsByMarketplaceCaptureId() { return []; } },
+  });
+  const execution = await runtime.executeInvitation({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1', opportunityId: 'capture-1' });
+  assert.equal(calls[0].preferredChannel, 'SMS');
+  assert.equal(execution.metrics.selectedProvider, 'twilio');
+  assert.equal(execution.metrics.retryStrategy.maxRetries, 3);
+  const failed = await runtime.recordInvitationResult({ tenantId: 'tenant-1' }, { executionId: execution.id, opportunityId: 'capture-1', status: 'FAILED', channel: 'SMS', retryable: true });
+  assert.equal(failed.metrics.invitationExecutionState, 'RETRY_SCHEDULED');
+  assert.equal(new Date(failed.metrics.nextRetryAt).getTime() - new Date(failed.metrics.lastAttemptAt).getTime(), 300000);
+});
+
+test('runtime prevents duplicate optimized invitations before worker execution', async () => {
+  const calls = [];
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    invitationQueue: { async enqueueInvitation(input) { calls.push(input); } },
+    sellerInvitations: {
+      async listSellerInvitationsByMarketplaceCaptureId() { return [{ id: 'invite-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', channel: 'WHATSAPP', status: 'SENT', metadata: {}, createdAt: now, updatedAt: now }]; },
+    },
+  });
+  const execution = await runtime.executeInvitation({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1', opportunityId: 'capture-1' });
+  assert.equal(execution.status, 'COMPLETED');
+  assert.equal(execution.metrics.invitationExecutionState, 'SUPPRESSED');
+  assert.equal(execution.metrics.suppressionReason, 'DUPLICATE_INVITATION_PREVENTED');
+  assert.equal(calls.length, 0);
+});
