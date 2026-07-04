@@ -112,7 +112,53 @@ test('PATCH route is feature-gated identically to GET', () => {
 test('PATCH route returns the updated record in the response body', () => {
   const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
   assert.match(text, /findByCaptureId/u);
-  assert.match(text, /data: \{ record \}/u);
+  assert.match(text, /data: \{ record, \.\.\.editResult \}/u);
+});
+
+// ---------------------------------------------------------------------------
+// ST1-007: requalification wiring
+// ---------------------------------------------------------------------------
+
+test('editExtract accepts an EditExtractContext with actorId and correlation, and returns EditExtractResult', () => {
+  const text = svc('seller-acquisition-edit.ts');
+  assert.match(text, /interface EditExtractContext/u);
+  assert.match(text, /interface EditExtractResult/u);
+  assert.match(text, /async editExtract\(context: EditExtractContext, captureId: string, raw: unknown\): Promise<EditExtractResult>/u);
+});
+
+test('editExtract only triggers requalification when sellerPhone is edited', () => {
+  const text = svc('seller-acquisition-edit.ts');
+  assert.match(text, /input\.sellerPhone !== undefined && this\.deps\.requalification !== undefined/u);
+  assert.match(text, /requalifyMarketplaceCapture/u);
+});
+
+test('SellerAcquisitionRequalificationService centralizes the canonical qualification + CRM conversion pipeline', () => {
+  const text = svc('marketplace-requalification.ts');
+  assert.match(text, /class MarketplaceRequalificationService/u);
+  assert.match(text, /requalifyMarketplaceCapture/u);
+  assert.match(text, /canonicalCapture\.capture/u);
+});
+
+test('MarketplaceRequalificationService refreshes existing campaign membership instead of recreating it', () => {
+  const text = svc('marketplace-requalification.ts');
+  assert.match(text, /listMembersByCapture/u);
+  assert.match(text, /updateMember/u);
+  assert.doesNotMatch(text, /addSeller/u);
+});
+
+test('MarketplaceRequalificationService records an audit event with previous/new qualification, actor, and reason', () => {
+  const text = svc('marketplace-requalification.ts');
+  assert.match(text, /MARKETPLACE_CAPTURE_REQUALIFIED/u);
+  assert.match(text, /previousQualificationStatus/u);
+  assert.match(text, /newQualificationStatus/u);
+  assert.match(text, /actorId: context\.actorId/u);
+});
+
+test('PATCH route wires MarketplaceRequalificationService into SellerAcquisitionEditService', () => {
+  const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
+  assert.match(text, /MarketplaceRequalificationService/u);
+  assert.match(text, /requalification/u);
+  assert.match(text, /actorId: tenantContext\.tenantUserId/u);
 });
 
 test('PATCH route handles ZodError with a 400 response', () => {

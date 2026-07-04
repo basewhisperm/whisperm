@@ -296,6 +296,7 @@ export const sellerAcquisitionCampaignMemberRecordSchema = baseRecordSchema.exte
 
 export type SellerAcquisitionCampaignMemberRecord = z.output<typeof sellerAcquisitionCampaignMemberRecordSchema>;
 export type CreateSellerAcquisitionCampaignMemberInput = TenantScoped & Pick<SellerAcquisitionCampaignMemberRecord, "campaignId" | "marketplaceCaptureId"> & Partial<Pick<SellerAcquisitionCampaignMemberRecord, "contactId" | "dealId" | "status" | "assignedAt" | "metadata">>;
+export type UpdateSellerAcquisitionCampaignMemberInput = Partial<Pick<SellerAcquisitionCampaignMemberRecord, "contactId" | "dealId" | "status" | "metadata">>;
 
 export const campaignRuntimeExecutionStatusSchema = z.enum(["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]);
 export type CampaignRuntimeExecutionStatus = z.output<typeof campaignRuntimeExecutionStatusSchema>;
@@ -326,6 +327,8 @@ export interface SellerAcquisitionCampaignRepository {
   removeSeller(context: TenantScoped, campaignId: string, memberId: string): Promise<SellerAcquisitionCampaignMemberRecord>;
   listMembers(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<SellerAcquisitionCampaignMemberRecord>>;
   findMemberByCapture(context: TenantScoped, campaignId: string, marketplaceCaptureId: string): Promise<SellerAcquisitionCampaignMemberRecord | null>;
+  listMembersByCapture(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly SellerAcquisitionCampaignMemberRecord[]>;
+  updateMember(context: TenantScoped, memberId: string, input: UpdateSellerAcquisitionCampaignMemberInput): Promise<SellerAcquisitionCampaignMemberRecord>;
 }
 
 export interface CampaignRuntimeExecutionRepository {
@@ -1441,6 +1444,21 @@ export class PrismaSellerAcquisitionCampaignRepository implements SellerAcquisit
     ensureContext(context);
     const row = await this.prisma.sellerAcquisitionCampaignMember.findFirst({ where: withTenant(context, { campaignId, marketplaceCaptureId }) });
     return row === null ? null : parseRecord(sellerAcquisitionCampaignMemberRecordSchema, row);
+  }
+
+  async listMembersByCapture(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly SellerAcquisitionCampaignMemberRecord[]> {
+    ensureContext(context);
+    const rows = await this.prisma.sellerAcquisitionCampaignMember.findMany({ where: withTenant(context, { marketplaceCaptureId, removedAt: null }) });
+    return rows.map((row) => parseRecord(sellerAcquisitionCampaignMemberRecordSchema, row));
+  }
+
+  async updateMember(context: TenantScoped, memberId: string, input: UpdateSellerAcquisitionCampaignMemberInput): Promise<SellerAcquisitionCampaignMemberRecord> {
+    ensureContext(context);
+    const result = await this.prisma.sellerAcquisitionCampaignMember.updateMany({ where: withTenant(context, { id: memberId }), data: dataWithDefined(input) });
+    if (result.count !== 1) notFound("Seller acquisition campaign member not found", { memberId });
+    const row = await this.prisma.sellerAcquisitionCampaignMember.findFirst({ where: withTenant(context, { id: memberId }) });
+    if (row === null) notFound("Seller acquisition campaign member not found", { memberId });
+    return parseRecord(sellerAcquisitionCampaignMemberRecordSchema, row);
   }
 }
 

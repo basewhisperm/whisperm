@@ -10,7 +10,7 @@ import {
   createPrismaRepositories,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { createWhispeRMServices, SellerAcquisitionEditService } from "@whisperm/services";
+import { createWhispeRMServices, MarketplaceRequalificationService, SellerAcquisitionEditService } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
@@ -53,29 +53,50 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
   const prismaPersistenceClient = prisma as unknown as PrismaPersistenceClient;
   const repositories = createPrismaRepositories(prismaPersistenceClient);
+  const services = createWhispeRMServices(repositories);
+
+  const requalification = new MarketplaceRequalificationService({
+    marketplaceCaptures: repositories.marketplaceCaptures,
+    canonicalCapture: services.marketplaceAcquisition,
+    auditLogs: repositories.auditLogs,
+    sellerAcquisitionCampaigns: repositories.sellerAcquisitionCampaigns,
+  });
 
   const editService = new SellerAcquisitionEditService({
     marketplaceAcquisition: new PrismaMarketplaceAcquisitionRepository(prismaPersistenceClient),
     draftInventories: repositories.draftInventories,
+    requalification,
   });
 
+  let editResult: Awaited<ReturnType<SellerAcquisitionEditService["editExtract"]>>;
   try {
-    await editService.editExtract({ tenantId: tenant.id }, context.params.captureId, body);
+    editResult = await editService.editExtract(
+      {
+        tenantId: tenant.id,
+        actorId: tenantContext.tenantUserId,
+        correlation: {
+          correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(),
+          requestId: request.headers.get("x-request-id") ?? undefined,
+        },
+      },
+      context.params.captureId,
+      body,
+    );
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse(error.issues[0]?.message ?? "Invalid input", 400);
     }
     const asErr = error as { readonly status?: number; readonly message?: string };
     if (asErr.status === 404) return errorResponse("Marketplace capture not found.", 404);
+    if (typeof asErr.status === "number") return errorResponse(asErr.message ?? "Request failed", asErr.status);
     throw error;
   }
 
   // Re-fetch the full record so the client gets updated data in one round-trip.
-  const services = createWhispeRMServices(repositories);
   const record = await services.sellerAcquisitionRecords.findByCaptureId(
     { tenantId: tenant.id },
     context.params.captureId,
   );
 
-  return NextResponse.json({ ok: true, data: { record } });
+  return NextResponse.json({ ok: true, data: { record, ...editResult } });
 }

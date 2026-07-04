@@ -1,7 +1,11 @@
 import { z } from "zod";
 
-import type { TenantScoped } from "@whisperm/types";
+import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
 import type { DraftInventoryRepository, MarketplaceAcquisitionRepository } from "@whisperm/repositories";
+import type {
+  MarketplaceRequalificationCrmConversionStatus,
+  MarketplaceRequalificationQualificationStatus,
+} from "./marketplace-requalification.js";
 
 export const editExtractInputSchema = z.object({
   title:       z.string().min(1).max(300).optional(),
@@ -19,15 +23,45 @@ export const editExtractInputSchema = z.object({
 
 export type EditExtractInput = z.infer<typeof editExtractInputSchema>;
 
+export interface EditExtractContext extends TenantScoped {
+  readonly actorId?: string | undefined;
+  readonly correlation?: PersistenceCorrelationMetadata | undefined;
+}
+
+export interface EditExtractResult {
+  readonly qualificationStatus: MarketplaceRequalificationQualificationStatus;
+  readonly crmConversionStatus: MarketplaceRequalificationCrmConversionStatus;
+  readonly requalified: boolean;
+  readonly invitationEligible: boolean;
+}
+
+/** Narrow view of MarketplaceRequalificationService so this module does not depend on its full dependency graph. */
+export interface RequalificationPort {
+  requalifyMarketplaceCapture(
+    context: { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: PersistenceCorrelationMetadata },
+    captureId: string,
+  ): Promise<{
+    readonly qualificationStatus: MarketplaceRequalificationQualificationStatus;
+    readonly crmConversionStatus: MarketplaceRequalificationCrmConversionStatus;
+    readonly requalified: boolean;
+    readonly invitationEligible: boolean;
+  }>;
+}
+
 export interface SellerAcquisitionEditDependencies {
   readonly marketplaceAcquisition: MarketplaceAcquisitionRepository;
   readonly draftInventories: DraftInventoryRepository;
+  /** ST1-007: whenever a qualifying field (phone) changes, re-runs the canonical qualification + CRM conversion pipeline. */
+  readonly requalification?: RequalificationPort | undefined;
 }
+
+const randomCorrelationId = (): string =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `edit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 export class SellerAcquisitionEditService {
   constructor(private readonly deps: SellerAcquisitionEditDependencies) {}
 
-  async editExtract(context: TenantScoped, captureId: string, raw: unknown): Promise<void> {
+  async editExtract(context: EditExtractContext, captureId: string, raw: unknown): Promise<EditExtractResult> {
     const input = editExtractInputSchema.parse(raw);
 
     const capture = await this.deps.marketplaceAcquisition.findMarketplaceCaptureById(context, captureId);
@@ -116,5 +150,27 @@ export class SellerAcquisitionEditService {
     if (Object.keys(captureUpdates).length > 0) {
       await this.deps.marketplaceAcquisition.updateMarketplaceCapture(context, captureId, captureUpdates);
     }
+
+    // --- Requalification: only qualifying-field edits (phone/WhatsApp) re-run the canonical
+    // qualification + CRM conversion pipeline. Unrelated edits (title, price, description, ...)
+    // must not trigger it.
+    if (input.sellerPhone !== undefined && this.deps.requalification !== undefined) {
+      return this.deps.requalification.requalifyMarketplaceCapture(
+        {
+          tenantId: context.tenantId,
+          actorId: context.actorId,
+          correlation: context.correlation ?? { correlationId: randomCorrelationId() },
+        },
+        captureId,
+      );
+    }
+
+    const alreadyQualified = capture.contactId != null && capture.dealId != null;
+    return {
+      qualificationStatus: alreadyQualified ? "QUALIFIED" : "UNQUALIFIED",
+      crmConversionStatus: alreadyQualified ? "EXISTING" : "NOT_ELIGIBLE",
+      requalified: false,
+      invitationEligible: alreadyQualified,
+    };
   }
 }
