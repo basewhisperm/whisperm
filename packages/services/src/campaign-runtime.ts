@@ -15,7 +15,7 @@ import type {
   BusinessGrowthOpportunityRepository,
 } from "@whisperm/repositories";
 import { PersistenceError } from "@whisperm/repositories";
-import type { TenantScoped } from "@whisperm/types";
+import type { CorrelationMetadata, TenantScoped } from "@whisperm/types";
 import { recordUsageEventBestEffort, type AcquisitionUsageMeteringService } from "./acquisition-usage-metering.js";
 import { DiscoveryOptimizationWorker } from "./marketplace-acquisition/discovery-optimization-worker.js";
 import {
@@ -94,6 +94,18 @@ export interface CampaignRuntimeInvitationQueue {
     readonly delayMs?: number | undefined;
     readonly replaySafe: true;
   }): Promise<void> | void;
+}
+
+/**
+ * ST-003: golden-path invitation dispatch. When configured, `executeInvitation` calls this
+ * synchronously instead of only enqueueing a job, so a customer-visible invite request completes
+ * (or fails) within the same request rather than depending on a queue worker that may never run.
+ */
+export interface CampaignRuntimeInvitationExecutor {
+  sendInvitation(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly tenantId: string; readonly captureId: string; readonly channel: "WHATSAPP" | "SMS" | "EMAIL" },
+  ): Promise<{ readonly invitationId: string; readonly status: string; readonly provider?: string | undefined }>;
 }
 
 
@@ -329,6 +341,7 @@ export interface CampaignRuntimeServiceDependencies {
   readonly executions: CampaignRuntimeExecutionRepository;
   readonly worker?: CampaignRuntimeWorker | undefined;
   readonly invitationQueue?: CampaignRuntimeInvitationQueue | undefined;
+  readonly invitationExecutor?: CampaignRuntimeInvitationExecutor | undefined;
   readonly discoveryQueue?: CampaignRuntimeDiscoveryQueue | undefined;
   readonly qualificationQueue?: CampaignRuntimeQualificationQueue | undefined;
   readonly optimizationQueue?: CampaignRuntimeOptimizationQueue | undefined;
@@ -428,6 +441,20 @@ export class CampaignRuntimeService {
     });
 
     if (strategy.shouldSkip) return execution;
+
+    if (this.deps.invitationExecutor !== undefined) {
+      await this.deps.executions.update(context, execution.id, {
+        status: "RUNNING",
+        metrics: { ...(execution.metrics ?? {}), invitationExecutionState: "DISPATCHED", dispatchedAt: new Date().toISOString() },
+      });
+      return this.dispatchInvitationInline(context, {
+        executionId: execution.id,
+        opportunityId: input.opportunityId,
+        channel: strategy.selectedChannel,
+        invitationId: input.invitationId,
+        correlationId: input.correlationId,
+      });
+    }
 
     await this.deps.invitationQueue?.enqueueInvitation({
       tenantId: context.tenantId,
@@ -796,12 +823,55 @@ export class CampaignRuntimeService {
     if (existing === null) throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "Campaign runtime execution not found", status: 404 });
     const state = typeof existing.metrics?.invitationExecutionState === "string" ? existing.metrics.invitationExecutionState : existing.status;
     if (!retryableStates.has(state)) throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Invitation execution is not retryable", status: 409 });
-    if (this.deps.invitationQueue === undefined) throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Invitation queue is not configured", status: 503 });
     const opportunityId = typeof existing.metrics?.opportunityId === "string" ? existing.metrics.opportunityId : undefined;
     if (opportunityId === undefined) throw new PersistenceError({ code: "PERSISTENCE_VALIDATION_FAILED", message: "Invitation execution is missing opportunity context", status: 422 });
     const channel = ["WHATSAPP", "SMS", "EMAIL"].includes(String(existing.metrics?.channel)) ? existing.metrics?.channel as "WHATSAPP" | "SMS" | "EMAIL" : undefined;
-    await this.deps.invitationQueue.enqueueInvitation({ tenantId: context.tenantId, campaignId: existing.campaignId, opportunityId, executionId, invitationId: typeof existing.metrics?.invitationId === "string" ? existing.metrics.invitationId : undefined, preferredChannel: channel, correlationId: executionId, replaySafe: true });
+    const invitationId = typeof existing.metrics?.invitationId === "string" ? existing.metrics.invitationId : undefined;
+
+    if (this.deps.invitationExecutor !== undefined) {
+      await this.deps.executions.update(context, executionId, { status: "RUNNING", failedAt: null, errorCode: null, errorMessage: null, metrics: { ...(existing.metrics ?? {}), invitationExecutionState: "DISPATCHED", retryable: true, nextRetryAt: null, manualRetryAt: new Date().toISOString() } });
+      return this.dispatchInvitationInline(context, { executionId, opportunityId, channel: channel ?? "WHATSAPP", invitationId, correlationId: executionId });
+    }
+
+    if (this.deps.invitationQueue === undefined) throw new PersistenceError({ code: "PERSISTENCE_TRANSIENT", message: "Invitation queue is not configured", status: 503 });
+    await this.deps.invitationQueue.enqueueInvitation({ tenantId: context.tenantId, campaignId: existing.campaignId, opportunityId, executionId, invitationId, preferredChannel: channel, correlationId: executionId, replaySafe: true });
     return this.deps.executions.update(context, executionId, { status: "RUNNING", failedAt: null, errorCode: null, errorMessage: null, metrics: { ...(existing.metrics ?? {}), invitationExecutionState: "DISPATCHED", retryable: true, nextRetryAt: null, manualRetryAt: new Date().toISOString() } });
+  }
+
+  /**
+   * ST-003: shared golden-path dispatch for `executeInvitation`/`retryInvitationExecution`
+   * when an `invitationExecutor` is configured -- sends synchronously and records the real
+   * outcome via `recordInvitationResult` instead of only enqueueing a job for a worker that
+   * may never run.
+   */
+  private async dispatchInvitationInline(context: TenantScoped, input: { readonly executionId: string; readonly opportunityId: string; readonly channel: "WHATSAPP" | "SMS" | "EMAIL"; readonly invitationId?: string | undefined; readonly correlationId?: string | undefined }): Promise<CampaignRuntimeExecutionRecord> {
+    const correlation: CorrelationMetadata = { correlationId: input.correlationId ?? input.executionId };
+    try {
+      const result = await this.deps.invitationExecutor!.sendInvitation(
+        { tenantId: context.tenantId, correlation },
+        { tenantId: context.tenantId, captureId: input.opportunityId, channel: input.channel },
+      );
+      return this.recordInvitationResult(context, {
+        executionId: input.executionId,
+        opportunityId: input.opportunityId,
+        invitationId: result.invitationId,
+        status: result.status,
+        channel: input.channel,
+        provider: result.provider ?? input.channel,
+      });
+    } catch (error) {
+      return this.recordInvitationResult(context, {
+        executionId: input.executionId,
+        opportunityId: input.opportunityId,
+        invitationId: input.invitationId,
+        status: "FAILED",
+        channel: input.channel,
+        provider: input.channel,
+        errorCode: typeof error === "object" && error !== null && "code" in error ? String((error as { readonly code: unknown }).code) : "INVITATION_DELIVERY_FAILED",
+        errorMessage: error instanceof Error ? error.message : "Seller invitation execution failed",
+        retryable: typeof error === "object" && error !== null && "retryable" in error ? Boolean((error as { readonly retryable: unknown }).retryable) : false,
+      });
+    }
   }
 
   getCampaignExecution(context: TenantScoped, executionId: string): Promise<CampaignRuntimeExecutionRecord | null> {

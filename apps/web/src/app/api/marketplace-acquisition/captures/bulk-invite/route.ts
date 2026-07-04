@@ -8,9 +8,11 @@ import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import {
   PrismaCampaignRuntimeExecutionRepository,
   PrismaSellerAcquisitionCampaignRepository,
+  PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { CampaignRuntimeService, type CampaignRuntimeInvitationQueue } from "@whisperm/services";
+import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
 
 const bulkInviteRequestSchema = z.object({
   captureIds: z.array(z.string().min(1)).min(1).max(100),
@@ -51,7 +53,9 @@ const invitationQueue = (): CampaignRuntimeInvitationQueue => ({
 const runtimeService = () => new CampaignRuntimeService({
   campaigns: new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient),
   executions: new PrismaCampaignRuntimeExecutionRepository(prisma as unknown as PrismaPersistenceClient),
+  sellerInvitations: new PrismaSellerInvitationRepository(prisma as unknown as PrismaPersistenceClient),
   invitationQueue: invitationQueue(),
+  invitationExecutor: createSellerInvitationExecutor(prisma as unknown as PrismaPersistenceClient),
 });
 
 export async function POST(request: NextRequest) {
@@ -89,7 +93,7 @@ export async function POST(request: NextRequest) {
   const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
   const runtime = runtimeService();
   const invalid: string[] = [];
-  const accepted: string[] = [];
+  const results: Array<{ readonly captureId: string; readonly executionId: string; readonly status: "COMPLETED" | "PENDING" | "FAILED" }> = [];
 
   for (const capture of captures) {
     const campaignId = capture.campaignMemberships[0]?.campaignId;
@@ -118,13 +122,18 @@ export async function POST(request: NextRequest) {
         correlationId,
       },
     );
-    accepted.push(execution.id);
+    const status = execution.status === "COMPLETED" ? "COMPLETED" : execution.status === "FAILED" ? "FAILED" : "PENDING";
+    results.push({ captureId: capture.id, executionId: execution.id, status });
   }
 
-  if (accepted.length === 0) return errorResponse("No captures assigned to a campaign.", 422);
+  if (results.length === 0) return errorResponse("No captures assigned to a campaign.", 422);
+
+  const completed = results.filter((result) => result.status === "COMPLETED").length;
+  const pending = results.filter((result) => result.status === "PENDING").length;
+  const failed = results.filter((result) => result.status === "FAILED").length;
 
   return NextResponse.json(
-    { ok: true, data: { accepted: accepted.length, executionIds: accepted, invalid, channel: parsed.data.channel } },
-    { status: 202 },
+    { ok: true, data: { results, completed, pending, failed, invalid, channel: parsed.data.channel } },
+    { status: 200 },
   );
 }

@@ -6,7 +6,7 @@ import { hashClaimToken } from '../dist/index.js';
 const now = new Date('2026-01-01T00:00:00.000Z');
 const baseContext = { correlation: { correlationId: 'corr-1' } };
 
-function makeService(overrides = {}) {
+function makeService(overrides = {}, extraDeps = {}) {
   const state = {
     token: { id: 'token-1', tenantId: 'tenant-1', marketplaceCaptureId: 'capture-1', tokenHash: hashClaimToken('raw-token'), status: 'SENT', expiresAt: '2026-01-08T00:00:00.000Z', metadata: {} },
     capture: { id: 'capture-1', tenantId: 'tenant-1', contactId: 'contact-1', dealId: 'deal-1', listingUrl: 'https://market.test/listing/1', title: 'Bike', description: 'Nice bike', price: '100', currency: 'USD', sellerName: 'Sam Seller', status: 'INVITED', capturedAt: now.toISOString(), metadata: { sellerPhone: '+15555550123', sellerEmail: 'sam@example.com', sellerLocation: 'Austin' }, createdAt: now.toISOString(), updatedAt: now.toISOString() },
@@ -26,6 +26,7 @@ function makeService(overrides = {}) {
     deals: { async updateStage(tenantId, dealId, stageId) { state.stages.push(stageId); return { id: dealId, tenantId, pipelineStageId: stageId, updatedAt: now.toISOString() }; } },
     auditLogs: { async append(context, input) { assert.equal(context.tenantId, input.tenantId); state.audits.push(input); return { id: `audit-${state.audits.length}`, ...input, createdAt: now.toISOString() }; } },
     activities: { async create(context, input) { assert.equal(context.tenantId, input.tenantId); state.activities.push(input); return { id: `activity-${state.activities.length}`, ...input, createdAt: now.toISOString(), updatedAt: now.toISOString() }; } },
+    ...extraDeps,
   });
   return { service, state };
 }
@@ -71,4 +72,25 @@ test('accept requires terms, claims capture and draft, is idempotent, and blocks
   assert.equal((await service.accept(baseContext, 'raw-token', { acceptedTerms: true })).status, 'CLAIMED');
   await assert.rejects(() => makeService({ capture: { ...state.capture, status: 'CONVERTED' } }).service.accept(baseContext, 'raw-token', { acceptedTerms: true }), SellerClaimPortalError);
   await assert.rejects(() => makeService({ token: { ...state.token, status: 'EXPIRED' } }).service.accept(baseContext, 'raw-token', { acceptedTerms: true }), SellerClaimPortalError);
+});
+
+test('accept executes CRM conversion inline and surfaces its real outcome, not a queued no-op', async () => {
+  const calls = [];
+  const crmConversionRuntime = { async enqueueForCompletedClaim(context, input) { calls.push({ context, input }); return { status: 'CONVERTED', contactId: 'contact-1', dealId: 'deal-1' }; } };
+  const { service, state } = makeService({ capture: { ...makeService().state.capture, status: 'CLAIM_STARTED' } }, { crmConversionRuntime });
+  const result = await service.accept(baseContext, 'raw-token', { acceptedTerms: true });
+  assert.equal(result.status, 'CLAIMED');
+  assert.equal(result.crmConversionStatus, 'CONVERTED');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].input.claimTokenId, state.token.id);
+  assert.equal(calls[0].input.marketplaceCaptureId, state.capture.id);
+});
+
+test('accept still returns CLAIMED (never a false 500) when inline CRM conversion throws', async () => {
+  const crmConversionRuntime = { async enqueueForCompletedClaim() { throw new Error('conversion backend unavailable'); } };
+  const { service, state } = makeService({ capture: { ...makeService().state.capture, status: 'CLAIM_STARTED' } }, { crmConversionRuntime });
+  const result = await service.accept(baseContext, 'raw-token', { acceptedTerms: true });
+  assert.equal(result.status, 'CLAIMED');
+  assert.equal(result.crmConversionStatus, 'CONVERSION_FAILED');
+  assert.equal(state.capture.status, 'CLAIMED');
 });
