@@ -167,7 +167,7 @@ import {
   MARKETPLACE_ACQUISITION_PIPELINE_KEY,
 } from "@whisperm/types";
 import { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
-import type { RevenueAttributionTriggerPort } from "./revenue-attribution.js";
+import type { RevenueAttributionResult, RevenueAttributionTriggerPort } from "./revenue-attribution.js";
 export { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
 export { MarketplaceDiscoveryService, DiscoveryPromotionError } from './marketplace-acquisition/discovery-service.js';
 export type { DiscoveryServiceContext, DiscoveryServiceDependencies, DiscoveryRunResult, ManualSeedEntry, StartDiscoveryRunInput, DiscoveryCampaignRepository, PromoteDiscoveredSellerResult, DiscoveryPromotionErrorCode, CanonicalMarketplaceCapturePort, CanonicalMarketplaceCaptureContext, CanonicalMarketplaceCaptureInput, CanonicalMarketplaceCaptureResult, CanonicalMarketplaceCaptureQualificationStatus, CanonicalMarketplaceCaptureCrmConversionStatus } from './marketplace-acquisition/discovery-service.js';
@@ -2170,9 +2170,11 @@ export class DealService {
   /**
    * Deal ownership records won/closed outcomes and revenue amounts. This is the
    * only write path that flips a deal into revenue-attribution eligibility
-   * (closedAt set and/or value present), so it triggers evaluation afterward.
+   * (closedAt set and/or value present), so it is the canonical trigger for
+   * revenue attribution: it triggers evaluation afterward and returns the
+   * resulting attribution outcome so callers never need to compute it themselves.
    */
-  async recordOutcome(contextInput: ServiceContext, dealId: string, input: { readonly value?: number | string | null | undefined; readonly currency?: string | undefined; readonly closedAt?: string | null | undefined; readonly expectedUpdatedAt: string }): Promise<DealRecord> {
+  async recordOutcome(contextInput: ServiceContext, dealId: string, input: { readonly value?: number | string | null | undefined; readonly currency?: string | undefined; readonly closedAt?: string | null | undefined; readonly expectedUpdatedAt: string }): Promise<{ readonly deal: DealRecord; readonly attribution?: RevenueAttributionResult | undefined }> {
     const context = ensureContext(contextInput);
     const data = exactInput(parseContract(recordDealOutcomeInputSchema, input, context.correlation));
     const deal = await runWrite(this.deps, context, async (repositories) => {
@@ -2181,10 +2183,10 @@ export class DealService {
       await appendDomainEvent(repositories, context, { aggregateType: "DEAL", aggregateId: updated.id, eventType: "deal.outcome_recorded", idempotencyKey: `deal:${updated.id}:outcome_recorded:${updated.updatedAt}`, payload: { tenantId: updated.tenantId, dealId: updated.id, value: updated.value ?? null, currency: updated.currency, closedAt: updated.closedAt ?? null } });
       return updated;
     });
-    if (this.deps.revenueAttribution !== undefined) {
-      await this.deps.revenueAttribution.evaluateForDeal({ tenantId: context.tenantId, actorId: context.actorId, correlation: context.correlation }, { tenantId: context.tenantId, dealId: deal.id });
-    }
-    return deal;
+    const attribution = this.deps.revenueAttribution === undefined
+      ? undefined
+      : await this.deps.revenueAttribution.evaluateForDeal({ tenantId: context.tenantId, actorId: context.actorId, correlation: context.correlation }, { tenantId: context.tenantId, dealId: deal.id });
+    return { deal, attribution };
   }
 }
 

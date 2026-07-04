@@ -1,6 +1,7 @@
 import type { ActivityRepository, AuditLogRepository, DealsRepository, DraftInventoryRepository, MarketplaceCaptureRepository, PipelineRepository, RenderConversionRepository } from "@whisperm/repositories";
 import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
+import type { RevenueAttributionTriggerPort } from "./revenue-attribution.js";
 
 export interface MarketplaceCaptureCompletionContext {
   readonly tenantId: string;
@@ -16,6 +17,8 @@ export interface MarketplaceCaptureCompletionDependencies {
   readonly deals?: DealsRepository | undefined;
   readonly auditLogs: AuditLogRepository;
   readonly activities: ActivityRepository;
+  /** ST1-008: canonical revenue attribution trigger; never blocks completion on failure. */
+  readonly revenueAttribution?: RevenueAttributionTriggerPort | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -26,6 +29,10 @@ export interface MarketplaceCaptureCompletionResult {
   readonly inventoryConversionId: string;
   readonly status: "CONVERTED";
   readonly idempotent: boolean;
+  readonly dealId?: string | undefined;
+  readonly revenueAttributed: boolean;
+  readonly attributionId?: string | undefined;
+  readonly attributedAmount?: string | undefined;
 }
 
 type CompletionErrorCode = "SERVICE_TENANT_MISMATCH" | "SERVICE_NOT_FOUND" | "SERVICE_INVALID_STATE_TRANSITION";
@@ -68,7 +75,8 @@ export class MarketplaceCaptureCompletionService {
     if (inventory?.externalId == null) throw this.error(context.correlation, "SERVICE_INVALID_STATE_TRANSITION", "Inventory conversion must succeed before capture completion", 422);
 
     if (capture.status === "CONVERTED" && draft.status === "CONVERTED") {
-      return { captureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, status: "CONVERTED", idempotent: true };
+      const attribution = await this.evaluateRevenueAttribution(context, capture.dealId ?? null);
+      return { captureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, status: "CONVERTED", idempotent: true, ...attribution };
     }
 
     if (capture.status !== "CLAIMED" && capture.status !== "CONVERTED") {
@@ -87,8 +95,22 @@ export class MarketplaceCaptureCompletionService {
       if (convertedStage !== undefined) await this.deps.deals.updateStage(context.tenantId, capture.dealId, convertedStage.id);
     }
 
+    // ST1-008: capture completion is the canonical point at which a marketplace acquisition deal
+    // reaches its revenue-generating outcome (Converted); evaluate attribution here rather than
+    // requiring a separate manual step, reusing RevenueAttributionRuntimeService for the actual work.
+    const attribution = await this.evaluateRevenueAttribution(context, capture.dealId ?? null);
+
     const completedAt = this.now().toISOString();
-    const completionMetadata = { marketplaceCaptureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, completedAt };
+    const completionMetadata = {
+      marketplaceCaptureId: capture.id,
+      draftInventoryId: draft.id,
+      sellerConversionId: seller.id,
+      inventoryConversionId: inventory.id,
+      completedAt,
+      dealId: attribution.dealId ?? null,
+      revenueAttributed: attribution.revenueAttributed,
+      attributedAmount: attribution.attributedAmount ?? null,
+    };
 
     await this.deps.auditLogs.append(scope, {
       tenantId: scope.tenantId,
@@ -101,7 +123,34 @@ export class MarketplaceCaptureCompletionService {
     });
     await this.appendActivity(context, capture, "Marketplace capture completed", completedAt, { eventType: "MARKETPLACE_CAPTURE_COMPLETED", ...completionMetadata });
 
-    return { captureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, status: "CONVERTED", idempotent: false };
+    return { captureId: capture.id, draftInventoryId: draft.id, sellerConversionId: seller.id, inventoryConversionId: inventory.id, status: "CONVERTED", idempotent: false, ...attribution };
+  }
+
+  /**
+   * Sets closedAt (the deal's revenue-eligibility signal) once, then delegates to the canonical
+   * RevenueAttributionRuntimeService port. Never throws: a revenue-attribution outage must not
+   * block sellers from completing an otherwise-valid capture.
+   */
+  private async evaluateRevenueAttribution(context: MarketplaceCaptureCompletionContext, dealId: string | null): Promise<{ readonly dealId?: string | undefined; readonly revenueAttributed: boolean; readonly attributionId?: string | undefined; readonly attributedAmount?: string | undefined }> {
+    if (dealId == null || this.deps.revenueAttribution === undefined || this.deps.deals === undefined) return { revenueAttributed: false };
+    try {
+      const deal = await this.deps.deals.findById(context.tenantId, dealId);
+      if (deal !== null && deal.closedAt == null) {
+        await this.deps.deals.update(context.tenantId, dealId, { closedAt: this.now().toISOString(), expectedUpdatedAt: deal.updatedAt });
+      }
+      const result = await this.deps.revenueAttribution.evaluateForDeal(
+        { tenantId: context.tenantId, actorId: context.actorId, correlation: context.correlation },
+        { tenantId: context.tenantId, dealId },
+      );
+      return {
+        dealId,
+        revenueAttributed: result.status === "ATTRIBUTED",
+        attributionId: result.snapshot?.idempotencyKey,
+        attributedAmount: result.snapshot?.revenueAmount,
+      };
+    } catch {
+      return { dealId, revenueAttributed: false };
+    }
   }
 
   private async appendActivity(context: MarketplaceCaptureCompletionContext, capture: { readonly contactId?: string | null | undefined; readonly dealId?: string | null | undefined }, note: string, occurredAt: string, metadata: Readonly<Record<string, unknown>>): Promise<void> {

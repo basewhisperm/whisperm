@@ -56,6 +56,16 @@ function formatValue(value?: unknown, currency?: string | null) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: currency ?? "GHS", maximumFractionDigits: 0 }).format(numeric);
 }
 
+// ST1-008: reads the canonical attribution snapshot RevenueAttributionRuntimeService already
+// persisted on the deal -- never recomputes revenue so this always matches Command Center and campaign views.
+function revenueAttributionLabel(deal: { readonly currency?: string | null } & Record<string, unknown>): string {
+  const metadata = asRecord(deal["metadata"]);
+  const snapshot = asRecord(metadata["revenueAttribution"]);
+  if (snapshot["attributionStatus"] !== "ATTRIBUTED") return "Not yet attributed";
+  const currency = stringValue(snapshot["revenueCurrency"]) ?? deal.currency;
+  return formatValue(snapshot["revenueAmount"], currency);
+}
+
 function formatDate(value: Date | string | null | undefined) {
   if (value === null || value === undefined) return "Unknown time";
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -232,6 +242,7 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
         <DetailRow label="Email">{contactEmail(detail.contact, captureSafeFields)}</DetailRow>
         <DetailRow label="Owner">{ownerName(detail.owner)}</DetailRow>
         <DetailRow label="price / deal value">{formatValue(deal.value, deal.currency)}</DetailRow>
+        <DetailRow label="Revenue attributed">{revenueAttributionLabel(deal)}</DetailRow>
       </section>
 
       {capture !== null && (

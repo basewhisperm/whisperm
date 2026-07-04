@@ -487,7 +487,7 @@ test("recording a deal outcome persists revenue and triggers configured revenue 
     },
   });
 
-  const deal = await services.deals.recordOutcome(context, "deal-1", { value: 500, currency: "USD", closedAt: now, expectedUpdatedAt: now });
+  const { deal, attribution } = await services.deals.recordOutcome(context, "deal-1", { value: 500, currency: "USD", closedAt: now, expectedUpdatedAt: now });
 
   assert.equal(deal.value, 500);
   assert.equal(deal.closedAt, now);
@@ -496,6 +496,18 @@ test("recording a deal outcome persists revenue and triggers configured revenue 
   assert.equal(evaluations.length, 1);
   assert.equal(evaluations[0].input.dealId, "deal-1");
   assert.equal(evaluations[0].input.tenantId, "tenant-a");
+  assert.equal(attribution.status, "ATTRIBUTED");
+  assert.equal(attribution.dealId, "deal-1");
+});
+
+test("recording a deal outcome without a configured revenue attribution runtime returns no attribution result", async () => {
+  const repositories = createRepositories();
+  const services = createWhispeRMServices(repositories);
+
+  const { deal, attribution } = await services.deals.recordOutcome(context, "deal-1", { value: 500, currency: "USD", closedAt: now, expectedUpdatedAt: now });
+
+  assert.equal(deal.value, 500);
+  assert.equal(attribution, undefined);
 });
 
 test("recording a deal outcome without value or closedAt is rejected", async () => {
