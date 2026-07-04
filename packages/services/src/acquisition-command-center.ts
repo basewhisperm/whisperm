@@ -140,7 +140,6 @@ export interface GetCommandCenterSnapshotInput {
 const qualifiedStatuses = new Set(["QUALIFIED", "INVITED", "CLAIMED", "CONVERTED", "COMPLETED"]);
 const invitedStatuses = new Set(["INVITED", "CLAIMED", "CONVERTED", "COMPLETED"]);
 const claimedStatuses = new Set(["CLAIMED", "CONVERTED", "COMPLETED"]);
-const convertedStatuses = new Set(["CONVERTED", "COMPLETED"]);
 
 const severityRank: Readonly<Record<AcquisitionActionSeverity, number>> = { ACTIONABLE: 0, WARNING: 1, INFO: 2 };
 
@@ -175,7 +174,10 @@ export class AcquisitionCommandCenterService {
     const qualified = active.filter((member) => qualifiedStatuses.has(member.status)).length;
     const invited = active.filter((member) => invitedStatuses.has(member.status)).length;
     const claimed = active.filter((member) => claimedStatuses.has(member.status)).length;
-    const crmConverted = active.filter((member) => convertedStatuses.has(member.status)).length;
+    // ST-005: CRM conversion is counted from the canonical signal (an actual Contact+Deal pair
+    // linked on the member), never from the member's pipeline `status`, which reflects lifecycle
+    // stage/inventory conversion and can be stale or absent relative to real CRM linkage.
+    const crmConverted = active.filter((member) => member.contactId != null && member.dealId != null).length;
     const dealsCreated = dealById.size;
 
     const wonDeals = deals.filter((deal) => deal.closedAt != null);

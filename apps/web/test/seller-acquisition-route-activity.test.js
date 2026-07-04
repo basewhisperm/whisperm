@@ -20,7 +20,7 @@ const makeState = () => ({
   capture: { id: captureId, tenantId, contactId: 'contact-1', dealId: 'deal-1', externalId: 'listing-1', listingUrl: 'https://market.test/listing/1', title: 'Bike', description: 'Fast bike', price: '100', currency: 'USD', sellerName: 'Sam Seller', sellerProfileUrl: 'https://market.test/seller/sam', status: 'CLAIM_STARTED', capturedAt: now, createdAt: now, updatedAt: now, metadata: { sellerPhone: '+15555550123', sellerEmail: 'sam@example.com', sellerLocation: 'Austin', marketplaceSource: 'MARKET_TEST' } },
   draft: { id: 'draft-1', tenantId, marketplaceCaptureId: captureId, contactId: 'contact-1', dealId: 'deal-1', title: 'Bike', description: 'Fast bike', price: '100', currency: 'USD', category: 'Bicycles', images: ['https://cdn.test/bike.jpg'], listingUrl: 'https://market.test/listing/1', marketplaceSource: 'MARKET_TEST', marketplaceListingId: 'listing-1', status: 'DRAFT', createdAt: now, updatedAt: now },
   contact: { id: 'contact-1', tenantId, firstName: 'Sam', lastName: 'Seller', email: 'sam@example.com', phone: '+15555550123', stage: 'PROSPECT', createdAt: now, updatedAt: now },
-  attestations: [], conversions: [], invitations: [], claimTokens: [], activities: [], audits: [], stageUpdates: [],
+  attestations: [], conversions: [], invitations: [], claimTokens: [], activities: [], audits: [], stageUpdates: [], dealUpdates: [],
 });
 
 const activityRepo = (state) => ({
@@ -32,7 +32,12 @@ const repositories = (state) => ({
   draftInventories: { async findByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.capture.id ? state.draft : null; }, async update(scope, id, input) { assert.equal(id, state.draft.id); state.draft = { ...state.draft, ...input, updatedAt: now }; return state.draft; } },
   ownershipAttestations: { async findByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return state.attestations.find((row) => row.marketplaceCaptureId === id) ?? null; }, async create(scope, input) { const row = { id: `att-${state.attestations.length + 1}`, ...input, createdAt: now, updatedAt: now }; state.attestations.push(row); return row; } },
   pipelines: { async findByDefaultKey(id, key) { assert.equal(id, tenantId); assert.equal(key, 'marketplace_acquisition'); return { id: 'pipeline-1', tenantId, stages: [{ id: 'stage-started', name: 'Claim Started' }, { id: 'stage-claimed', name: 'Claimed' }, { id: 'stage-converted', name: 'Converted' }] }; } },
-  deals: { async updateStage(id, dealId, stageId) { state.stageUpdates.push({ tenantId: id, dealId, stageId }); return { id: dealId, tenantId: id, pipelineStageId: stageId, updatedAt: now }; } },
+  deals: {
+    dealsById: new Map([['deal-1', { id: 'deal-1', tenantId, metadata: { source: 'MARKETPLACE_ACQUISITION' }, updatedAt: now }]]),
+    async updateStage(id, dealId, stageId) { state.stageUpdates.push({ tenantId: id, dealId, stageId }); return { id: dealId, tenantId: id, pipelineStageId: stageId, updatedAt: now }; },
+    async findById(id, dealId) { assert.equal(id, tenantId); return this.dealsById.get(dealId) ?? null; },
+    async update(id, dealId, input) { assert.equal(id, tenantId); const existing = this.dealsById.get(dealId); const updated = { ...existing, ...input, updatedAt: now }; this.dealsById.set(dealId, updated); state.dealUpdates.push(updated); return updated; },
+  },
   contacts: { async findById(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.contact.id ? state.contact : null; } },
   marketplaceClaimTokens: {
     async create(scope, input) {
@@ -337,6 +342,35 @@ test('seller acquisition invite-to-completion route E2E creates claim token and 
   assert.equal(state.activities.some((activity) => activity.metadata.eventType === 'RENDER_SELLER_CONVERSION_SUCCEEDED'), true);
   assert.equal(state.activities.some((activity) => activity.metadata.eventType === 'RENDER_INVENTORY_CONVERSION_SUCCEEDED'), true);
   assert.equal(state.activities.some((activity) => activity.metadata.eventType === 'MARKETPLACE_CAPTURE_COMPLETED'), true);
+});
+
+test('claim accept API returns canonical CRM linkage and is idempotent across repeated calls', async () => {
+  const state = makeState();
+  const harness = await createHarness(state);
+  try {
+    const first = await harness.accept.POST(makeRequest({ acceptedTerms: true, claimantName: 'Sam Seller' }), { params: { token } });
+    const firstText = await first.text();
+    assert.equal(first.status, 200, firstText);
+    const firstBody = JSON.parse(firstText);
+    assert.equal(firstBody.status, 'CLAIMED');
+    assert.equal(firstBody.contactId, 'contact-1');
+    assert.equal(firstBody.dealId, 'deal-1');
+    assert.equal(firstBody.crmConversionStatus, 'UPDATED');
+    assert.equal(state.dealUpdates.length, 1);
+
+    const second = await harness.accept.POST(makeRequest({ acceptedTerms: true, claimantName: 'Sam Seller' }), { params: { token } });
+    const secondText = await second.text();
+    assert.equal(second.status, 200, secondText);
+    const secondBody = JSON.parse(secondText);
+    assert.equal(secondBody.status, 'CLAIMED');
+    assert.equal(secondBody.contactId, 'contact-1');
+    assert.equal(secondBody.dealId, 'deal-1');
+    assert.equal(secondBody.crmConversionStatus, 'ALREADY_CONVERTED');
+    assert.equal(state.dealUpdates.length, 1, 'repeated claim accept must not duplicate CRM enrichment');
+    assert.equal(state.attestations.length, 1, 'repeated claim accept must not create a duplicate attestation');
+  } finally {
+    harness.cleanup();
+  }
 });
 
 test('seller acquisition route handlers create failure activities when conversion providers fail', async () => {

@@ -78,6 +78,14 @@ const splitName = (name: string | null): { readonly firstName?: string; readonly
   return { ...(firstName === undefined ? {} : { firstName }), ...(lastName.length === 0 ? {} : { lastName }) };
 };
 
+/**
+ * @deprecated ST-005: not the canonical CRM conversion mechanism for V1 and not wired into
+ * production. Capture-time Contact/Deal creation (`MarketplaceAcquisitionCaptureService.capture`
+ * in `index.ts`) is canonical: a qualified capture already has its Contact/Deal pair by the time
+ * a claim could complete, so this post-claim runtime would only ever see already-converted
+ * captures and no-op. Kept for its unit test coverage and as a documented legacy path; do not
+ * wire it into any route, worker, or claim-acceptance flow.
+ */
 export class CrmConversionRuntimeService {
   private readonly opportunities: BusinessGrowthOpportunityService;
   constructor(private readonly deps: CrmConversionRuntimeDependencies) { this.opportunities = new BusinessGrowthOpportunityService({ opportunities: deps.businessGrowthOpportunities }); }

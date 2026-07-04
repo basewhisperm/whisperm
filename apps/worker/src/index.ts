@@ -593,6 +593,13 @@ export const createRenderConversionRetryHandler = (services: WorkerServices): Wo
 
 const crmConversionJobPayloadSchema = z.object({ tenantId: z.string().min(1), claimTokenId: z.string().min(1), marketplaceCaptureId: z.string().min(1) }).strict();
 
+/**
+ * @deprecated ST-005: dead in production. Capture-time Contact/Deal creation is the canonical
+ * CRM conversion mechanism for V1; nothing enqueues `crmConversionJobType` jobs anymore (claim
+ * acceptance now enriches the existing canonical records inline instead of calling the legacy
+ * `CrmConversionRuntimeService`). Kept only so an already-queued job from before this change
+ * still resolves cleanly instead of dead-lettering forever; do not build new producers for it.
+ */
 export const createCrmConversionHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.crmConversionRuntime === undefined) {
