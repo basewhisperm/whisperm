@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { IconCheck, IconLoader2, IconPlus, IconRefresh, IconX } from "@tabler/icons-react";
+import { buildPromoteRequestInit, derivePromoteOutcome, markSellerPromoted, promoteEndpoint } from "./promote-helpers";
 
 interface DiscoveryRun {
   readonly id: string;
@@ -289,6 +290,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
   const [actionBusy, setActionBusy] = useState(false);
   const [showSeedModal, setShowSeedModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -316,15 +318,21 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
 
   const handlePromote = async (sellerId: string) => {
     setActionBusy(true);
+    setError(null);
+    setSuccessMessage(null);
     try {
-      const res = await fetch(
-        `/api/marketplace-acquisition/campaigns/${campaignId}/discovery/sellers/${sellerId}/promote`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ captureId: sellerId }) },
-      );
-      if (!res.ok) throw new Error("Promote failed.");
+      const res = await fetch(promoteEndpoint(campaignId, sellerId), buildPromoteRequestInit());
+      const payload = await res.json().catch(() => null);
+      const outcome = derivePromoteOutcome(res.ok, payload);
+      if (!outcome.success) {
+        setError(outcome.message);
+        return;
+      }
+      setSellers((current) => markSellerPromoted(current, sellerId));
+      setSuccessMessage(outcome.message);
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed.");
+      setError(err instanceof Error ? err.message : "Failed to add seller to campaign.");
     } finally {
       setActionBusy(false);
     }
@@ -400,6 +408,10 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
 
       {error ? (
         <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>
+      ) : null}
+
+      {successMessage ? (
+        <p className="rounded-xl bg-green-50 p-3 text-sm text-green-700">{successMessage}</p>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">

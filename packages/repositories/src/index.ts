@@ -325,6 +325,7 @@ export interface SellerAcquisitionCampaignRepository {
   addSeller(context: TenantScoped, input: CreateSellerAcquisitionCampaignMemberInput): Promise<SellerAcquisitionCampaignMemberRecord>;
   removeSeller(context: TenantScoped, campaignId: string, memberId: string): Promise<SellerAcquisitionCampaignMemberRecord>;
   listMembers(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<SellerAcquisitionCampaignMemberRecord>>;
+  findMemberByCapture(context: TenantScoped, campaignId: string, marketplaceCaptureId: string): Promise<SellerAcquisitionCampaignMemberRecord | null>;
 }
 
 export interface CampaignRuntimeExecutionRepository {
@@ -1434,6 +1435,12 @@ export class PrismaSellerAcquisitionCampaignRepository implements SellerAcquisit
       orderBy: { assignedAt: "desc" },
     });
     return paginate(rows.map((row) => parseRecord(sellerAcquisitionCampaignMemberRecordSchema, row)), limit);
+  }
+
+  async findMemberByCapture(context: TenantScoped, campaignId: string, marketplaceCaptureId: string): Promise<SellerAcquisitionCampaignMemberRecord | null> {
+    ensureContext(context);
+    const row = await this.prisma.sellerAcquisitionCampaignMember.findFirst({ where: withTenant(context, { campaignId, marketplaceCaptureId }) });
+    return row === null ? null : parseRecord(sellerAcquisitionCampaignMemberRecordSchema, row);
   }
 }
 
