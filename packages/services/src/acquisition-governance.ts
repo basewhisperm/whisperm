@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import type {
   AcquisitionGovernanceRepository,
+  AcquisitionGovernanceUsageCounts,
+  AcquisitionUsageEventRepository,
   AuditLogRepository,
   CreateAuditLogInput,
   SellerAcquisitionCampaignRecord,
@@ -131,6 +133,14 @@ export interface AcquisitionGovernanceDependencies {
   readonly governance: AcquisitionGovernanceRepository;
   readonly campaigns?: Pick<SellerAcquisitionCampaignRepository, "findById"> | undefined;
   readonly auditLogs?: Pick<AuditLogRepository, "append"> | undefined;
+  /**
+   * CS-023: when provided, quota/limit usage is read from the centralized
+   * usage-metering ledger (SELLER_DISCOVERED / INVITATION_SENT event totals)
+   * instead of being derived ad hoc from discovery-run/invitation record
+   * counts. Falls back to `governance.countUsageSince` when absent so
+   * existing deployments without metering wired up keep working.
+   */
+  readonly usageEvents?: Pick<AcquisitionUsageEventRepository, "summarizeByTenantAndPeriod"> | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -313,8 +323,8 @@ export class AcquisitionGovernanceService {
       this.deps.governance.getTenantStatus(scope),
       this.deps.governance.hasActiveProvider(scope, "WHATSAPP"),
       this.deps.governance.hasActiveDiscoverySource(scope),
-      this.deps.governance.countUsageSince(scope, startOfUtcMonth(now)),
-      this.deps.governance.countUsageSince(scope, startOfUtcDay(now)),
+      this.usageCountsSince(scope, startOfUtcMonth(now), now),
+      this.usageCountsSince(scope, startOfUtcDay(now), now),
     ]);
 
     const planLimits = planLimitsFor(status.planName);
@@ -349,6 +359,16 @@ export class AcquisitionGovernanceService {
       dailyInvitationsExceeded: invitationDaily.status === "EXCEEDED",
       baseWarnings,
     };
+  }
+
+  private async usageCountsSince(scope: TenantScoped, since: Date, until: Date): Promise<AcquisitionGovernanceUsageCounts> {
+    if (this.deps.usageEvents === undefined) {
+      return this.deps.governance.countUsageSince(scope, since);
+    }
+    const summary = await this.deps.usageEvents.summarizeByTenantAndPeriod(scope, since, until);
+    const discoveryRuns = summary.totals.find((total) => total.eventType === "SELLER_DISCOVERED")?.billableQuantity ?? 0;
+    const invitationsSent = summary.totals.find((total) => total.eventType === "INVITATION_SENT")?.billableQuantity ?? 0;
+    return { discoveryRuns, invitationsSent };
   }
 
   private capabilitySnapshot(capability: AcquisitionGovernanceCapability, state: TenantGovernanceState): AcquisitionGovernanceCapabilitySnapshot {

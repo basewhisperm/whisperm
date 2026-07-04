@@ -21,6 +21,7 @@ export const acquisitionGovernanceService = (): AcquisitionGovernanceService => 
     governance: repositories.acquisitionGovernance,
     campaigns: repositories.sellerAcquisitionCampaigns,
     auditLogs: repositories.auditLogs,
+    usageEvents: repositories.acquisitionUsageEvents,
   });
 };
 

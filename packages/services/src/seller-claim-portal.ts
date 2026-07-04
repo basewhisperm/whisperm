@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { ActivityRepository, AuditLogRepository, DealsRepository, DraftInventoryRecord, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, MarketplaceOwnershipAttestationRepository, PipelineRepository } from "@whisperm/repositories";
 import { MARKETPLACE_ACQUISITION_PIPELINE_KEY, OWNERSHIP_ATTESTATION_STATEMENT } from "@whisperm/types";
 import type { PersistenceCorrelationMetadata, TenantScoped } from "@whisperm/types";
+import { recordUsageEventBestEffort, type AcquisitionUsageMeteringService } from "./acquisition-usage-metering.js";
 import { hashClaimToken } from "./claim-token-hash.js";
 
 
@@ -40,7 +41,7 @@ const terminal = new Set(["CLAIMED", "CONVERTED", "EXPIRED"]);
 
 export interface ClaimTokenRecord { readonly id: string; readonly tenantId: string; readonly marketplaceCaptureId: string; readonly tokenHash: string; readonly status: TokenStatus; readonly expiresAt: string; readonly claimedAt?: string | null; readonly metadata?: Readonly<Record<string, unknown>> | null; }
 export interface ClaimTokenRepository { findByTokenHash(tokenHash: string): Promise<ClaimTokenRecord | null>; update(context: TenantScoped, tokenId: string, input: Partial<Pick<ClaimTokenRecord, "status" | "claimedAt" | "metadata">>): Promise<ClaimTokenRecord>; }
-export interface SellerClaimPortalDependencies { readonly claimTokens: ClaimTokenRepository; readonly marketplaceCaptures: MarketplaceCaptureRepository; readonly draftInventories: DraftInventoryRepository; readonly ownershipAttestations: MarketplaceOwnershipAttestationRepository; readonly pipelines: PipelineRepository; readonly deals: DealsRepository; readonly auditLogs: AuditLogRepository; readonly activities: ActivityRepository; readonly crmConversionRuntime?: { enqueueForCompletedClaim(context: { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: PersistenceCorrelationMetadata }, input: { readonly tenantId: string; readonly claimTokenId: string; readonly marketplaceCaptureId: string }): Promise<unknown>; } | undefined; readonly clock?: (() => Date) | undefined; }
+export interface SellerClaimPortalDependencies { readonly claimTokens: ClaimTokenRepository; readonly marketplaceCaptures: MarketplaceCaptureRepository; readonly draftInventories: DraftInventoryRepository; readonly ownershipAttestations: MarketplaceOwnershipAttestationRepository; readonly pipelines: PipelineRepository; readonly deals: DealsRepository; readonly auditLogs: AuditLogRepository; readonly activities: ActivityRepository; readonly crmConversionRuntime?: { enqueueForCompletedClaim(context: { readonly tenantId: string; readonly actorId?: string | undefined; readonly correlation: PersistenceCorrelationMetadata }, input: { readonly tenantId: string; readonly claimTokenId: string; readonly marketplaceCaptureId: string }): Promise<unknown>; } | undefined; /** CS-023: best-effort billable-usage recording; never blocks claim acceptance on failure. */ readonly usageMetering?: Pick<AcquisitionUsageMeteringService, "recordUsageEvent"> | undefined; readonly clock?: (() => Date) | undefined; }
 export interface ClaimPreview { readonly tokenStatus: string; readonly expiresAt: string; readonly capture: { readonly id: string; readonly marketplaceSource: string | null; readonly listingUrl: string }; readonly seller: { readonly name: string | null; readonly phoneMasked: string | null; readonly emailMasked: string | null; readonly location: string | null }; readonly draftInventory: Pick<DraftInventoryRecord, "id" | "title" | "description" | "price" | "currency" | "category" | "images" | "listingUrl" | "marketplaceSource"> | null; readonly currentStage: StageName; }
 
 const safeEqual = (left: string, right: string): boolean => { const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b); };
@@ -104,6 +105,16 @@ export class SellerClaimPortalService {
     await this.audit({ tenantId: token.tenantId, correlation: context.correlation }, "MARKETPLACE_CLAIM_ACCEPTED", token.id, { marketplaceCaptureId: capture.id, draftInventoryId: draft.id, attestationId: attestation.id });
     await this.appendActivity({ tenantId: token.tenantId, correlation: context.correlation }, capture, "Seller claim accepted", claimedAt, { eventType: "MARKETPLACE_CLAIM_ACCEPTED", marketplaceCaptureId: capture.id, draftInventoryId: draft.id, attestationId: attestation.id, claimTokenId: token.id });
     await this.deps.auditLogs.append(scope, { tenantId: token.tenantId, action: "OWNERSHIP_ATTESTED", targetType: "MARKETPLACE_OWNERSHIP_ATTESTATION", targetId: attestation.id, correlationId: context.correlation.correlationId, requestId: context.correlation.requestId, metadata: { marketplaceCaptureId: capture.id, draftInventoryId: draft.id, attestationId: attestation.id, claimTokenId: token.id } });
+    if (this.deps.usageMetering !== undefined) {
+      await recordUsageEventBestEffort(this.deps.usageMetering, scope, {
+        eventType: "SELLER_CLAIMED",
+        captureId: capture.id,
+        contactId: draft.contactId ?? capture.contactId ?? undefined,
+        dealId: capture.dealId ?? undefined,
+        occurredAt: this.now(),
+        idempotencyKey: `usage:SELLER_CLAIMED:${token.tenantId}:${token.id}`,
+      });
+    }
     await this.deps.crmConversionRuntime?.enqueueForCompletedClaim({ tenantId: token.tenantId, correlation: context.correlation }, { tenantId: token.tenantId, claimTokenId: token.id, marketplaceCaptureId: capture.id });
     return { status: "CLAIMED", captureId: capture.id, draftInventoryId: draft.id, attestationId: attestation.id, claimedAt };
   }
