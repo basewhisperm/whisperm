@@ -2292,6 +2292,16 @@ export { RenderConversionRetryService, RenderConversionRetryError, nextRenderCon
 export type { RenderConversionRetryContext, RenderConversionRetryDependencies, RenderConversionRetryResult, RenderInventoryConnector } from "./render-conversion-retry.js";
 
 export { SellerAcquisitionEditService } from "./seller-acquisition-edit.js";
+export type { EditExtractInput, EditExtractResult, SellerAcquisitionEditDependencies } from "./seller-acquisition-edit.js";
+
+export { MarketplaceRequalificationService, MarketplaceRequalificationError } from "./marketplace-requalification.js";
+export type {
+  MarketplaceRequalificationCrmConversionStatus,
+  MarketplaceRequalificationDependencies,
+  MarketplaceRequalificationQualificationStatus,
+  RequalificationContext,
+  RequalifyMarketplaceCaptureResult,
+} from "./marketplace-requalification.js";
 
 export { evaluateCaptureQuality } from "./seller-acquisition/capture-quality.js";
 export { DiscoveryExecutionWorker, normalizeProviderResultForDiscovery } from './marketplace-acquisition/discovery-execution-worker.js';
