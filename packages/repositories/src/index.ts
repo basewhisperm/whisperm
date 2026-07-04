@@ -7,6 +7,7 @@ export type {
 } from "./business-growth-opportunity.js";
 
 import { PrismaMarketplaceAcquisitionRepository, type MarketplaceAcquisitionRepository } from "./marketplace-acquisition.js";
+import { PrismaAcquisitionGovernanceRepository, type AcquisitionGovernanceRepository } from "./acquisition-governance.js";
 
 import {
   PersistenceError,
@@ -1984,6 +1985,7 @@ export interface PrismaRepositories {
   readonly ownershipAttestations: MarketplaceOwnershipAttestationRepository;
   readonly scheduledJobs: ScheduledJobRepository;
   readonly businessGrowthOpportunities: import("./business-growth-opportunity.js").BusinessGrowthOpportunityRepository;
+  readonly acquisitionGovernance: AcquisitionGovernanceRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -2014,6 +2016,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     ownershipAttestations: new PrismaMarketplaceOwnershipAttestationRepository(prisma),
     scheduledJobs: new PrismaScheduledJobRepository(prisma),
     businessGrowthOpportunities: new PrismaBusinessGrowthOpportunityRepository(prisma),
+    acquisitionGovernance: new PrismaAcquisitionGovernanceRepository(prisma),
     auditLogs
   };
 };
@@ -2031,3 +2034,5 @@ export * from "./marketplace-acquisition.js";
 export * from "./marketplace-discovery.js";
 
 export * from "./business-growth-opportunity.js";
+
+export * from "./acquisition-governance.js";

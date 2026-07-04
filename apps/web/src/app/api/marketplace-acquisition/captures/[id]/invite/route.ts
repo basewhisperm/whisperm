@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { authorizeAcquisitionActionForApi } from "@/lib/acquisition-governance";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
@@ -80,6 +81,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const campaignId = await resolveCampaignId(tenant.id, params.id);
   if (campaignId === null) return NextResponse.json({ ok: false, error: { message: "Capture is not assigned to a campaign." } }, { status: 409 });
+
+  const { denied } = await authorizeAcquisitionActionForApi(tenant.id, {
+    capability: "INVITATION",
+    campaignId,
+    provider: parsed.data.preferredChannel,
+    actorId: tenantUserId,
+    source: "API",
+  });
+  if (denied) return denied;
 
   try {
     const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
