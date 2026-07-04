@@ -104,9 +104,22 @@ Verify:
 
 ## 6. Deploy apps/worker → Railway (long-running, NOT serverless)
 
-Worker runs BullMQ consumers with persistent Redis connections.
+**ST1-003 status check (verify before relying on this section):** as of this writing, apps/worker's
+production bootstrap (`apps/worker/src/index.ts`, `isMainModule()` block) wires `InMemoryQueueRuntime`
+-- it registers job handlers and logs "worker started", but does not poll or consume any durable
+queue. No BullMQ/Redis/SQS adapter is implemented anywhere in this repo despite REDIS_URL being
+listed below; nothing in the codebase reads that variable. A "worker started" log line or a HEALTHY
+readiness check from this process is true about its own bootstrap but is **not** proof that any
+queued job (event ingestion, score recomputation, trial reminders, publish, scheduler) will ever
+execute. Do not treat step 6's checklist below as verified until a real queue backend is wired in.
+This does not block deploying apps/web: the seller-acquisition golden path (capture, campaign
+assignment, invitation send, claim, CRM/deal update) executes synchronously inside apps/web request
+handlers and does not depend on this worker process.
 
-Queues — all 5 must be processing:
+Intended design (once a real queue backend is implemented): worker runs BullMQ consumers with
+persistent Redis connections.
+
+Queues — intended to all be processing (unverified, see status check above):
   event.ingestion        | event.ingestion           | SDK event processing
   score-recomputation    | score.recompute           | Client health scores
   notification           | notification.trial_reminder | Trial reminder emails (D-3, D-1, D+0)
@@ -120,7 +133,8 @@ Deploy:
 4. Restart policy: Always
 5. Add DATABASE_URL and REDIS_URL
 
-Verify in Railway logs:
+Verify in Railway logs (presence of these lines confirms the process booted, not that jobs are
+being consumed -- see status check above):
   [worker] event.ingestion-worker started
   [worker] score-recomputation-worker started
   [worker] notification-worker started
