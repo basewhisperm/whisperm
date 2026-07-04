@@ -1,8 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { IconCheck, IconLoader2, IconPlus, IconRefresh, IconX } from "@tabler/icons-react";
-import { buildPromoteRequestInit, derivePromoteOutcome, markSellerPromoted, promoteEndpoint } from "./promote-helpers";
+import { IconCheck, IconLoader2, IconPlus, IconRefresh, IconSend, IconX } from "@tabler/icons-react";
+import {
+  buildPromoteRequestInit,
+  crmConversionBadgeLabel,
+  derivePromoteOutcome,
+  isInviteEligible,
+  markSellerPromoted,
+  promoteEndpoint,
+  discoveryQualificationBadgeLabel,
+  type PromoteApiResult,
+} from "./promote-helpers";
 
 interface DiscoveryRun {
   readonly id: string;
@@ -77,16 +86,28 @@ function ScoreBar({ score }: { readonly score: number }) {
 
 function SellerCard({
   seller,
+  outcome,
   onPromote,
   onReject,
+  onInvite,
   busy,
+  inviteBusy,
+  invited,
 }: {
   readonly seller: DiscoveredSeller;
+  readonly outcome?: PromoteApiResult | undefined;
   readonly onPromote: (id: string) => void;
   readonly onReject: (id: string) => void;
+  readonly onInvite: (id: string, marketplaceCaptureId: string) => void;
   readonly busy: boolean;
+  readonly inviteBusy: boolean;
+  readonly invited: boolean;
 }) {
   const canAct = seller.status === "QUALIFIED" && !busy;
+  const qualificationBadge = discoveryQualificationBadgeLabel(outcome?.qualificationStatus);
+  const crmBadge = crmConversionBadgeLabel(outcome?.crmConversionStatus);
+  // ST1-006: never imply invitation readiness before canonical qualification has succeeded.
+  const canInvite = seller.status === "PROMOTED" && isInviteEligible(outcome) && !inviteBusy && !invited;
   const image = seller.images?.[0];
 
   return (
@@ -134,6 +155,19 @@ function SellerCard({
         ) : null}
       </div>
 
+      {qualificationBadge !== null || crmBadge !== null ? (
+        <div className="flex flex-wrap gap-1.5">
+          {qualificationBadge !== null ? (
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${qualificationBadge === "Qualified" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"}`}>
+              {qualificationBadge}
+            </span>
+          ) : null}
+          {crmBadge !== null ? (
+            <span className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-blue-100 text-blue-700">{crmBadge}</span>
+          ) : null}
+        </div>
+      ) : null}
+
       {canAct ? (
         <div className="flex gap-2 pt-1">
           <button
@@ -152,6 +186,23 @@ function SellerCard({
             type="button"
           >
             <IconX className="size-3.5" />
+          </button>
+        </div>
+      ) : null}
+
+      {/* ST1-006: Invite is only ever shown once canonical qualification + CRM conversion succeeded. */}
+      {isInviteEligible(outcome) && seller.status === "PROMOTED" && invited ? (
+        <p className="text-center text-xs font-medium text-muted-foreground pt-1">Invitation sent</p>
+      ) : canInvite && outcome !== undefined ? (
+        <div className="pt-1">
+          <button
+            onClick={() => onInvite(seller.id, outcome.marketplaceCaptureId)}
+            disabled={inviteBusy}
+            className="w-full flex items-center justify-center gap-1.5 h-8 rounded-xl bg-whisper text-white text-xs font-semibold disabled:opacity-50"
+            type="button"
+          >
+            <IconSend className="size-3.5" />
+            Send Invite
           </button>
         </div>
       ) : null}
@@ -291,6 +342,11 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
   const [showSeedModal, setShowSeedModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // ST1-006: canonical qualification/CRM-conversion/invite-eligibility outcome per promoted seller,
+  // surfaced from the promote response so the UI never implies invite-readiness before qualification.
+  const [promotionOutcomes, setPromotionOutcomes] = useState<Record<string, PromoteApiResult>>({});
+  const [inviteBusySellerId, setInviteBusySellerId] = useState<string | null>(null);
+  const [invitedSellerIds, setInvitedSellerIds] = useState<ReadonlySet<string>>(new Set());
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -329,6 +385,9 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
         return;
       }
       setSellers((current) => markSellerPromoted(current, sellerId));
+      if (outcome.data !== undefined) {
+        setPromotionOutcomes((current) => ({ ...current, [sellerId]: outcome.data as PromoteApiResult }));
+      }
       setSuccessMessage(outcome.message);
       await loadData();
     } catch (err) {
@@ -351,6 +410,32 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
       setError(err instanceof Error ? err.message : "Failed.");
     } finally {
       setActionBusy(false);
+    }
+  };
+
+  // ST1-006: reuses the existing capture-level invitation endpoint (no new invitation capability) --
+  // discovery promotion already assigned the capture to this campaign, so it is invite-eligible here too.
+  const handleInvite = async (sellerId: string, marketplaceCaptureId: string) => {
+    setInviteBusySellerId(sellerId);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const res = await fetch(`/api/marketplace-acquisition/captures/${marketplaceCaptureId}/invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferredChannel: "WHATSAPP" }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        const message = (payload as { error?: { message?: unknown } } | null)?.error?.message;
+        throw new Error(typeof message === "string" && message.length > 0 ? message : "Failed to send invitation.");
+      }
+      setInvitedSellerIds((current) => new Set(current).add(sellerId));
+      setSuccessMessage("Invitation sent.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send invitation.");
+    } finally {
+      setInviteBusySellerId(null);
     }
   };
 
@@ -510,9 +595,13 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
                 <SellerCard
                   key={seller.id}
                   seller={seller}
+                  outcome={promotionOutcomes[seller.id]}
                   onPromote={(id) => void handlePromote(id)}
                   onReject={(id) => void handleReject(id)}
+                  onInvite={(id, marketplaceCaptureId) => void handleInvite(id, marketplaceCaptureId)}
                   busy={actionBusy}
+                  inviteBusy={inviteBusySellerId === seller.id}
+                  invited={invitedSellerIds.has(seller.id)}
                 />
               ))}
             </div>

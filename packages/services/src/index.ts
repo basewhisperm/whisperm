@@ -170,7 +170,7 @@ import { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
 import type { RevenueAttributionTriggerPort } from "./revenue-attribution.js";
 export { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
 export { MarketplaceDiscoveryService, DiscoveryPromotionError } from './marketplace-acquisition/discovery-service.js';
-export type { DiscoveryServiceContext, DiscoveryServiceDependencies, DiscoveryRunResult, ManualSeedEntry, StartDiscoveryRunInput, DiscoveryCaptureRepository, DiscoveryCampaignRepository, PromoteDiscoveredSellerResult, DiscoveryPromotionErrorCode } from './marketplace-acquisition/discovery-service.js';
+export type { DiscoveryServiceContext, DiscoveryServiceDependencies, DiscoveryRunResult, ManualSeedEntry, StartDiscoveryRunInput, DiscoveryCampaignRepository, PromoteDiscoveredSellerResult, DiscoveryPromotionErrorCode, CanonicalMarketplaceCapturePort, CanonicalMarketplaceCaptureContext, CanonicalMarketplaceCaptureInput, CanonicalMarketplaceCaptureResult, CanonicalMarketplaceCaptureQualificationStatus, CanonicalMarketplaceCaptureCrmConversionStatus } from './marketplace-acquisition/discovery-service.js';
 export { SellerQualificationService, DEFAULT_QUALIFICATION_POLICY } from './marketplace-acquisition/qualification-service.js';
 export { MarketplaceQualificationExecutionService } from './marketplace-acquisition/qualification-execution-service.js';
 export type { QualificationPolicy, QualificationResult, SellerDataForQualification } from './marketplace-acquisition/qualification-service.js';
