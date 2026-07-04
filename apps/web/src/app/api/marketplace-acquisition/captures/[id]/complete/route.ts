@@ -3,10 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { createPrismaRepositories, PrismaAcquisitionUsageEventRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import {
+  AcquisitionUsageMeteringService,
   MarketplaceCaptureCompletionError,
   MarketplaceCaptureCompletionService,
+  RevenueAttributionRuntimeService,
   ServiceError,
 } from "@whisperm/services";
 
@@ -44,6 +46,18 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
+  const usageMetering = new AcquisitionUsageMeteringService({ usageEvents: new PrismaAcquisitionUsageEventRepository(prisma as unknown as PrismaPersistenceClient) });
+  // ST1-008: canonical revenue attribution execution -- capture completion is the point at which
+  // a marketplace acquisition deal reaches its revenue-generating outcome (Converted), so this is
+  // where RevenueAttributionRuntimeService is invoked. No route implements attribution logic itself.
+  const revenueAttribution = new RevenueAttributionRuntimeService({
+    deals: repositories.deals,
+    businessGrowthOpportunities: repositories.businessGrowthOpportunities,
+    marketplaceCaptures: repositories.marketplaceCaptures,
+    sellerInvitations: repositories.sellerInvitations,
+    claimTokens: repositories.marketplaceClaimTokens,
+    usageMetering,
+  });
   const service = new MarketplaceCaptureCompletionService({
     marketplaceCaptures: repositories.marketplaceCaptures,
     draftInventories: repositories.draftInventories,
@@ -52,6 +66,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     deals: repositories.deals,
     auditLogs: repositories.auditLogs,
     activities: repositories.activities,
+    revenueAttribution,
   });
 
   try {
@@ -82,6 +97,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         inventoryConversionId: result.inventoryConversionId,
         status: result.status,
         idempotent: result.idempotent,
+        dealId: result.dealId ?? null,
+        revenueAttributed: result.revenueAttributed,
+        attributionId: result.attributionId ?? null,
+        attributedAmount: result.attributedAmount ?? null,
       },
       meta: {
         correlationId,

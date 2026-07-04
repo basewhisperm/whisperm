@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { PrismaDealsRepository, PrismaMarketplaceCaptureRepository, PrismaPipelineRepository } from "@whisperm/repositories";
+import { createPrismaRepositories, PrismaAcquisitionUsageEventRepository, PrismaDealsRepository, PrismaMarketplaceCaptureRepository, PrismaPipelineRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { AcquisitionUsageMeteringService, createWhispeRMServices, RevenueAttributionRuntimeService } from "@whisperm/services";
 import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 
 const ACQUISITION_STAGE_NAMES = new Set(["Captured", "Invited", "Claim Started", "Claimed", "Converted", "Expired"]);
@@ -20,7 +21,10 @@ const ALLOWED_TRANSITIONS = new Map<string, readonly string[]>([
   ["Invited", ["Claim Started", "Expired"]],
   ["Claim Started", ["Claimed", "Expired"]],
   ["Claimed", ["Converted"]],
-  ["Converted", []],
+  // ST1-008: Converted is the revenue-generating outcome for this pipeline. Allowing the
+  // self-transition keeps repeated completion requests idempotent (revenue attribution is
+  // re-evaluated, never duplicated) instead of failing the request with 422.
+  ["Converted", ["Converted"]],
   ["Expired", []],
 ]);
 
@@ -82,13 +86,53 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const status = STATUS_BY_STAGE.get(stage.name) ?? capture.status;
   const updatedCapture = await captureRepo.update({ tenantId: workspaceId }, capture.id, { status });
 
+  // ST1-008: "Converted" is the canonical revenue-generating outcome for the Marketplace
+  // Acquisition pipeline. Route through DealService.recordOutcome -- the single canonical
+  // execution path -- which reuses RevenueAttributionRuntimeService rather than this route
+  // implementing any attribution logic itself.
+  let revenueAttributed = false;
+  let attributionId: string | null = null;
+  let attributedAmount: string | null = null;
+
+  if (stage.name === "Converted") {
+    const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
+    const usageMetering = new AcquisitionUsageMeteringService({ usageEvents: new PrismaAcquisitionUsageEventRepository(prisma as unknown as PrismaPersistenceClient) });
+    const revenueAttribution = new RevenueAttributionRuntimeService({
+      deals: repositories.deals,
+      businessGrowthOpportunities: repositories.businessGrowthOpportunities,
+      marketplaceCaptures: repositories.marketplaceCaptures,
+      sellerInvitations: repositories.sellerInvitations,
+      claimTokens: repositories.marketplaceClaimTokens,
+      usageMetering,
+    });
+    const services = createWhispeRMServices({ ...repositories, revenueAttribution });
+    const correlation = {
+      correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(),
+      requestId: request.headers.get("x-request-id") ?? undefined,
+    };
+    const { attribution } = await services.deals.recordOutcome(
+      { tenantId: workspaceId, correlation },
+      updatedDeal.id,
+      { closedAt: updatedDeal.closedAt ?? new Date().toISOString(), expectedUpdatedAt: updatedDeal.updatedAt },
+    );
+    revenueAttributed = attribution?.status === "ATTRIBUTED";
+    attributionId = attribution?.snapshot?.idempotencyKey ?? null;
+    attributedAmount = attribution?.snapshot?.revenueAmount ?? null;
+  }
+
   return NextResponse.json({
-    deal: updatedDeal,
-    captureId: updatedCapture.id,
-    dealId: updatedDeal.id,
-    currentStage: stage.name,
-    previousStage: previousStage.name,
-    status: updatedCapture.status,
-    updatedAt: updatedDeal.updatedAt,
+    ok: true,
+    data: {
+      dealId: updatedDeal.id,
+      dealStatus: stage.name,
+      captureId: updatedCapture.id,
+      captureStatus: updatedCapture.status,
+      previousStage: previousStage.name,
+      currentStage: stage.name,
+      updatedAt: updatedDeal.updatedAt,
+      revenueAttributed,
+      attributionId,
+      attributedAmount,
+    },
   });
 }

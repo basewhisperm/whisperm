@@ -20,7 +20,7 @@ const makeState = () => ({
   capture: { id: captureId, tenantId, contactId: 'contact-1', dealId: 'deal-1', externalId: 'listing-1', listingUrl: 'https://market.test/listing/1', title: 'Bike', description: 'Fast bike', price: '100', currency: 'USD', sellerName: 'Sam Seller', sellerProfileUrl: 'https://market.test/seller/sam', status: 'CLAIM_STARTED', capturedAt: now, createdAt: now, updatedAt: now, metadata: { sellerPhone: '+15555550123', sellerEmail: 'sam@example.com', sellerLocation: 'Austin', marketplaceSource: 'MARKET_TEST' } },
   draft: { id: 'draft-1', tenantId, marketplaceCaptureId: captureId, contactId: 'contact-1', dealId: 'deal-1', title: 'Bike', description: 'Fast bike', price: '100', currency: 'USD', category: 'Bicycles', images: ['https://cdn.test/bike.jpg'], listingUrl: 'https://market.test/listing/1', marketplaceSource: 'MARKET_TEST', marketplaceListingId: 'listing-1', status: 'DRAFT', createdAt: now, updatedAt: now },
   contact: { id: 'contact-1', tenantId, firstName: 'Sam', lastName: 'Seller', email: 'sam@example.com', phone: '+15555550123', stage: 'PROSPECT', createdAt: now, updatedAt: now },
-  attestations: [], conversions: [], invitations: [], claimTokens: [], activities: [], audits: [], stageUpdates: [], dealUpdates: [],
+  attestations: [], conversions: [], invitations: [], claimTokens: [], activities: [], audits: [], stageUpdates: [], dealUpdates: [], usageEvents: [],
 });
 
 const activityRepo = (state) => ({
@@ -28,7 +28,7 @@ const activityRepo = (state) => ({
 });
 
 const repositories = (state) => ({
-  marketplaceCaptures: { async findById(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.capture.id ? state.capture : null; }, async update(scope, id, input) { assert.equal(id, state.capture.id); state.capture = { ...state.capture, ...input, updatedAt: now }; return state.capture; } },
+  marketplaceCaptures: { async findById(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.capture.id ? state.capture : null; }, async findByDealId(scope, dealId) { assert.equal(scope.tenantId, tenantId); return state.capture.dealId === dealId ? state.capture : null; }, async update(scope, id, input) { assert.equal(id, state.capture.id); state.capture = { ...state.capture, ...input, updatedAt: now }; return state.capture; } },
   draftInventories: { async findByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.capture.id ? state.draft : null; }, async update(scope, id, input) { assert.equal(id, state.draft.id); state.draft = { ...state.draft, ...input, updatedAt: now }; return state.draft; } },
   ownershipAttestations: { async findByMarketplaceCaptureId(scope, id) { assert.equal(scope.tenantId, tenantId); return state.attestations.find((row) => row.marketplaceCaptureId === id) ?? null; }, async create(scope, input) { const row = { id: `att-${state.attestations.length + 1}`, ...input, createdAt: now, updatedAt: now }; state.attestations.push(row); return row; } },
   pipelines: { async findByDefaultKey(id, key) { assert.equal(id, tenantId); assert.equal(key, 'marketplace_acquisition'); return { id: 'pipeline-1', tenantId, stages: [{ id: 'stage-started', name: 'Claim Started' }, { id: 'stage-claimed', name: 'Claimed' }, { id: 'stage-converted', name: 'Converted' }] }; } },
@@ -36,7 +36,7 @@ const repositories = (state) => ({
     dealsById: new Map([['deal-1', { id: 'deal-1', tenantId, metadata: { source: 'MARKETPLACE_ACQUISITION' }, updatedAt: now }]]),
     async updateStage(id, dealId, stageId) { state.stageUpdates.push({ tenantId: id, dealId, stageId }); return { id: dealId, tenantId: id, pipelineStageId: stageId, updatedAt: now }; },
     async findById(id, dealId) { assert.equal(id, tenantId); return this.dealsById.get(dealId) ?? null; },
-    async update(id, dealId, input) { assert.equal(id, tenantId); const existing = this.dealsById.get(dealId); const updated = { ...existing, ...input, updatedAt: now }; this.dealsById.set(dealId, updated); state.dealUpdates.push(updated); return updated; },
+    async update(id, dealId, input) { assert.equal(id, tenantId); const existing = this.dealsById.get(dealId); const updated = { ...existing, ...input, updatedAt: now }; this.dealsById.set(dealId, updated); state.dealUpdates.push({ id: dealId, ...input }); return updated; },
   },
   contacts: { async findById(scope, id) { assert.equal(scope.tenantId, tenantId); return id === state.contact.id ? state.contact : null; } },
   marketplaceClaimTokens: {
@@ -60,6 +60,10 @@ const repositories = (state) => ({
       else state.claimTokens[index] = row;
       if (state.token.id === id) state.token = row;
       return row;
+    },
+    async listClaimTokensByMarketplaceCaptureId(scope, marketplaceCaptureId) {
+      assert.equal(scope.tenantId, tenantId);
+      return state.claimTokens.filter((row) => row.marketplaceCaptureId === marketplaceCaptureId);
     },
   },
   sellerInvitations: {
@@ -90,6 +94,25 @@ const repositories = (state) => ({
   },
   auditLogs: { async append(scope, input) { state.audits.push(input); return { id: `audit-${state.audits.length}`, ...input, createdAt: now }; } },
   activities: activityRepo(state),
+  // ST1-008: RevenueAttributionRuntimeService dependencies for the completion route's canonical
+  // revenue-attribution trigger. No opportunity exists in this fixture, so attribution resolves
+  // to a PARTIAL-but-ATTRIBUTED snapshot -- these tests assert activity/audit behavior, not
+  // attribution outcomes, so a minimal working mock is sufficient.
+  businessGrowthOpportunities: {
+    async findByDealId() { return null; },
+    async findByMarketplaceCaptureId() { return null; },
+    async recordRevenueAttribution(scope, opportunityId, input) { return { id: opportunityId, ...input }; },
+  },
+  acquisitionUsageEvents: {
+    async createIfNotExists(scope, input) {
+      assert.equal(scope.tenantId, tenantId);
+      const row = { id: `usage-${state.usageEvents.length + 1}`, ...input, createdAt: now, updatedAt: now };
+      state.usageEvents.push(row);
+      return row;
+    },
+    async summarizeByTenantAndPeriod() { return { totals: [], periodStart: now, periodEnd: now }; },
+    async listByTenantAndPeriod() { return { items: [], nextCursor: undefined }; },
+  },
 });
 
 const claimService = (state) => new SellerClaimPortalService({
@@ -148,7 +171,7 @@ const createHarness = async (state, options = {}) => {
   const tempDir = join(tmpdir(), `whisperm-route-activity-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(tempDir);
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\nexport class NextRequest extends Request {}\n');
-  writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__routeState.tenant;\nexport const getTenantContextForCurrentUser = async () => ({ tenant: globalThis.__routeState.tenant, tenantUserId: "tenant-user-1" });\n');
+  writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__routeState.tenant;\nexport const getTenantContextForCurrentUser = async () => (globalThis.__routeState.tenant === null ? null : { tenant: globalThis.__routeState.tenant, tenantUserId: "tenant-user-1" });\n');
   writeFileSync(join(tempDir, 'prisma.mjs'), [
     'export const prisma = {',
     '  sellerAcquisitionCampaignMember: {',
@@ -180,6 +203,8 @@ const createHarness = async (state, options = {}) => {
     'export class PrismaMarketplaceClaimTokenRepository { constructor() { return globalThis.__routeRepositories.marketplaceClaimTokens; } }',
     'export class PrismaPipelineRepository { constructor() { return globalThis.__routeRepositories.pipelines; } }',
     'export class PrismaSellerInvitationRepository { constructor() { return globalThis.__routeRepositories.sellerInvitations; } }',
+    'export class PrismaAcquisitionUsageEventRepository { constructor() { return globalThis.__routeRepositories.acquisitionUsageEvents; } }',
+    'export class PrismaBusinessGrowthOpportunityRepository { constructor() { return globalThis.__routeRepositories.businessGrowthOpportunities; } }',
     'export class PersistenceError extends Error { constructor(input = {}) { super(input.message ?? "Persistence error"); this.code = input.code ?? "PERSISTENCE_ERROR"; this.status = input.status ?? 500; this.details = input.details; } }',
     'export class PrismaSellerAcquisitionCampaignRepository { constructor() { return { async findById() { return { id: "campaign-1", tenantId: "tenant-1", name: "Test Campaign", status: "ACTIVE", createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z", metadata: {} }; } }; } }',
     'export class PrismaCampaignRuntimeExecutionRepository { constructor() { return { async create(scope, input) { const row = { id: "execution-1", ...input, createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; }, async findById(scope, id) { const row = globalThis.__routeState.execution; return row && row.id === id ? row : null; }, async update(scope, id, input) { const row = { ...(globalThis.__routeState.execution ?? { id, tenantId: scope.tenantId, campaignId: "campaign-1" }), ...input, id, updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; } }; } }',
@@ -220,6 +245,20 @@ test('authenticated seller acquisition route denies disabled tenant before prote
   }
 });
 
+test('unauthenticated capture completion request returns 401 and never touches revenue attribution', async () => {
+  const state = makeState();
+  state.tenant = null;
+  const harness = await createHarness(state);
+  try {
+    const response = await harness.complete.POST(makeRequest(), { params: { id: captureId } });
+    assert.equal(response.status, 401);
+    assert.equal(state.dealUpdates.length, 0);
+    assert.equal(state.audits.length, 0);
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test('seller acquisition route handlers create authenticated CRM activities for live conversion-to-completion lifecycle', async () => {
   const state = makeState();
   const harness = await createHarness(state);
@@ -229,11 +268,18 @@ test('seller acquisition route handlers create authenticated CRM activities for 
   process.env.RENDER_API_KEY = 'test-key';
   process.env.RENDER_INTERNAL_API_KEY = 'test-internal-key';
   globalThis.fetch = async (url) => Response.json(url.toString().includes('/seller-accounts') ? { renderSellerId: 'render-seller-1' } : { listing: { id: 'render-inventory-1' } }, { status: 201 });
+  let completeBody;
+  let repeatCompleteBody;
   try {
     for (const [route, body] of [[harness.accept, { acceptedTerms: true, claimantName: 'Sam Seller' }], [harness.seller], [harness.inventory], [harness.complete]]) {
       const response = await route.POST(makeRequest(body), { params: route === harness.accept ? { token } : { id: captureId } });
+      if (route === harness.complete) completeBody = await response.clone().json();
       assert.equal(response.status, 200, await response.text());
     }
+    // ST1-008: repeated completion requests must stay idempotent -- no duplicate revenue attribution.
+    const repeatResponse = await harness.complete.POST(makeRequest(), { params: { id: captureId } });
+    assert.equal(repeatResponse.status, 200, await repeatResponse.clone().text());
+    repeatCompleteBody = await repeatResponse.json();
   } finally {
     globalThis.fetch = originalFetch;
     for (const [key, value] of Object.entries(originalEnv)) {
@@ -251,6 +297,18 @@ test('seller acquisition route handlers create authenticated CRM activities for 
   assert.equal(state.conversions.find((row) => row.conversionKind === 'SELLER')?.renderSellerId, 'render-seller-1');
   assert.equal(state.conversions.find((row) => row.conversionKind === 'INVENTORY')?.metadata.renderInventoryId, 'render-inventory-1');
   assert.equal(state.capture.status, 'CONVERTED');
+  // ST1-008: capture completion is the canonical trigger that moves a deal to its
+  // revenue-generating outcome and executes revenue attribution automatically.
+  assert.equal(completeBody.ok, true);
+  assert.equal(completeBody.data.revenueAttributed, true);
+  assert.equal(completeBody.data.dealId, 'deal-1');
+  assert.ok(completeBody.data.attributionId);
+  assert.equal(state.dealUpdates.some((update) => update.id === 'deal-1' && update.closedAt != null), true);
+  // The repeat call reports the same canonical attribution outcome without duplicating it.
+  assert.equal(repeatCompleteBody.data.idempotent, true);
+  assert.equal(repeatCompleteBody.data.revenueAttributed, true);
+  assert.equal(repeatCompleteBody.data.attributionId, completeBody.data.attributionId);
+  assert.equal(state.dealUpdates.filter((update) => update.id === 'deal-1' && update.closedAt != null).length, 1);
 });
 
 
