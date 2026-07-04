@@ -13,6 +13,7 @@ import type {
   SellerInvitationRepository,
 } from "@whisperm/repositories";
 import type { PersistenceCorrelationMetadata } from "@whisperm/types";
+import { recordUsageEventBestEffort, type AcquisitionUsageMeteringService } from "./acquisition-usage-metering.js";
 
 const idSchema = z.string().min(1);
 
@@ -102,6 +103,8 @@ export interface RevenueAttributionRuntimeDependencies {
   readonly sellerInvitations?: Pick<SellerInvitationRepository, "listSellerInvitationsByMarketplaceCaptureId"> | undefined;
   readonly claimTokens?: Pick<MarketplaceClaimTokenRepository, "listClaimTokensByMarketplaceCaptureId"> | undefined;
   readonly scheduler?: RevenueAttributionScheduler | undefined;
+  /** CS-023: best-effort billable-usage recording; never blocks attribution on failure. */
+  readonly usageMetering?: Pick<AcquisitionUsageMeteringService, "recordUsageEvent"> | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -213,6 +216,17 @@ export class RevenueAttributionRuntimeService {
         idempotencyKey,
       };
       await this.persist(context, deal, snapshot);
+      if (this.deps.usageMetering !== undefined) {
+        await recordUsageEventBestEffort(this.deps.usageMetering, { tenantId: context.tenantId }, {
+          eventType: "REVENUE_ATTRIBUTED",
+          campaignId: snapshot.campaignId,
+          captureId: snapshot.captureId,
+          contactId: snapshot.contactId,
+          dealId: snapshot.dealId,
+          runtimeExecutionId: snapshot.campaignRuntimeExecutionId,
+          idempotencyKey: `usage:REVENUE_ATTRIBUTED:${snapshot.idempotencyKey}`,
+        });
+      }
       return { status: snapshot.attributionStatus, dealId: deal.id, snapshot, idempotent: false };
     } catch (cause) {
       if (cause instanceof RevenueAttributionRuntimeError) throw cause;

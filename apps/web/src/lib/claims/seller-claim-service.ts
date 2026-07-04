@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import {
+  PrismaAcquisitionUsageEventRepository,
   PrismaActivityRepository,
   PrismaAuditLogRepository,
   PrismaDealsRepository,
@@ -9,7 +10,7 @@ import {
   PrismaPipelineRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { SellerClaimPortalService, type ClaimTokenRecord, type ClaimTokenRepository } from "@whisperm/services";
+import { AcquisitionUsageMeteringService, SellerClaimPortalService, type ClaimTokenRecord, type ClaimTokenRepository } from "@whisperm/services";
 
 const normalize = (value: unknown): unknown => {
   if (value instanceof Date) return value.toISOString();
@@ -47,5 +48,6 @@ export const createSellerClaimService = (): SellerClaimPortalService => {
     deals: new PrismaDealsRepository(client),
     auditLogs: new PrismaAuditLogRepository(client),
     activities: new PrismaActivityRepository(client),
+    usageMetering: new AcquisitionUsageMeteringService({ usageEvents: new PrismaAcquisitionUsageEventRepository(client) }),
   });
 };

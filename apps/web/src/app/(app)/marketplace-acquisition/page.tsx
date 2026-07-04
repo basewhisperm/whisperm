@@ -2,12 +2,14 @@ import { AcquisitionCommandCenter } from "@/components/marketplace-acquisition/a
 import { AcquisitionWorkbench } from "@/components/marketplace-acquisition/acquisition-workbench";
 import { GovernancePanel } from "@/components/marketplace-acquisition/governance-panel";
 import { RuntimeHealthPanel } from "@/components/marketplace-acquisition/runtime-health-panel";
+import { UsageMeteringPanel } from "@/components/marketplace-acquisition/usage-metering-panel";
 
 export default function MarketplaceAcquisitionPage() {
   return (
     <div className="space-y-6">
       <GovernancePanel />
       <AcquisitionCommandCenter />
+      <UsageMeteringPanel />
       <RuntimeHealthPanel />
       <AcquisitionWorkbench
         mode="global"

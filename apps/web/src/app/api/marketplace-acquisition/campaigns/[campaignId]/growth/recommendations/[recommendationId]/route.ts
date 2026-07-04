@@ -10,7 +10,7 @@ import {
   PrismaCampaignRuntimeExecutionRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { CampaignRuntimeService } from "@whisperm/services";
+import { AcquisitionUsageMeteringService, CampaignRuntimeService } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
@@ -36,6 +36,7 @@ const runtimeService = () => {
     opportunities: repositories.businessGrowthOpportunities,
     deals: repositories.deals,
     auditLogs: repositories.auditLogs,
+    usageMetering: new AcquisitionUsageMeteringService({ usageEvents: repositories.acquisitionUsageEvents }),
   });
 };
 

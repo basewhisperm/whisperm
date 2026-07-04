@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { ActivityRepository, AuditLogRepository, BusinessGrowthOpportunityRecord, BusinessGrowthOpportunityRepository, ContactRepository, DealsRepository, DraftInventoryRepository, MarketplaceCaptureRecord, MarketplaceCaptureRepository, MarketplaceClaimTokenRepository, PipelineRepository, PipelineStageRecord } from "@whisperm/repositories";
 import { MARKETPLACE_ACQUISITION_PIPELINE_KEY, type PersistenceCorrelationMetadata, type TenantScoped } from "@whisperm/types";
+import { recordUsageEventBestEffort, type AcquisitionUsageMeteringService } from "./acquisition-usage-metering.js";
 import { BusinessGrowthOpportunityService } from "./business-growth-opportunity.js";
 import type { RevenueAttributionTriggerPort } from "./revenue-attribution.js";
 
@@ -31,6 +32,8 @@ export interface CrmConversionRuntimeDependencies {
   readonly activities?: ActivityRepository | undefined;
   readonly scheduler?: CrmConversionScheduler | undefined;
   readonly revenueAttribution?: RevenueAttributionTriggerPort | undefined;
+  /** CS-023: best-effort billable-usage recording; never blocks conversion on failure. */
+  readonly usageMetering?: Pick<AcquisitionUsageMeteringService, "recordUsageEvent"> | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -110,6 +113,16 @@ export class CrmConversionRuntimeService {
       await this.deps.businessGrowthOpportunities.linkDeal(scope, opportunity.id, dealId);
       await this.deps.businessGrowthOpportunities.updateConversionStatus?.(scope, opportunity.id, "CONVERTED");
       await this.record(scope, context, capture, { status: "CONVERTED", contactId, dealId, crmConversionStatus: "CONVERTED", crmConversionCompletedAt: this.nowIso(), crmConversionOpportunityId: opportunity.id, crmConversionContactId: contactId, crmConversionDealId: dealId });
+      if (this.deps.usageMetering !== undefined) {
+        await recordUsageEventBestEffort(this.deps.usageMetering, scope, {
+          eventType: "CRM_CONVERSION_CREATED",
+          campaignId: opportunity.campaignId ?? undefined,
+          captureId: capture.id,
+          contactId,
+          dealId,
+          idempotencyKey: `usage:CRM_CONVERSION_CREATED:${ready.idempotencyKey}`,
+        });
+      }
       await this.deps.revenueAttribution?.evaluateForDeal(context, { tenantId: scope.tenantId, dealId });
       await this.audit(scope, context, "MARKETPLACE_CRM_CONVERSION_COMPLETED", capture.id, { claimTokenId: parsed.claimTokenId, contactId, dealId, opportunityId: opportunity.id, idempotencyKey: ready.idempotencyKey });
       await this.activity(context, contactId, dealId, "Marketplace seller converted to CRM", { eventType: "MARKETPLACE_CRM_CONVERSION_COMPLETED", marketplaceCaptureId: capture.id, claimTokenId: parsed.claimTokenId, contactId, dealId, opportunityId: opportunity.id });

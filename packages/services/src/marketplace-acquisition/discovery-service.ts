@@ -6,6 +6,7 @@ import type {
   CreateDiscoveredSellerInput,
 } from "@whisperm/repositories";
 import type { BusinessGrowthOpportunityService } from "../business-growth-opportunity.js";
+import { recordUsageEventBestEffort, type AcquisitionUsageMeteringService } from "../acquisition-usage-metering.js";
 import { SellerQualificationService, type QualificationPolicy } from "./qualification-service.js";
 import type { CampaignTargetingConfig } from "../campaign-targeting.js";
 import { SellerDedupeService, computeSellerIdentityKey } from "./dedupe-service.js";
@@ -59,6 +60,8 @@ export interface DiscoveryRunResult {
 export interface DiscoveryServiceDependencies {
   readonly discoveryRepo: MarketplaceDiscoveryRepository;
   readonly businessGrowthOpportunities?: BusinessGrowthOpportunityService | undefined;
+  /** CS-023: best-effort billable-usage recording; never blocks discovery on failure. */
+  readonly usageMetering?: Pick<AcquisitionUsageMeteringService, "recordUsageEvent"> | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +251,14 @@ export class MarketplaceDiscoveryService {
           if (opportunity !== undefined) {
             await this.deps.businessGrowthOpportunities?.attachQualificationOutput(repoContext, opportunity.id, qualification);
           }
+        }
+        if (this.deps.usageMetering !== undefined) {
+          await recordUsageEventBestEffort(this.deps.usageMetering, repoContext, {
+            eventType: "SELLER_DISCOVERED",
+            campaignId: input.campaignId,
+            captureId: seller.id,
+            idempotencyKey: `usage:SELLER_DISCOVERED:${context.tenantId}:${input.campaignId}:${sellerIdentityKey ?? entry.listingUrl}`,
+          });
         }
       }
 

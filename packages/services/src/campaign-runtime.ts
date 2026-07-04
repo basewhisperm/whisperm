@@ -16,6 +16,7 @@ import type {
 } from "@whisperm/repositories";
 import { PersistenceError } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
+import { recordUsageEventBestEffort, type AcquisitionUsageMeteringService } from "./acquisition-usage-metering.js";
 import { DiscoveryOptimizationWorker } from "./marketplace-acquisition/discovery-optimization-worker.js";
 import {
   GrowthLoopWorker,
@@ -338,6 +339,8 @@ export interface CampaignRuntimeServiceDependencies {
   readonly auditLogs?: AuditLogRepository | undefined;
   readonly growthLoopWorker?: GrowthLoopWorker | undefined;
   readonly growthLoopQueue?: CampaignRuntimeGrowthLoopQueue | undefined;
+  /** CS-023: best-effort billable-usage recording; never blocks runtime execution on failure. */
+  readonly usageMetering?: Pick<AcquisitionUsageMeteringService, "recordUsageEvent"> | undefined;
 }
 
 const activeStatuses = new Set(["QUEUED", "RUNNING"]);
@@ -676,6 +679,19 @@ export class CampaignRuntimeService {
         qualificationFailureMessage: input.status === "FAILED" ? safeMessage ?? "Qualification execution failed" : undefined,
       },
     });
+
+    const qualifiedCount = input.qualifiedCount ?? 0;
+    if (input.status === "COMPLETED" && qualifiedCount > 0 && this.deps.usageMetering !== undefined) {
+      await recordUsageEventBestEffort(this.deps.usageMetering, context, {
+        eventType: "SELLER_QUALIFIED",
+        quantity: qualifiedCount,
+        campaignId: updated.campaignId,
+        runtimeExecutionId: input.executionId,
+        occurredAt: new Date(now),
+        idempotencyKey: `usage:SELLER_QUALIFIED:${context.tenantId}:${input.executionId}`,
+      });
+    }
+
     return this.applyOptimization(context, updated, updated.metrics ?? {});
   }
 
@@ -752,7 +768,7 @@ export class CampaignRuntimeService {
       });
     }
 
-    return this.deps.executions.update(context, input.executionId, {
+    const updatedExecution = await this.deps.executions.update(context, input.executionId, {
       status: delivered ? "COMPLETED" : shouldScheduleRetry ? "RUNNING" : "FAILED",
       completedAt: delivered ? now : null,
       failedAt: delivered || shouldScheduleRetry ? null : now,
@@ -760,6 +776,19 @@ export class CampaignRuntimeService {
       errorMessage: delivered || shouldScheduleRetry ? null : safeFailureMessage ?? "Seller invitation worker failed",
       metrics: finalMetrics,
     });
+
+    if (delivered && this.deps.usageMetering !== undefined) {
+      await recordUsageEventBestEffort(this.deps.usageMetering, context, {
+        eventType: "INVITATION_SENT",
+        campaignId: existing.campaignId,
+        captureId: typeof finalMetrics.opportunityId === "string" ? finalMetrics.opportunityId : undefined,
+        runtimeExecutionId: input.executionId,
+        occurredAt: new Date(now),
+        idempotencyKey: `usage:INVITATION_SENT:${context.tenantId}:${input.executionId}`,
+      });
+    }
+
+    return updatedExecution;
   }
 
   async retryInvitationExecution(context: TenantScoped, executionId: string): Promise<CampaignRuntimeExecutionRecord> {
@@ -828,6 +857,14 @@ export class CampaignRuntimeService {
       metadata: { ...baseMetadata, growthRecommendations: nextRecommendations },
       ...(scheduleCadence === undefined ? {} : { scheduleCadence }),
     });
+    if (this.deps.usageMetering !== undefined) {
+      await recordUsageEventBestEffort(this.deps.usageMetering, context, {
+        eventType: "GROWTH_RECOMMENDATION_APPLIED",
+        campaignId: campaign.id,
+        occurredAt: new Date(now),
+        idempotencyKey: `usage:GROWTH_RECOMMENDATION_APPLIED:${context.tenantId}:${campaign.id}:${input.recommendationId}`,
+      });
+    }
     await this.auditGrowthRecommendation(context, campaign.id, "GROWTH_RECOMMENDATION_APPLIED", recommendation, { actorId: input.actorId });
     return updated;
   }
@@ -876,7 +913,7 @@ export class CampaignRuntimeService {
       const existing = asGrowthRecommendations(campaign.metadata);
       const merged = result.growthLoopStatus === "INSUFFICIENT_DATA" ? existing : mergeGrowthRecommendations(existing, result.recommendations);
       const previousRecomputeCount = numericOrNull(isRecord(campaign.metadata) ? campaign.metadata.growthRecomputeCount : undefined) ?? 0;
-      return await this.deps.campaigns.update(context, campaign.id, {
+      const updatedCampaign = await this.deps.campaigns.update(context, campaign.id, {
         metadata: {
           ...(campaign.metadata ?? {}),
           growthLoopStatus: result.growthLoopStatus,
@@ -890,6 +927,16 @@ export class CampaignRuntimeService {
           growthRecomputeCount: previousRecomputeCount + 1,
         },
       });
+      if (this.deps.usageMetering !== undefined) {
+        const dayBucket = now.toISOString().slice(0, 10);
+        await recordUsageEventBestEffort(this.deps.usageMetering, context, {
+          eventType: "GROWTH_LOOP_EVALUATED",
+          campaignId: campaign.id,
+          occurredAt: now,
+          idempotencyKey: `usage:GROWTH_LOOP_EVALUATED:${context.tenantId}:${campaign.id}:${trigger}:${dayBucket}`,
+        });
+      }
+      return updatedCampaign;
     } catch (error) {
       const code = error instanceof PersistenceError ? error.code : errorCode(error);
       const message = error instanceof PersistenceError ? error.message : sanitizeErrorMessage(error);

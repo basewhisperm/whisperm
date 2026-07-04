@@ -8,6 +8,7 @@ export type {
 
 import { PrismaMarketplaceAcquisitionRepository, type MarketplaceAcquisitionRepository } from "./marketplace-acquisition.js";
 import { PrismaAcquisitionGovernanceRepository, type AcquisitionGovernanceRepository } from "./acquisition-governance.js";
+import { PrismaAcquisitionUsageEventRepository, type AcquisitionUsageEventRepository } from "./acquisition-usage-events.js";
 
 import {
   PersistenceError,
@@ -112,6 +113,7 @@ export interface PrismaPersistenceClient {
   readonly deadLetterJob: PrismaDelegate;
   readonly subscription: PrismaDelegate;
   readonly scheduledJob: PrismaDelegate;
+  readonly acquisitionUsageEvent: PrismaDelegate;
   $transaction?<TResult>(work: (client: PrismaPersistenceClient) => Promise<TResult>, options?: { readonly maxWait?: number; readonly timeout?: number }): Promise<TResult>;
 }
 
@@ -1986,6 +1988,7 @@ export interface PrismaRepositories {
   readonly scheduledJobs: ScheduledJobRepository;
   readonly businessGrowthOpportunities: import("./business-growth-opportunity.js").BusinessGrowthOpportunityRepository;
   readonly acquisitionGovernance: AcquisitionGovernanceRepository;
+  readonly acquisitionUsageEvents: AcquisitionUsageEventRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -2017,6 +2020,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     scheduledJobs: new PrismaScheduledJobRepository(prisma),
     businessGrowthOpportunities: new PrismaBusinessGrowthOpportunityRepository(prisma),
     acquisitionGovernance: new PrismaAcquisitionGovernanceRepository(prisma),
+    acquisitionUsageEvents: new PrismaAcquisitionUsageEventRepository(prisma),
     auditLogs
   };
 };
@@ -2036,3 +2040,5 @@ export * from "./marketplace-discovery.js";
 export * from "./business-growth-opportunity.js";
 
 export * from "./acquisition-governance.js";
+
+export * from "./acquisition-usage-events.js";

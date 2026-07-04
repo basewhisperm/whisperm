@@ -249,6 +249,7 @@ model Tenant {
   marketplaceDiscoveryRuns         MarketplaceDiscoveryRun[]
   discoveredMarketplaceSellers     DiscoveredMarketplaceSeller[]
   businessGrowthOpportunities       BusinessGrowthOpportunity[]
+  acquisitionUsageEvents           AcquisitionUsageEvent[]
 }
 
 model TenantFeature {
@@ -1668,4 +1669,43 @@ model NotificationDeliveryLog {
   @@index([tenantId, claimTokenId])
   @@index([tenantId, providerConnectionId])
   @@index([tenantId, channel, status, createdAt])
+}
+
+// CS-023: centralized, tenant-scoped billable-usage ledger for the autonomous
+// acquisition runtime (CS-018/019/020). Deliberately has no foreign-key
+// relations to campaign/capture/contact/deal/execution records -- it is an
+// append-only event log that must remain writable even if a referenced
+// record is later archived or deleted.
+enum AcquisitionUsageEventType {
+  SELLER_DISCOVERED
+  SELLER_QUALIFIED
+  INVITATION_SENT
+  SELLER_CLAIMED
+  CRM_CONVERSION_CREATED
+  REVENUE_ATTRIBUTED
+  GROWTH_LOOP_EVALUATED
+  GROWTH_RECOMMENDATION_APPLIED
+}
+
+model AcquisitionUsageEvent {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  tenantId           String                    @db.Uuid
+  eventType          AcquisitionUsageEventType
+  quantity           Int                       @default(1)
+  billable           Boolean                   @default(true)
+  campaignId         String?                   @db.Uuid
+  captureId          String?                   @db.Uuid
+  contactId          String?                   @db.Uuid
+  dealId             String?                   @db.Uuid
+  runtimeExecutionId String?                   @db.Uuid
+  idempotencyKey     String
+  occurredAt         DateTime
+  metadata           Json?
+  createdAt          DateTime                  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, eventType, occurredAt])
 }
