@@ -1,10 +1,9 @@
-import { PersistenceError, type TenantScoped } from "@whisperm/types";
+import { PersistenceError, type PersistenceCorrelationMetadata, type TenantScoped } from "@whisperm/types";
 import type {
   MarketplaceDiscoveryRepository,
   DiscoveryRunRecord,
   DiscoveredSellerRecord,
   CreateDiscoveredSellerInput,
-  MarketplaceAcquisitionRepository,
   SellerAcquisitionCampaignRepository,
   SellerAcquisitionCampaignMemberRecord,
 } from "@whisperm/repositories";
@@ -60,13 +59,61 @@ export interface DiscoveryRunResult {
   readonly creditsConsumed: number;
 }
 
-export type DiscoveryCaptureRepository = Pick<MarketplaceAcquisitionRepository, "createMarketplaceCapture" | "findMarketplaceCaptureByListingUrl">;
 export type DiscoveryCampaignRepository = Pick<SellerAcquisitionCampaignRepository, "findById" | "addSeller" | "findMemberByCapture">;
+
+/**
+ * ST1-006: structural port onto the canonical `MarketplaceAcquisitionCaptureService.capture`
+ * method (packages/services/src/index.ts). Declared locally -- rather than importing the class
+ * from index.ts -- to avoid a circular module dependency, since index.ts re-exports this file.
+ */
+export type CanonicalMarketplaceCaptureQualificationStatus = "QUALIFIED" | "UNQUALIFIED";
+export type CanonicalMarketplaceCaptureCrmConversionStatus = "CREATED" | "EXISTING" | "NOT_ELIGIBLE";
+
+export interface CanonicalMarketplaceCaptureContext extends TenantScoped {
+  readonly actorId?: string | undefined;
+  readonly correlation: PersistenceCorrelationMetadata;
+}
+
+export interface CanonicalMarketplaceCaptureInput extends TenantScoped {
+  readonly listingUrl: string;
+  readonly title: string;
+  readonly description?: string | null | undefined;
+  readonly price?: string | number | null | undefined;
+  readonly currency?: string | null | undefined;
+  readonly sellerName?: string | null | undefined;
+  readonly sellerPhone?: string | null | undefined;
+  readonly phone?: string | null | undefined;
+  readonly sellerEmail?: string | null | undefined;
+  readonly email?: string | null | undefined;
+  readonly sellerProfileUrl?: string | null | undefined;
+  readonly marketplaceSourceId?: string | null | undefined;
+  readonly category?: string | null | undefined;
+  readonly location?: string | null | undefined;
+  readonly images?: string[] | null | undefined;
+  readonly metadata?: Readonly<Record<string, unknown>> | null | undefined;
+}
+
+export interface CanonicalMarketplaceCaptureResult {
+  readonly captureId: string;
+  readonly contactId?: string | undefined;
+  readonly dealId?: string | undefined;
+  readonly contactCreated: boolean;
+  readonly dealCreated: boolean;
+  readonly qualificationStatus: CanonicalMarketplaceCaptureQualificationStatus;
+  readonly crmConversionStatus: CanonicalMarketplaceCaptureCrmConversionStatus;
+}
+
+export interface CanonicalMarketplaceCapturePort {
+  capture(context: CanonicalMarketplaceCaptureContext, input: CanonicalMarketplaceCaptureInput): Promise<CanonicalMarketplaceCaptureResult>;
+}
 
 export interface DiscoveryServiceDependencies {
   readonly discoveryRepo: MarketplaceDiscoveryRepository;
-  /** ST-002: required only for promoteSellerToCapture; other methods do not need the capture/campaign bridge. */
-  readonly marketplaceCaptures?: DiscoveryCaptureRepository | undefined;
+  /**
+   * ST1-006: the canonical acquisition pipeline entry point (qualification, Contact, Deal).
+   * Required only for promoteSellerToCapture; other methods do not need the capture/campaign bridge.
+   */
+  readonly canonicalCapture?: CanonicalMarketplaceCapturePort | undefined;
   readonly campaigns?: DiscoveryCampaignRepository | undefined;
   readonly businessGrowthOpportunities?: BusinessGrowthOpportunityService | undefined;
   /** CS-023: best-effort billable-usage recording; never blocks discovery on failure. */
@@ -79,6 +126,11 @@ export interface PromoteDiscoveredSellerResult {
   readonly campaignMemberId: string | null;
   readonly status: "PROMOTED";
   readonly alreadyPromoted: boolean;
+  /** ST1-006: canonical qualification/CRM-conversion outcome from the shared acquisition pipeline. */
+  readonly qualificationStatus: CanonicalMarketplaceCaptureQualificationStatus;
+  readonly crmConversionStatus: CanonicalMarketplaceCaptureCrmConversionStatus;
+  readonly contactId?: string | undefined;
+  readonly dealId?: string | undefined;
 }
 
 export type DiscoveryPromotionErrorCode =
@@ -111,6 +163,8 @@ const isValidUrl = (value: string): boolean => {
   }
 };
 
+const isValidEmail = (value: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value.trim());
+
 const hasSufficientCaptureData = (seller: DiscoveredSellerRecord): boolean => {
   if (seller.listingUrl.trim().length === 0 || !isValidUrl(seller.listingUrl)) return false;
   const title = seller.title ?? seller.sellerName;
@@ -120,27 +174,49 @@ const hasSufficientCaptureData = (seller: DiscoveredSellerRecord): boolean => {
 const compact = (input: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> =>
   Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== null));
 
-const buildCaptureInputFromSeller = (tenantId: string, seller: DiscoveredSellerRecord) => ({
-  tenantId,
-  listingUrl: seller.listingUrl,
-  title: (seller.title ?? seller.sellerName ?? "").trim(),
-  status: "CAPTURED" as const,
-  marketplaceSourceId: seller.marketplaceSourceId,
-  ...(seller.description !== undefined && seller.description !== null ? { description: seller.description } : {}),
-  ...(seller.price !== undefined && seller.price !== null ? { price: seller.price } : {}),
-  ...(seller.currency !== undefined && seller.currency !== null ? { currency: seller.currency } : {}),
-  ...(seller.sellerName !== undefined && seller.sellerName !== null ? { sellerName: seller.sellerName } : {}),
-  ...(seller.sellerProfileUrl !== undefined && seller.sellerProfileUrl !== null ? { sellerProfileUrl: seller.sellerProfileUrl } : {}),
-  metadata: compact({
-    discoveredSellerId: seller.id,
-    discoveryRunId: seller.discoveryRunId,
-    category: seller.category ?? undefined,
-    location: seller.location ?? undefined,
-    images: seller.images ?? undefined,
-    phone: seller.phone ?? undefined,
-    email: seller.email ?? undefined,
-  }),
-});
+/**
+ * ST1-006: builds the canonical capture-pipeline input from a discovered-seller projection.
+ * This is the only place discovery data crosses into the shared MarketplaceCapture boundary --
+ * everything downstream (qualification, Contact, Deal) is owned by the canonical service.
+ */
+const nonEmptyTrimmed = (value: string | null | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+};
+
+const buildCanonicalCaptureInput = (tenantId: string, seller: DiscoveredSellerRecord): CanonicalMarketplaceCaptureInput => {
+  const sellerProfileUrl = seller.sellerProfileUrl !== undefined && seller.sellerProfileUrl !== null && isValidUrl(seller.sellerProfileUrl)
+    ? seller.sellerProfileUrl
+    : undefined;
+  const email = seller.email !== undefined && seller.email !== null && isValidEmail(seller.email) ? seller.email : undefined;
+  const category = nonEmptyTrimmed(seller.category);
+  const location = nonEmptyTrimmed(seller.location);
+  // ST1-006: the canonical schema requires every image to be a valid URL (unlike the discovery
+  // repo's untyped string array), so malformed scraped image URLs are dropped rather than
+  // failing promotion for an otherwise-qualified seller.
+  const images = seller.images?.filter((image) => isValidUrl(image));
+
+  return {
+    tenantId,
+    listingUrl: seller.listingUrl,
+    title: (seller.title ?? seller.sellerName ?? "").trim(),
+    marketplaceSourceId: seller.marketplaceSourceId,
+    ...(seller.description !== undefined && seller.description !== null ? { description: seller.description } : {}),
+    ...(seller.price !== undefined && seller.price !== null ? { price: seller.price } : {}),
+    ...(seller.currency !== undefined && seller.currency !== null ? { currency: seller.currency } : {}),
+    ...(seller.sellerName !== undefined && seller.sellerName !== null ? { sellerName: seller.sellerName } : {}),
+    ...(seller.phone !== undefined && seller.phone !== null ? { sellerPhone: seller.phone, phone: seller.phone } : {}),
+    ...(email !== undefined ? { sellerEmail: email, email } : {}),
+    ...(sellerProfileUrl !== undefined ? { sellerProfileUrl } : {}),
+    ...(category !== undefined ? { category } : {}),
+    ...(location !== undefined ? { location } : {}),
+    ...(images !== undefined && images.length > 0 ? { images } : {}),
+    metadata: compact({
+      discoveredSellerId: seller.id,
+      discoveryRunId: seller.discoveryRunId,
+    }),
+  };
+};
 
 const isConflictError = (error: unknown): error is PersistenceError =>
   error instanceof PersistenceError && error.code === "PERSISTENCE_CONFLICT";
@@ -406,23 +482,27 @@ export class MarketplaceDiscoveryService {
   }
 
   /**
-   * ST-002: Bridges a discovered-seller projection into the canonical acquisition
-   * pipeline by creating or reusing a real MarketplaceCapture and campaign member.
-   * The seller is only marked PROMOTED once that handoff has actually succeeded.
+   * ST1-006: Routes a discovered-seller projection through the canonical acquisition
+   * pipeline (MarketplaceCapture -> qualification -> CRM conversion) instead of creating
+   * or reusing a capture directly. Discovery and manual/URL capture become identical from
+   * MarketplaceCapture onward; there is no discovery-specific downstream behavior.
+   * The canonical capture step is itself idempotent (matches by listing URL / phone / email /
+   * external id), so re-running it on an already-promoted seller is safe and lets a seller who
+   * is later enriched with a phone number become qualified and CRM-converted on re-promotion.
    */
   async promoteSellerToCapture(
     context: DiscoveryServiceContext,
     campaignId: string,
     sellerId: string,
   ): Promise<PromoteDiscoveredSellerResult> {
-    if (this.deps.marketplaceCaptures === undefined || this.deps.campaigns === undefined) {
+    if (this.deps.canonicalCapture === undefined || this.deps.campaigns === undefined) {
       throw new DiscoveryPromotionError({
         code: "PROMOTION_NOT_CONFIGURED",
         message: "Discovery promotion is not configured for this service instance.",
         status: 500,
       });
     }
-    const { marketplaceCaptures, campaigns } = this.deps;
+    const { canonicalCapture, campaigns } = this.deps;
     const repoContext = { tenantId: context.tenantId };
 
     const seller = await this.deps.discoveryRepo.findDiscoveredSellerById(repoContext, sellerId);
@@ -438,17 +518,6 @@ export class MarketplaceDiscoveryService {
       throw new DiscoveryPromotionError({ code: "CAMPAIGN_NOT_FOUND", message: "Seller acquisition campaign was not found for this workspace.", status: 404 });
     }
 
-    if (seller.status === "PROMOTED" && seller.promotedCaptureId !== undefined && seller.promotedCaptureId !== null) {
-      const existingMember = await campaigns.findMemberByCapture(repoContext, campaignId, seller.promotedCaptureId);
-      return {
-        discoveredSellerId: seller.id,
-        marketplaceCaptureId: seller.promotedCaptureId,
-        campaignMemberId: existingMember?.id ?? null,
-        status: "PROMOTED",
-        alreadyPromoted: true,
-      };
-    }
-
     if (!hasSufficientCaptureData(seller)) {
       throw new DiscoveryPromotionError({
         code: "INSUFFICIENT_CAPTURE_DATA",
@@ -457,18 +526,26 @@ export class MarketplaceDiscoveryService {
       });
     }
 
-    const existingCapture = await marketplaceCaptures.findMarketplaceCaptureByListingUrl(repoContext, seller.listingUrl);
-    const capture = existingCapture ?? await marketplaceCaptures.createMarketplaceCapture(repoContext, buildCaptureInputFromSeller(context.tenantId, seller));
+    const wasAlreadyPromoted = seller.status === "PROMOTED" && seller.promotedCaptureId !== undefined && seller.promotedCaptureId !== null;
 
-    let member: SellerAcquisitionCampaignMemberRecord | null = await campaigns.findMemberByCapture(repoContext, campaignId, capture.id);
+    const captureResult = await canonicalCapture.capture(
+      {
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        correlation: { correlationId: `discovery-promotion:${context.tenantId}:${sellerId}` },
+      },
+      buildCanonicalCaptureInput(context.tenantId, seller),
+    );
+
+    let member: SellerAcquisitionCampaignMemberRecord | null = await campaigns.findMemberByCapture(repoContext, campaignId, captureResult.captureId);
     if (member === null) {
       try {
-        member = await campaigns.addSeller(repoContext, { tenantId: context.tenantId, campaignId, marketplaceCaptureId: capture.id });
+        member = await campaigns.addSeller(repoContext, { tenantId: context.tenantId, campaignId, marketplaceCaptureId: captureResult.captureId });
       } catch (error) {
         if (!isConflictError(error)) {
           throw new DiscoveryPromotionError({ code: "CAPTURE_ASSIGNMENT_FAILED", message: "Failed to assign the marketplace capture to this campaign.", status: 502 });
         }
-        member = await campaigns.findMemberByCapture(repoContext, campaignId, capture.id);
+        member = await campaigns.findMemberByCapture(repoContext, campaignId, captureResult.captureId);
         if (member === null) {
           throw new DiscoveryPromotionError({ code: "CAPTURE_ASSIGNMENT_FAILED", message: "Failed to assign the marketplace capture to this campaign.", status: 502 });
         }
@@ -479,16 +556,20 @@ export class MarketplaceDiscoveryService {
       repoContext,
       sellerId,
       "PROMOTED",
-      { promotedCaptureId: capture.id, reviewedBy: context.actorId },
+      { promotedCaptureId: captureResult.captureId, reviewedBy: context.actorId },
     );
     await this.deps.businessGrowthOpportunities?.createFromDiscoveredSeller(repoContext, updatedSeller);
 
     return {
       discoveredSellerId: updatedSeller.id,
-      marketplaceCaptureId: capture.id,
+      marketplaceCaptureId: captureResult.captureId,
       campaignMemberId: member.id,
       status: "PROMOTED",
-      alreadyPromoted: false,
+      alreadyPromoted: wasAlreadyPromoted,
+      qualificationStatus: captureResult.qualificationStatus,
+      crmConversionStatus: captureResult.crmConversionStatus,
+      contactId: captureResult.contactId,
+      dealId: captureResult.dealId,
     };
   }
 

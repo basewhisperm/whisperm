@@ -84,3 +84,87 @@ test('promoted seller row updates accurately without touching other sellers', as
     cleanup();
   }
 });
+
+test('the promote outcome for a qualified seller carries canonical statuses through to the UI', async () => {
+  const { helpers, cleanup } = await loadHelpers();
+  try {
+    const outcome = helpers.derivePromoteOutcome(true, {
+      ok: true,
+      data: {
+        discoveredSellerId: 'seller-1',
+        marketplaceCaptureId: 'capture-1',
+        campaignMemberId: 'member-1',
+        alreadyPromoted: false,
+        qualificationStatus: 'QUALIFIED',
+        crmConversionStatus: 'CREATED',
+        contactId: 'contact-1',
+        dealId: 'deal-1',
+      },
+    });
+    assert.equal(outcome.success, true);
+    assert.equal(outcome.data.qualificationStatus, 'QUALIFIED');
+    assert.equal(outcome.data.crmConversionStatus, 'CREATED');
+    assert.equal(outcome.data.dealId, 'deal-1');
+  } finally {
+    cleanup();
+  }
+});
+
+test('the promote outcome for an unqualified seller reports Needs Qualification and carries no Contact/Deal ids', async () => {
+  const { helpers, cleanup } = await loadHelpers();
+  try {
+    const outcome = helpers.derivePromoteOutcome(true, {
+      ok: true,
+      data: {
+        discoveredSellerId: 'seller-1',
+        marketplaceCaptureId: 'capture-1',
+        campaignMemberId: 'member-1',
+        alreadyPromoted: false,
+        qualificationStatus: 'UNQUALIFIED',
+        crmConversionStatus: 'NOT_ELIGIBLE',
+      },
+    });
+    assert.equal(outcome.success, true);
+    assert.match(outcome.message, /Needs qualification/u);
+    assert.equal(outcome.data.qualificationStatus, 'UNQUALIFIED');
+    assert.equal(outcome.data.contactId, undefined);
+    assert.equal(outcome.data.dealId, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test('Qualified badge is shown only for a canonically qualified outcome', async () => {
+  const { helpers, cleanup } = await loadHelpers();
+  try {
+    assert.equal(helpers.discoveryQualificationBadgeLabel('QUALIFIED'), 'Qualified');
+    assert.equal(helpers.discoveryQualificationBadgeLabel('UNQUALIFIED'), 'Needs Qualification');
+    assert.equal(helpers.discoveryQualificationBadgeLabel(undefined), null);
+  } finally {
+    cleanup();
+  }
+});
+
+test('CRM converted indicator matches the canonical CRM conversion status', async () => {
+  const { helpers, cleanup } = await loadHelpers();
+  try {
+    assert.equal(helpers.crmConversionBadgeLabel('CREATED'), 'CRM Converted');
+    assert.equal(helpers.crmConversionBadgeLabel('EXISTING'), 'CRM Converted');
+    assert.equal(helpers.crmConversionBadgeLabel('NOT_ELIGIBLE'), null);
+    assert.equal(helpers.crmConversionBadgeLabel(undefined), null);
+  } finally {
+    cleanup();
+  }
+});
+
+test('Invite is hidden for an unqualified seller and visible only once qualified with a Deal', async () => {
+  const { helpers, cleanup } = await loadHelpers();
+  try {
+    assert.equal(helpers.isInviteEligible({ qualificationStatus: 'UNQUALIFIED', dealId: undefined }), false);
+    assert.equal(helpers.isInviteEligible({ qualificationStatus: 'QUALIFIED', dealId: undefined }), false);
+    assert.equal(helpers.isInviteEligible({ qualificationStatus: 'QUALIFIED', dealId: 'deal-1' }), true);
+    assert.equal(helpers.isInviteEligible(undefined), false);
+  } finally {
+    cleanup();
+  }
+});

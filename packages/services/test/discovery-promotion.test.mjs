@@ -18,27 +18,73 @@ class MemoryDiscoveryRepo {
   }
 }
 
-class MemoryCaptureRepo {
+/**
+ * Stands in for `MarketplaceAcquisitionCaptureService.capture` (packages/services/src/index.ts),
+ * the canonical acquisition pipeline: it is idempotent by listingUrl (capture), phone (contact),
+ * and contact id (deal), and only creates a Contact/Deal pair when a phone number is present --
+ * mirroring the ST1-004 qualification boundary and the ST1-005 canonical CRM conversion.
+ */
+class FakeCanonicalCapture {
   captures = [];
-  nextCapture = 1;
-  failNextCreate = false;
+  contacts = [];
+  deals = [];
+  calls = [];
+  nextId = 1;
+  failNextCapture = false;
 
-  async createMarketplaceCapture(ctx, input) {
-    if (this.failNextCreate) {
-      this.failNextCreate = false;
+  async capture(context, input) {
+    this.calls.push({ context, input });
+    if (this.failNextCapture) {
+      this.failNextCapture = false;
       throw new Error('capture backend unavailable');
     }
-    const existing = this.captures.find((capture) => capture.tenantId === ctx.tenantId && capture.listingUrl === input.listingUrl);
-    if (existing !== undefined) {
-      throw new PersistenceError({ code: 'PERSISTENCE_CONFLICT', message: 'Marketplace capture already exists', status: 409 });
-    }
-    const capture = { id: `capture-${this.nextCapture++}`, status: 'CAPTURED', capturedAt: now, createdAt: now, updatedAt: now, metadata: {}, ...input };
-    this.captures.push(capture);
-    return capture;
-  }
 
-  async findMarketplaceCaptureByListingUrl(ctx, listingUrl) {
-    return this.captures.find((capture) => capture.tenantId === ctx.tenantId && capture.listingUrl === listingUrl) ?? null;
+    let capture = this.captures.find((item) => item.tenantId === context.tenantId && item.listingUrl === input.listingUrl);
+    const captureCreated = capture === undefined;
+    if (capture === undefined) {
+      capture = { id: `capture-${this.nextId++}`, tenantId: context.tenantId, listingUrl: input.listingUrl, title: input.title, contactId: undefined, dealId: undefined };
+      this.captures.push(capture);
+    }
+
+    const phone = input.sellerPhone ?? input.phone;
+    if (phone === undefined || phone === null) {
+      return {
+        captureId: capture.id,
+        contactCreated: false,
+        dealCreated: false,
+        qualificationStatus: 'UNQUALIFIED',
+        crmConversionStatus: 'NOT_ELIGIBLE',
+      };
+    }
+
+    let contact = this.contacts.find((item) => item.tenantId === context.tenantId && item.phone === phone);
+    const contactCreated = contact === undefined;
+    if (contact === undefined) {
+      contact = { id: `contact-${this.nextId++}`, tenantId: context.tenantId, phone };
+      this.contacts.push(contact);
+    }
+
+    let deal = this.deals.find((item) => item.tenantId === context.tenantId && item.contactId === contact.id);
+    const dealCreated = deal === undefined;
+    if (deal === undefined) {
+      deal = { id: `deal-${this.nextId++}`, tenantId: context.tenantId, contactId: contact.id };
+      this.deals.push(deal);
+    }
+
+    if (captureCreated || capture.contactId !== contact.id) {
+      capture.contactId = contact.id;
+      capture.dealId = deal.id;
+    }
+
+    return {
+      captureId: capture.id,
+      contactId: contact.id,
+      dealId: deal.id,
+      contactCreated,
+      dealCreated,
+      qualificationStatus: 'QUALIFIED',
+      crmConversionStatus: contactCreated || dealCreated ? 'CREATED' : 'EXISTING',
+    };
   }
 }
 
@@ -94,24 +140,94 @@ const baseSeller = (overrides = {}) => ({
 
 const harness = () => {
   const discoveryRepo = new MemoryDiscoveryRepo();
-  const marketplaceCaptures = new MemoryCaptureRepo();
+  const canonicalCapture = new FakeCanonicalCapture();
   const campaigns = new MemoryCampaignRepo();
   campaigns.campaigns.push({ id: 'campaign-1', tenantId: 'tenant-1', name: 'Test Campaign', status: 'ACTIVE', createdAt: now, updatedAt: now });
-  const service = new MarketplaceDiscoveryService({ discoveryRepo, marketplaceCaptures, campaigns });
-  return { discoveryRepo, marketplaceCaptures, campaigns, service };
+  const service = new MarketplaceDiscoveryService({ discoveryRepo, canonicalCapture, campaigns });
+  return { discoveryRepo, canonicalCapture, campaigns, service };
 };
 
 const context = { tenantId: 'tenant-1', actorId: 'actor-1' };
 
 test('promoting a discovered seller creates a real MarketplaceCapture', async () => {
-  const { discoveryRepo, marketplaceCaptures, service } = harness();
+  const { discoveryRepo, canonicalCapture, service } = harness();
   discoveryRepo.sellers.push(baseSeller());
 
   const result = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
 
-  assert.equal(marketplaceCaptures.captures.length, 1);
-  assert.equal(marketplaceCaptures.captures[0].listingUrl, 'https://jiji.com.gh/cars/listing-1');
-  assert.equal(result.marketplaceCaptureId, marketplaceCaptures.captures[0].id);
+  assert.equal(canonicalCapture.captures.length, 1);
+  assert.equal(canonicalCapture.captures[0].listingUrl, 'https://jiji.com.gh/cars/listing-1');
+  assert.equal(result.marketplaceCaptureId, canonicalCapture.captures[0].id);
+});
+
+test('promote runs canonical qualification and reports QUALIFIED for a seller with a phone number', async () => {
+  const { discoveryRepo, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  const result = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(result.qualificationStatus, 'QUALIFIED');
+});
+
+test('qualified promotion creates a Contact', async () => {
+  const { discoveryRepo, canonicalCapture, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  const result = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(canonicalCapture.contacts.length, 1);
+  assert.equal(result.contactId, canonicalCapture.contacts[0].id);
+});
+
+test('qualified promotion creates a Deal', async () => {
+  const { discoveryRepo, canonicalCapture, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  const result = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(canonicalCapture.deals.length, 1);
+  assert.equal(result.dealId, canonicalCapture.deals[0].id);
+});
+
+test('malformed image URLs and empty category/location are sanitized before crossing into the canonical pipeline', async () => {
+  const { discoveryRepo, canonicalCapture, service } = harness();
+  discoveryRepo.sellers.push(baseSeller({
+    images: ['not-a-url', 'https://cdn.example.com/photo.jpg', ''],
+    category: '',
+    location: '   ',
+  }));
+
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  const input = canonicalCapture.calls[0].input;
+  assert.deepEqual(input.images, ['https://cdn.example.com/photo.jpg']);
+  assert.equal('category' in input, false);
+  assert.equal('location' in input, false);
+});
+
+test('unqualified promotion (no phone) creates neither a Contact nor a Deal', async () => {
+  const { discoveryRepo, canonicalCapture, service } = harness();
+  discoveryRepo.sellers.push(baseSeller({ phone: undefined }));
+
+  const result = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(result.qualificationStatus, 'UNQUALIFIED');
+  assert.equal(result.crmConversionStatus, 'NOT_ELIGIBLE');
+  assert.equal(canonicalCapture.contacts.length, 0);
+  assert.equal(canonicalCapture.deals.length, 0);
+  assert.equal(result.contactId, undefined);
+  assert.equal(result.dealId, undefined);
+});
+
+test('unqualified promotion still creates the MarketplaceCapture and a campaign member', async () => {
+  const { discoveryRepo, canonicalCapture, campaigns, service } = harness();
+  discoveryRepo.sellers.push(baseSeller({ phone: undefined }));
+
+  const result = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(canonicalCapture.captures.length, 1);
+  assert.equal(campaigns.members.length, 1);
+  assert.equal(result.status, 'PROMOTED');
 });
 
 test('promoting a discovered seller creates a SellerAcquisitionCampaignMember', async () => {
@@ -127,28 +243,87 @@ test('promoting a discovered seller creates a SellerAcquisitionCampaignMember', 
 });
 
 test('promotedCaptureId on the discovered seller equals the real MarketplaceCapture.id', async () => {
-  const { discoveryRepo, marketplaceCaptures, service } = harness();
+  const { discoveryRepo, canonicalCapture, service } = harness();
   discoveryRepo.sellers.push(baseSeller());
 
   await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
 
   assert.equal(discoveryRepo.sellers[0].status, 'PROMOTED');
-  assert.equal(discoveryRepo.sellers[0].promotedCaptureId, marketplaceCaptures.captures[0].id);
+  assert.equal(discoveryRepo.sellers[0].promotedCaptureId, canonicalCapture.captures[0].id);
 });
 
 test('second promotion is idempotent: no duplicate capture or member is created', async () => {
-  const { discoveryRepo, marketplaceCaptures, campaigns, service } = harness();
+  const { discoveryRepo, canonicalCapture, campaigns, service } = harness();
   discoveryRepo.sellers.push(baseSeller());
 
   const first = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
   const second = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
 
-  assert.equal(marketplaceCaptures.captures.length, 1);
+  assert.equal(canonicalCapture.captures.length, 1);
   assert.equal(campaigns.members.length, 1);
   assert.equal(second.alreadyPromoted, true);
   assert.equal(first.alreadyPromoted, false);
   assert.equal(second.marketplaceCaptureId, first.marketplaceCaptureId);
   assert.equal(second.campaignMemberId, first.campaignMemberId);
+});
+
+test('repeated promotion does not duplicate the Contact', async () => {
+  const { discoveryRepo, canonicalCapture, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(canonicalCapture.contacts.length, 1);
+});
+
+test('repeated promotion does not duplicate the Deal', async () => {
+  const { discoveryRepo, canonicalCapture, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(canonicalCapture.deals.length, 1);
+});
+
+test('repeated promotion does not duplicate the campaign member', async () => {
+  const { discoveryRepo, campaigns, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(campaigns.members.length, 1);
+});
+
+test('a seller later enriched with a phone number becomes qualified and CRM-converted on re-promotion', async () => {
+  const { discoveryRepo, canonicalCapture, service } = harness();
+  discoveryRepo.sellers.push(baseSeller({ phone: undefined }));
+
+  const first = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+  assert.equal(first.qualificationStatus, 'UNQUALIFIED');
+
+  discoveryRepo.sellers[0] = { ...discoveryRepo.sellers[0], phone: '+233555000000' };
+  const second = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(second.qualificationStatus, 'QUALIFIED');
+  assert.equal(second.crmConversionStatus, 'CREATED');
+  assert.equal(canonicalCapture.captures.length, 1);
+  assert.equal(canonicalCapture.contacts.length, 1);
+});
+
+test('promote delegates to the canonical capture pipeline with a correlation id and the acting user for auditability', async () => {
+  const { discoveryRepo, canonicalCapture, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+
+  assert.equal(canonicalCapture.calls.length, 1);
+  assert.equal(canonicalCapture.calls[0].context.tenantId, 'tenant-1');
+  assert.equal(canonicalCapture.calls[0].context.actorId, 'actor-1');
+  assert.equal(typeof canonicalCapture.calls[0].context.correlation.correlationId, 'string');
+  assert.ok(canonicalCapture.calls[0].context.correlation.correlationId.length > 0);
 });
 
 test('tenant mismatch on the discovered seller is denied', async () => {
@@ -159,6 +334,19 @@ test('tenant mismatch on the discovered seller is denied', async () => {
     () => service.promoteSellerToCapture({ tenantId: 'tenant-2', actorId: 'actor-1' }, 'campaign-1', 'seller-1'),
     (error) => error instanceof DiscoveryPromotionError && error.code === 'SELLER_NOT_FOUND',
   );
+});
+
+test('tenant isolation: a canonical capture created for one tenant is invisible to another tenant', async () => {
+  const { discoveryRepo, canonicalCapture, campaigns, service } = harness();
+  campaigns.campaigns.push({ id: 'campaign-1', tenantId: 'tenant-2', name: 'Other Tenant Campaign', status: 'ACTIVE', createdAt: now, updatedAt: now });
+  discoveryRepo.sellers.push(baseSeller());
+  discoveryRepo.sellers.push(baseSeller({ id: 'seller-2', tenantId: 'tenant-2', listingUrl: 'https://jiji.com.gh/cars/listing-1' }));
+
+  await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
+  await service.promoteSellerToCapture({ tenantId: 'tenant-2', actorId: 'actor-1' }, 'campaign-1', 'seller-2');
+
+  assert.equal(canonicalCapture.captures.filter((capture) => capture.tenantId === 'tenant-1').length, 1);
+  assert.equal(canonicalCapture.captures.filter((capture) => capture.tenantId === 'tenant-2').length, 1);
 });
 
 test('campaign mismatch is denied when the seller belongs to a different campaign', async () => {
@@ -184,15 +372,15 @@ test('campaign belonging to another tenant is denied', async () => {
 });
 
 test('promotion does not mark the seller PROMOTED when capture creation fails', async () => {
-  const { discoveryRepo, marketplaceCaptures, campaigns, service } = harness();
+  const { discoveryRepo, canonicalCapture, campaigns, service } = harness();
   discoveryRepo.sellers.push(baseSeller());
-  marketplaceCaptures.failNextCreate = true;
+  canonicalCapture.failNextCapture = true;
 
   await assert.rejects(() => service.promoteSellerToCapture(context, 'campaign-1', 'seller-1'));
 
   assert.equal(discoveryRepo.sellers[0].status, 'QUALIFIED');
   assert.equal(discoveryRepo.sellers[0].promotedCaptureId, undefined);
-  assert.equal(marketplaceCaptures.captures.length, 0);
+  assert.equal(canonicalCapture.captures.length, 0);
   assert.equal(campaigns.members.length, 0);
 });
 
@@ -242,7 +430,7 @@ test('promoted seller is discoverable through the normal campaign member query p
 });
 
 test('promotion race that hits a campaign-member conflict still resolves to the existing member', async () => {
-  const { discoveryRepo, campaigns, marketplaceCaptures, service } = harness();
+  const { discoveryRepo, campaigns, canonicalCapture, service } = harness();
   discoveryRepo.sellers.push(baseSeller());
 
   const originalFindMemberByCapture = campaigns.findMemberByCapture.bind(campaigns);
@@ -253,7 +441,7 @@ test('promotion race that hits a campaign-member conflict still resolves to the 
     return originalFindMemberByCapture(ctx, campaignId, marketplaceCaptureId);
   };
   campaigns.members.push({ id: 'member-preexisting', tenantId: 'tenant-1', campaignId: 'campaign-1', marketplaceCaptureId: 'capture-1', status: 'ADDED', assignedAt: now, createdAt: now, updatedAt: now });
-  marketplaceCaptures.captures.push({ id: 'capture-1', tenantId: 'tenant-1', listingUrl: baseSeller().listingUrl, title: 'Existing capture', status: 'CAPTURED', capturedAt: now, createdAt: now, updatedAt: now, metadata: {} });
+  canonicalCapture.captures.push({ id: 'capture-1', tenantId: 'tenant-1', listingUrl: baseSeller().listingUrl, title: 'Existing capture' });
 
   const result = await service.promoteSellerToCapture(context, 'campaign-1', 'seller-1');
 
