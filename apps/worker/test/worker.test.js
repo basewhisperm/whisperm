@@ -828,3 +828,122 @@ test('crm conversion worker does not fail the conversion job when growth loop tr
   assert.equal(result.status, 'SUCCEEDED');
   assert.equal(result.result.status, 'CONVERTED');
 });
+
+test('marketplace invite worker refuses to execute a DENY governance decision before touching the invitation provider', async () => {
+  const runtime = createRuntimePorts();
+  let sendInvitationCalled = false;
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'unused', tenantId: 'tenant-1' }) },
+    sellerInvitation: {
+      async sendInvitation() {
+        sendInvitationCalled = true;
+        return { invitationId: 'invitation-1', status: 'SENT' };
+      },
+    },
+    campaignRuntime: {
+      async recordInvitationResult() {},
+    },
+    acquisitionGovernance: {
+      async authorize(_context, input) {
+        assert.equal(input.capability, 'INVITATION');
+        return { status: 'DENY', capability: 'INVITATION', reason: 'PROVIDER_REQUIRED', message: 'Connect WhatsApp before sending WhatsApp invitations.', limits: [], warnings: [], auditEvent: { action: 'ACQUISITION_GOVERNANCE_DENY', capability: 'INVITATION', status: 'DENY', reason: 'PROVIDER_REQUIRED', recordedAt: fixedDate.toISOString(), persisted: false } };
+      },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({
+    job: createJob({
+      jobId: 'invite-governance-denied',
+      queueName: 'marketplace.invite',
+      jobType: 'marketplace.invite.send',
+      payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', captureId: 'capture-1', executionId: 'execution-1', channel: 'WHATSAPP' },
+      idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'invite:tenant-1:governance-denied', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+      scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.invite', priority: 'NORMAL' },
+    }),
+  });
+
+  assert.equal(sendInvitationCalled, false);
+  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(result.deadLetter.error.code, 'WORKER_RUNTIME_VALIDATION_FAILED');
+  assert.match(result.deadLetter.error.message, /Connect WhatsApp/u);
+});
+
+test('marketplace discovery worker refuses to execute a DENY governance decision before running discovery', async () => {
+  const runtime = createRuntimePorts();
+  let discoveryCalled = false;
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'unused', tenantId: 'tenant-1' }) },
+    marketplaceDiscovery: {
+      async executeAutonomousDiscovery() {
+        discoveryCalled = true;
+        return { discoveredCount: 0, capturedCount: 0, skippedDuplicateCount: 0 };
+      },
+    },
+    campaignRuntime: {
+      async recordDiscoveryResult() {},
+    },
+    acquisitionGovernance: {
+      async authorize(_context, input) {
+        assert.equal(input.capability, 'DISCOVERY');
+        return { status: 'DENY', capability: 'DISCOVERY', reason: 'MONTHLY_QUOTA_EXCEEDED', message: 'Monthly discovery quota has been reached for this workspace.', limits: [], warnings: [], auditEvent: { action: 'ACQUISITION_GOVERNANCE_DENY', capability: 'DISCOVERY', status: 'DENY', reason: 'MONTHLY_QUOTA_EXCEEDED', recordedAt: fixedDate.toISOString(), persisted: false } };
+      },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({
+    job: createJob({
+      jobId: 'discovery-governance-denied',
+      queueName: 'marketplace.discovery',
+      jobType: 'marketplace.discovery.execute',
+      payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', targeting: { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 10 }, replaySafe: true },
+      idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'discovery:tenant-1:governance-denied', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+      scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.discovery', priority: 'NORMAL' },
+    }),
+  });
+
+  assert.equal(discoveryCalled, false);
+  assert.equal(result.status, 'DEAD_LETTERED');
+  assert.equal(result.deadLetter.error.code, 'WORKER_RUNTIME_VALIDATION_FAILED');
+  assert.match(result.deadLetter.error.message, /Monthly discovery quota/u);
+});
+
+test('marketplace invite worker proceeds normally when governance allows', async () => {
+  const runtime = createRuntimePorts();
+  const calls = [];
+  const app = createApp({
+    events: { ingest: async () => ({ id: 'unused', tenantId: 'tenant-1' }) },
+    sellerInvitation: {
+      async sendInvitation(context, input) {
+        calls.push(['sendInvitation', context, input]);
+        return { invitationId: 'invitation-1', status: 'SENT' };
+      },
+    },
+    campaignRuntime: {
+      async recordInvitationResult(context, input) {
+        calls.push(['recordInvitationResult', context, input]);
+      },
+    },
+    acquisitionGovernance: {
+      async authorize() {
+        return { status: 'ALLOW', capability: 'INVITATION', reason: null, message: 'Invitations may be sent.', limits: [], warnings: [], auditEvent: { action: 'ACQUISITION_GOVERNANCE_ALLOW', capability: 'INVITATION', status: 'ALLOW', reason: null, recordedAt: fixedDate.toISOString(), persisted: false } };
+      },
+    },
+  }, runtime.ports);
+  await app.start();
+
+  const result = await app.processJob({
+    job: createJob({
+      jobId: 'invite-governance-allowed',
+      queueName: 'marketplace.invite',
+      jobType: 'marketplace.invite.send',
+      payload: { tenantId: 'tenant-1', campaignId: 'campaign-1', captureId: 'capture-1', executionId: 'execution-1', channel: 'WHATSAPP' },
+      idempotency: { tenantId: 'tenant-1', scope: 'JOB', key: 'invite:tenant-1:governance-allowed', replaySafe: true, conflictPolicy: 'SKIP_DUPLICATE' },
+      scheduling: { tenantId: 'tenant-1', queueName: 'marketplace.invite', priority: 'NORMAL' },
+    }),
+  });
+
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(calls[0][0], 'sendInvitation');
+});

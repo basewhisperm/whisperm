@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { authorizeAcquisitionActionForApi } from "@/lib/acquisition-governance";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
@@ -50,6 +51,13 @@ export async function POST(_request: Request, context: RouteContext) {
   const { tenant } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
+
+  const { denied } = await authorizeAcquisitionActionForApi(tenant.id, {
+    capability: "INVITATION",
+    campaignId: context.params.campaignId,
+    source: "API",
+  });
+  if (denied) return denied;
 
   try {
     const service = runtimeService();

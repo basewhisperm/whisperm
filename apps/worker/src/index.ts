@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord } from "@whisperm/services";
+import { CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
 import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
@@ -207,6 +207,19 @@ export interface DiscoveryExecutionServicePort {
   execute(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly trigger: "MANUAL" | "SCHEDULED" | "SYSTEM"; readonly correlation: CorrelationMetadata }): Promise<{ readonly status: string; readonly metrics?: Readonly<Record<string, unknown>>; readonly errorCode?: string; readonly errorMessage?: string }> | { readonly status: string; readonly metrics?: Readonly<Record<string, unknown>>; readonly errorCode?: string; readonly errorMessage?: string };
 }
 
+/**
+ * CS-022: the single governance checkpoint every runtime-executing job handler
+ * calls before doing tenant work. Workers never re-implement feature/plan/
+ * quota/provider checks themselves -- they ask AcquisitionGovernanceService
+ * (wired in by the host process) and refuse to proceed on a DENY decision.
+ */
+export interface AcquisitionGovernancePort {
+  authorize(
+    context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+    input: { readonly capability: AcquisitionGovernanceCapability; readonly campaignId?: string | undefined; readonly provider?: "WHATSAPP" | "SMS" | "EMAIL" | "DISCOVERY" | undefined; readonly hasCapturedData?: boolean | undefined },
+  ): Promise<AcquisitionGovernanceDecision>;
+}
+
 export interface WorkerServices {
   readonly events: EventIngestionServicePort;
   readonly scoring?: ScoreRecomputationServicePort | undefined;
@@ -221,7 +234,26 @@ export interface WorkerServices {
   readonly marketplaceQualification?: MarketplaceQualificationExecutionPort | undefined;
   readonly discoveryExecution?: DiscoveryExecutionServicePort | undefined;
   readonly growthLoop?: GrowthLoopExecutionPort | undefined;
+  readonly acquisitionGovernance?: AcquisitionGovernancePort | undefined;
 }
+
+const enforceAcquisitionGovernance = async (
+  services: WorkerServices,
+  context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
+  input: { readonly capability: AcquisitionGovernanceCapability; readonly campaignId?: string | undefined; readonly provider?: "WHATSAPP" | "SMS" | "EMAIL" | "DISCOVERY" | undefined; readonly hasCapturedData?: boolean | undefined },
+): Promise<void> => {
+  if (services.acquisitionGovernance === undefined) return;
+  const decision = await services.acquisitionGovernance.authorize(context, input);
+  if (decision.status === "DENY") {
+    throw new WorkerRuntimeError({
+      code: "WORKER_RUNTIME_VALIDATION_FAILED",
+      message: decision.message,
+      status: 403,
+      retryable: false,
+      correlation: context.correlation,
+    });
+  }
+};
 
 export interface QueueRegistration {
   readonly queue: QueueContract;
@@ -570,6 +602,7 @@ export const createCrmConversionHandler = (services: WorkerServices): WorkerJobH
     if (payload.tenantId !== context.tenantId) {
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "CRM conversion job tenantId must match execution context", status: 403, correlation: context.correlation });
     }
+    await enforceAcquisitionGovernance(services, { tenantId: payload.tenantId, correlation: context.correlation }, { capability: "CRM_CONVERSION" });
     const result = await services.crmConversionRuntime.executeConversion({ tenantId: payload.tenantId, correlation: context.correlation }, payload);
     if (result.status === "CONVERTED" && result.campaignId !== undefined && services.growthLoop !== undefined) {
       // Revenue attribution just completed for this campaign: trigger a governed growth-loop
@@ -633,6 +666,7 @@ export const createGrowthLoopHandler = (services: WorkerServices): WorkerJobHand
     if (payload.tenantId !== context.tenantId) {
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Growth loop job tenantId must match execution context", status: 403, correlation: context.correlation });
     }
+    await enforceAcquisitionGovernance(services, { tenantId: payload.tenantId, correlation: context.correlation }, { capability: "GROWTH_LOOP", campaignId: payload.campaignId });
     try {
       const result = await services.growthLoop.executeEvaluation({ tenantId: payload.tenantId, correlation: context.correlation }, { campaignId: payload.campaignId, trigger: payload.trigger });
       return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, trigger: payload.trigger, ...growthLoopSummary(result), correlationId: context.correlation.correlationId });
@@ -653,6 +687,7 @@ export const createRevenueAttributionHandler = (services: WorkerServices): Worke
     if (payload.tenantId !== context.tenantId) {
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Revenue attribution job tenantId must match execution context", status: 403, correlation: context.correlation });
     }
+    await enforceAcquisitionGovernance(services, { tenantId: payload.tenantId, correlation: context.correlation }, { capability: "REVENUE_ATTRIBUTION" });
     const result = await services.revenueAttribution.computeAttribution({ tenantId: payload.tenantId, correlation: context.correlation }, payload);
     return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, dealId: payload.dealId, status: result.status, correlationId: context.correlation.correlationId });
   },
@@ -688,6 +723,7 @@ export const createClaimLifecycleHandler = (services: WorkerServices): WorkerJob
         correlation: context.correlation,
       });
     }
+    await enforceAcquisitionGovernance(services, { tenantId: payload.tenantId, correlation: context.correlation }, { capability: "CLAIM", campaignId: payload.campaignId });
     if (context.job.jobType === "marketplace.claim.reminder") {
       if (payload.reminderType === undefined) {
         throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Claim reminder jobs require reminderType", status: 400, correlation: context.correlation });
@@ -781,6 +817,7 @@ export const createSellerInvitationHandler = (services: WorkerServices): WorkerJ
         correlation: context.correlation,
       });
     }
+    await enforceAcquisitionGovernance(services, { tenantId: payload.tenantId, correlation: context.correlation }, { capability: "INVITATION", campaignId: payload.campaignId, provider: payload.channel });
     let result: { readonly invitationId: string; readonly status: string; readonly provider?: string | undefined };
     try {
       result = await services.sellerInvitation.sendInvitation(
@@ -833,6 +870,7 @@ export const createMarketplaceDiscoveryHandler = (services: WorkerServices): Wor
     if (payload.tenantId !== context.tenantId) {
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Marketplace discovery job tenantId must match execution context", status: 403, correlation: context.correlation });
     }
+    await enforceAcquisitionGovernance(services, { tenantId: payload.tenantId, correlation: context.correlation }, { capability: "DISCOVERY", campaignId: payload.campaignId, provider: "DISCOVERY" });
     try {
       const result = await services.marketplaceDiscovery.executeAutonomousDiscovery(
         { tenantId: payload.tenantId, correlation: context.correlation },
@@ -870,6 +908,9 @@ export const createMarketplaceQualificationHandler = (services: WorkerServices):
     if (payload.tenantId !== context.tenantId) {
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION", message: "Marketplace qualification job tenantId must match execution context", status: 403, correlation: context.correlation });
     }
+    // Qualification jobs only ever run against already-discovered/captured sellers, so a rate-limited
+    // tenant can safely degrade (qualify against existing data) rather than being denied outright.
+    await enforceAcquisitionGovernance(services, { tenantId: payload.tenantId, correlation: context.correlation }, { capability: "QUALIFICATION", campaignId: payload.campaignId, hasCapturedData: true });
     try {
       const result = await services.marketplaceQualification.executeQualification({ tenantId: payload.tenantId, correlation: context.correlation }, payload);
       await services.campaignRuntime.recordQualificationResult({ tenantId: payload.tenantId, correlation: context.correlation }, { executionId: payload.executionId, status: "COMPLETED", ...result });

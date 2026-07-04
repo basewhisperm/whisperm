@@ -2278,3 +2278,23 @@ export type {
   RuntimeUnit,
   RuntimeUnitHealth,
 } from "./acquisition-runtime-health.js";
+
+export { AcquisitionGovernanceService } from "./acquisition-governance.js";
+export type {
+  AcquisitionGovernanceAuditEvent,
+  AcquisitionGovernanceAuthorizationInput,
+  AcquisitionGovernanceCapability,
+  AcquisitionGovernanceCapabilitySnapshot,
+  AcquisitionGovernanceCapabilityStatus,
+  AcquisitionGovernanceDecision,
+  AcquisitionGovernanceDecisionStatus,
+  AcquisitionGovernanceDenialReason,
+  AcquisitionGovernanceDependencies,
+  AcquisitionGovernanceLimit,
+  AcquisitionGovernanceLimitPeriod,
+  AcquisitionGovernanceLimitStatus,
+  AcquisitionGovernanceOverallStatus,
+  AcquisitionGovernanceSnapshot,
+  AcquisitionGovernanceWarning,
+  AcquisitionGovernanceWarningSeverity,
+} from "./acquisition-governance.js";

@@ -96,6 +96,7 @@ const transpileRoute = (routePath, tempDir) => {
   let source = readFileSync(routePath, 'utf8')
     .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
+    .replace(/from "@\/lib\/acquisition-governance"/gu, `from "${join(tempDir, 'acquisition-governance.mjs')}"`)
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
     .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
     .replace(/from "@\/lib\/claims\/seller-claim-service"/gu, `from "${join(tempDir, 'claim-service.mjs')}"`)
@@ -154,6 +155,7 @@ const createHarness = async (state, options = {}) => {
     'export const createPrismaRepositories = () => globalThis.__routeRepositories;',
     '',
   ].join('\n'));
+  writeFileSync(join(tempDir, 'acquisition-governance.mjs'), 'export const acquisitionGovernanceService = () => ({ authorizeAcquisitionAction: async () => ({ status: "ALLOW", capability: "INVITATION", reason: null, message: "ok", limits: [], warnings: [], auditEvent: { action: "ACQUISITION_GOVERNANCE_ALLOW", capability: "INVITATION", status: "ALLOW", reason: null, recordedAt: new Date().toISOString(), persisted: false } }) });\nexport const authorizeAcquisitionActionForApi = async () => ({ decision: await acquisitionGovernanceService().authorizeAcquisitionAction(), denied: null });\n');
   writeFileSync(join(tempDir, 'claim-service.mjs'), 'export const createSellerClaimService = () => globalThis.__routeClaimService;\n');
   writeFileSync(join(tempDir, 'request-body.mjs'), 'export class RequestBodyError extends Error { constructor(message, code = "REQUEST_BODY_INVALID", status = 400) { super(message); this.code = code; this.status = status; } }\nexport const readJsonBody = async (request) => request.json();\n');
   writeFileSync(join(tempDir, 'provider-adapters.mjs'), 'export const createHttpSmsProviderFromEnv = () => globalThis.__routeSmsProvider;\nexport const createMetaWhatsAppCloudProviderFromEnv = () => globalThis.__routeWhatsappProvider;\n');

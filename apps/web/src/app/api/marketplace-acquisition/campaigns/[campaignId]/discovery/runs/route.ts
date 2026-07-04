@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { authorizeAcquisitionActionForApi } from "@/lib/acquisition-governance";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
@@ -63,6 +64,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return errorResponse("Discovery credits exhausted. Purchase more credits to continue.", 402);
   }
 
+  const campaignId = decodeURIComponent(context.params.campaignId);
+  const { denied } = await authorizeAcquisitionActionForApi(tenant.id, {
+    capability: "DISCOVERY",
+    campaignId,
+    provider: "DISCOVERY",
+    source: "API",
+  });
+  if (denied) return denied;
+
   let body: unknown;
   try {
     body = await readJsonBody(request, { maxBytes: 500_000 });
@@ -88,7 +98,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return errorResponse("Maximum 500 entries per discovery run.", 400);
   }
 
-  const campaignId = decodeURIComponent(context.params.campaignId);
   const clampedEntries = entries.slice(0, creditsRemaining);
 
   const service = makeDiscoveryService();

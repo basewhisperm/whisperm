@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { authorizeAcquisitionActionForApi } from "@/lib/acquisition-governance";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
@@ -56,6 +57,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   const parsed = requestSchema.safeParse(body);
   if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid growth recommendation request.", 400);
+
+  const { denied } = await authorizeAcquisitionActionForApi(tenant.id, {
+    capability: "GROWTH_LOOP",
+    campaignId: context.params.campaignId,
+    actorId: tenantUserId,
+    source: "API",
+  });
+  if (denied) return denied;
 
   const service = runtimeService();
   const scope = { tenantId: tenant.id };

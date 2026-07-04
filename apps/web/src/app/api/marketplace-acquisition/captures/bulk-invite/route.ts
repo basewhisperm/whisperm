@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { authorizeAcquisitionActionForApi } from "@/lib/acquisition-governance";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
@@ -93,6 +94,17 @@ export async function POST(request: NextRequest) {
   for (const capture of captures) {
     const campaignId = capture.campaignMemberships[0]?.campaignId;
     if (campaignId === undefined) {
+      invalid.push(capture.id);
+      continue;
+    }
+    const { denied } = await authorizeAcquisitionActionForApi(tenant.id, {
+      capability: "INVITATION",
+      campaignId,
+      provider: parsed.data.channel,
+      actorId: tenantUserId,
+      source: "API",
+    });
+    if (denied) {
       invalid.push(capture.id);
       continue;
     }
