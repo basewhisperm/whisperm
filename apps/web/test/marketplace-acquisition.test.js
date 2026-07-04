@@ -229,8 +229,8 @@ test("capture intake and bookmarklet support mobile-required WhatsApp-first bulk
 
 test("URL capture no-phone response exposes blocked metadata", () => {
   const route = read("app/api/marketplace-acquisition/captures/from-url/route.ts");
-  assert.match(route, /missingRequirements = result\.contactId === undefined \? \["PHONE_REQUIRED"\] : \[\]/u);
-  assert.match(route, /qualified: missingRequirements\.length === 0/u);
-  assert.match(route, /blocked: missingRequirements\.length > 0/u);
+  assert.match(route, /missingRequirements = result\.qualificationStatus === "UNQUALIFIED" \? \[result\.qualificationReason \?\? "PHONE_REQUIRED"\] : \[\]/u);
+  assert.match(route, /qualified: result\.qualificationStatus === "QUALIFIED"/u);
+  assert.match(route, /blocked: result\.qualificationStatus === "UNQUALIFIED"/u);
   assert.match(route, /nextAction: missingRequirements\.includes\("PHONE_REQUIRED"\) \? "REVEAL_PHONE" : undefined/u);
 });

@@ -1237,6 +1237,8 @@ const marketplaceCaptureInputSchema = z.object({
 }).strict().refine((value) => value.listingUrl !== undefined || value.sourceUrl !== undefined, { message: "Marketplace capture requires listingUrl or sourceUrl", path: ["listingUrl"] });
 
 export type MarketplaceCaptureServiceInput = z.output<typeof marketplaceCaptureInputSchema>;
+export type MarketplaceCaptureQualificationStatus = "QUALIFIED" | "UNQUALIFIED";
+export type MarketplaceCaptureQualificationReason = "PHONE_REQUIRED";
 export interface MarketplaceCaptureServiceResult {
   readonly captureId: string;
   readonly contactId?: string | undefined;
@@ -1247,6 +1249,9 @@ export interface MarketplaceCaptureServiceResult {
   readonly dealCreated: boolean;
   readonly dealMatched: boolean;
   readonly status: string;
+  readonly qualificationStatus: MarketplaceCaptureQualificationStatus;
+  readonly qualificationReason?: MarketplaceCaptureQualificationReason | undefined;
+  readonly contactCreated: boolean;
   readonly portfolioCaptureCount?: number | undefined;
   readonly createdCaptureIds?: readonly string[] | undefined;
   readonly matchedCaptureIds?: readonly string[] | undefined;
@@ -1330,6 +1335,16 @@ const sellerReadiness = (input: MarketplaceCaptureServiceInput, cleanedName: str
   if (cleanedName !== undefined && cleanedName.trim().length > 1 && listingCount > 0) return "READY";
   return "REVIEW";
 };
+
+interface MarketplaceCaptureQualificationDecision {
+  readonly status: MarketplaceCaptureQualificationStatus;
+  readonly reason?: MarketplaceCaptureQualificationReason | undefined;
+}
+
+const determineQualification = (input: MarketplaceCaptureServiceInput): MarketplaceCaptureQualificationDecision =>
+  sellerPhoneForInput(input) === undefined
+    ? { status: "UNQUALIFIED", reason: "PHONE_REQUIRED" }
+    : { status: "QUALIFIED" };
 
 const sellerQualityScore = (input: MarketplaceCaptureServiceInput, listingCount: number, verifiedSeller: boolean): number => Math.min(100,
   (sellerPhoneForInput(input) === undefined ? 0 : 35) +
@@ -1675,7 +1690,13 @@ export class MarketplaceAcquisitionCaptureService {
       throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace Acquisition Captured stage is missing; run the pipeline seed before capturing marketplace listings", status: 404, correlation: context.correlation });
     }
 
+    const qualification = determineQualification(data);
+
     return runWrite(this.deps, context, async (repositories) => {
+      if (qualification.status === "UNQUALIFIED") {
+        return this.captureUnqualifiedListing(repositories, context, tenantScope, data, qualification.reason);
+      }
+
       const contactResult = await this.resolveContact(repositories, context, data);
       const listingInputs = this.listingInputs(data);
       const firstInput = listingInputs[0] ?? data;
@@ -1740,12 +1761,14 @@ export class MarketplaceAcquisitionCaptureService {
         captureId: finalCapture.id,
         contactId: contactResult.contact.id,
         dealId: dealResult.deal.id,
-        contactMatchStrategy: sellerPhoneForInput(data) === undefined ? "unqualified" : contactResult.strategy,
+        contactMatchStrategy: contactResult.strategy,
         dealCreated: dealResult.created,
         dealMatched: !dealResult.created,
         draftInventoryId,
         status: finalCapture.status,
-        sellerIdentityStrategy: sellerPhoneForInput(data) === undefined ? "unqualified" : contactResult.strategy,
+        qualificationStatus: "QUALIFIED",
+        contactCreated: contactResult.strategy === "created",
+        sellerIdentityStrategy: contactResult.strategy,
         portfolioCaptureCount: listingInputs.length,
         createdCaptureIds,
         matchedCaptureIds,
@@ -1789,7 +1812,7 @@ export class MarketplaceAcquisitionCaptureService {
     });
   }
 
-  private async captureUnqualifiedListing(repositories: ServiceRepositories, context: ServiceContext, tenantScope: TenantScoped, data: MarketplaceCaptureServiceInput): Promise<MarketplaceCaptureServiceResult> {
+  private async captureUnqualifiedListing(repositories: ServiceRepositories, context: ServiceContext, tenantScope: TenantScoped, data: MarketplaceCaptureServiceInput, reason: MarketplaceCaptureQualificationReason = "PHONE_REQUIRED"): Promise<MarketplaceCaptureServiceResult> {
     const listingInputs = this.listingInputs(data);
     const captures: MarketplaceCaptureRecord[] = [];
     const createdCaptureIds: string[] = [];
@@ -1829,6 +1852,9 @@ export class MarketplaceAcquisitionCaptureService {
       dealMatched: false,
       draftInventoryId: draftInventoryIds[0] ?? "",
       status: finalCapture.status,
+      qualificationStatus: "UNQUALIFIED",
+      qualificationReason: reason,
+      contactCreated: false,
       sellerIdentityStrategy: "unqualified",
       portfolioCaptureCount: listingInputs.length,
       createdCaptureIds,

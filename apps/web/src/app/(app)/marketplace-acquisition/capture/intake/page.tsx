@@ -41,20 +41,34 @@ function ResultRow({ label, ok, detail }: { readonly label: string; readonly ok:
   );
 }
 
+const qualificationBadgeLabel = (qualificationStatus: string | undefined, qualificationReason: string | undefined): string => {
+  if (qualificationStatus === "QUALIFIED") return "Qualified";
+  if (qualificationReason === "PHONE_REQUIRED") return "Needs Phone";
+  return "Needs Enrichment";
+};
+
 function CaptureResult({ data }: { readonly data: Record<string, unknown> | undefined }) {
   const captureId = resultId(data, "captureId");
   const contactId = resultId(data, "contactId");
   const dealId = resultId(data, "dealId");
   const draftInventoryId = resultId(data, "draftInventoryId");
-  const isQualified = contactId !== undefined && dealId !== undefined;
+  const qualificationStatus = typeof data?.qualificationStatus === "string" ? data.qualificationStatus : undefined;
+  const qualificationReason = typeof data?.qualificationReason === "string" ? data.qualificationReason : undefined;
+  const isQualified = qualificationStatus === "QUALIFIED";
+  const badgeLabel = qualificationBadgeLabel(qualificationStatus, qualificationReason);
   const nextAction = isQualified ? "Send WhatsApp invitation" : "Edit phone and retry qualification";
 
   return (
     <section className="rounded-2xl bg-secondary p-4" style={{ border: "0.5px solid hsl(var(--border))" }}>
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Capture result</p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Capture result</p>
+        <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: isQualified ? "var(--color-secondary)" : "var(--color-muted)", color: isQualified ? "var(--color-growth)" : "var(--color-health-amber)" }}>
+          {badgeLabel}
+        </span>
+      </div>
       <h2 className="mt-2 text-lg font-semibold text-foreground">{isQualified ? "Qualified seller captured" : "Capture saved, qualification incomplete"}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {isQualified ? "Contact, deal, and draft inventory are ready for seller acquisition." : "Draft inventory was saved, but the seller still needs a contact and acquisition deal before invitation."}
+        {isQualified ? "Contact, deal, and draft inventory are ready for seller acquisition." : "The seller has no verified phone yet, so no contact or acquisition deal was created. Invitation is not available until qualification succeeds."}
       </p>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
