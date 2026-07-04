@@ -82,13 +82,13 @@ export async function POST(request: NextRequest) {
       { tenantId: tenant.id, ...captureInput, images: [...captureInput.images], imageUrls: [...captureInput.imageUrls] },
     );
 
-    const missingRequirements = result.contactId === undefined ? ["PHONE_REQUIRED"] : [];
+    const missingRequirements = result.qualificationStatus === "UNQUALIFIED" ? [result.qualificationReason ?? "PHONE_REQUIRED"] : [];
     return NextResponse.json({
       ok: true,
       data: result,
       extracted: captureInput,
-      qualified: missingRequirements.length === 0,
-      blocked: missingRequirements.length > 0,
+      qualified: result.qualificationStatus === "QUALIFIED",
+      blocked: result.qualificationStatus === "UNQUALIFIED",
       missingRequirements,
       nextAction: missingRequirements.includes("PHONE_REQUIRED") ? "REVEAL_PHONE" : undefined,
     });

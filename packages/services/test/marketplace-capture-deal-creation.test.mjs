@@ -333,7 +333,7 @@ test("second capture for same source URL links existing deal without duplication
   assert.equal(repositories.draftInventoriesByCapture.size, 1);
 });
 
-test("capture without phone creates prospect contact and deal while remaining unqualified", async () => {
+test("capture without phone creates capture only and remains unqualified", async () => {
   const repositories = createRepositories();
   const services = createWhispeRMServices(repositories);
 
@@ -345,28 +345,31 @@ test("capture without phone creates prospect contact and deal while remaining un
   });
 
   assert.equal(result.status, "CAPTURED");
-  assert.equal(result.contactId, "contact-1");
-  assert.equal(result.dealId, "deal-1");
+  assert.equal(result.contactId, undefined);
+  assert.equal(result.dealId, undefined);
   assert.equal(result.contactMatchStrategy, "unqualified");
-  assert.equal(result.dealCreated, true);
+  assert.equal(result.qualificationStatus, "UNQUALIFIED");
+  assert.equal(result.qualificationReason, "PHONE_REQUIRED");
+  assert.equal(result.contactCreated, false);
+  assert.equal(result.dealCreated, false);
   assert.equal(result.dealMatched, false);
   assert.equal(result.draftInventoryId, "draft-1");
-  assert.equal(repositories.calls.some((call) => call.repo === "contacts" && call.method === "create"), true);
-  assert.equal(repositories.calls.some((call) => call.repo === "deals" && call.method === "create"), true);
+  assert.equal(repositories.calls.some((call) => call.repo === "contacts" && call.method === "create"), false);
+  assert.equal(repositories.calls.some((call) => call.repo === "deals" && call.method === "create"), false);
 
   const capture = [...repositories.capturesByUrl.values()][0];
-  assert.equal(capture.contactId, "contact-1");
-  assert.equal(capture.dealId, "deal-1");
+  assert.equal(capture.contactId, null);
+  assert.equal(capture.dealId, null);
   assert.equal(capture.metadata.acquisitionReadiness, "BLOCKED");
   assert.equal(capture.metadata.mobileRequiredForQualification, true);
 
   const draft = [...repositories.draftInventoriesByCapture.values()][0];
-  assert.equal(draft.contactId, "contact-1");
-  assert.equal(draft.dealId, "deal-1");
+  assert.equal(draft.contactId, null);
+  assert.equal(draft.dealId, null);
   assert.deepEqual(draft.images, ["https://market.example/images/one.jpg"]);
 });
 
-test("repeated capture without phone is idempotent and reuses prospect contact and deal", async () => {
+test("repeated capture without phone is idempotent and creates no contact or deal", async () => {
   const repositories = createRepositories();
   const services = createWhispeRMServices(repositories);
   const input = { ...captureInput, sellerPhone: undefined, phone: undefined };
@@ -375,10 +378,11 @@ test("repeated capture without phone is idempotent and reuses prospect contact a
   const second = await services.marketplaceAcquisition.capture(context, input);
 
   assert.equal(first.captureId, second.captureId);
-  assert.equal(second.contactId, "contact-1");
-  assert.equal(second.dealId, "deal-1");
-  assert.equal(repositories.calls.filter((call) => call.repo === "contacts" && call.method === "create").length, 1);
-  assert.equal(repositories.calls.filter((call) => call.repo === "deals" && call.method === "create").length, 1);
+  assert.equal(second.contactId, undefined);
+  assert.equal(second.dealId, undefined);
+  assert.equal(second.qualificationStatus, "UNQUALIFIED");
+  assert.equal(repositories.calls.filter((call) => call.repo === "contacts" && call.method === "create").length, 0);
+  assert.equal(repositories.calls.filter((call) => call.repo === "deals" && call.method === "create").length, 0);
   assert.equal(repositories.calls.filter((call) => call.repo === "draftInventories" && call.method === "create").length, 1);
 });
 
@@ -478,16 +482,20 @@ test("canonical phone qualifies when optional sellerPhone and sellerEmail channe
   assert.equal(capture.metadata.sellerEmail, undefined);
 });
 
-test("truly no sellerPhone and no canonical phone creates unqualified prospect contact and deal", async () => {
+test("truly no sellerPhone and no canonical phone creates unqualified capture without contact or deal", async () => {
   const repositories = createRepositories();
   const services = createWhispeRMServices(repositories);
   const result = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/no-phone", externalId: "listing-no-phone", sellerEmail: undefined, sellerPhone: undefined, email: undefined, phone: undefined });
   assert.equal(result.status, "CAPTURED");
-  assert.equal(result.contactId, "contact-1");
-  assert.equal(result.dealId, "deal-1");
+  assert.equal(result.contactId, undefined);
+  assert.equal(result.dealId, undefined);
   assert.equal(result.contactMatchStrategy, "unqualified");
-  assert.equal(repositories.contactsById.size, 1);
-  assert.equal(repositories.dealsByExternalId.size, 1);
+  assert.equal(result.qualificationStatus, "UNQUALIFIED");
+  assert.equal(result.qualificationReason, "PHONE_REQUIRED");
+  assert.equal(result.contactCreated, false);
+  assert.equal(result.dealCreated, false);
+  assert.equal(repositories.contactsById.size, 0);
+  assert.equal(repositories.dealsByExternalId.size, 0);
   const capture = [...repositories.capturesByUrl.values()].find((item) => item.id === result.captureId);
   assert.equal(capture.metadata.acquisitionReadiness, "BLOCKED");
   assert.equal(capture.metadata.mobileRequiredForQualification, true);
@@ -521,15 +529,15 @@ test("dirty marketplace seller name is cleaned and raw badges remain metadata", 
   assert.equal(contact.metadata.marketplaceAcquisition.marketplaceTenure, "New on Jiji");
 });
 
-test("same seller profile URL without phone reuses unqualified prospect contact", async () => {
+test("same seller profile URL without phone creates no contact for either capture", async () => {
   const repositories = createRepositories();
   const services = createWhispeRMServices(repositories);
   const first = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/profile-1", externalId: "profile-1", sellerPhone: undefined, phone: undefined, sellerEmail: undefined, email: undefined, sellerProfileUrl: "https://market.example/sellers/shared" });
   const second = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/profile-2", externalId: "profile-2", sellerPhone: undefined, phone: undefined, sellerEmail: undefined, email: undefined, sellerProfileUrl: "https://market.example/sellers/shared" });
-  assert.equal(first.contactId, "contact-1");
-  assert.equal(second.contactId, "contact-1");
+  assert.equal(first.contactId, undefined);
+  assert.equal(second.contactId, undefined);
   assert.equal(second.sellerIdentityStrategy, "unqualified");
-  assert.equal(repositories.contactsById.size, 1);
+  assert.equal(repositories.contactsById.size, 0);
 });
 
 test("bulk portfolio payload creates many captures and drafts but one seller contact and deal", async () => {
@@ -562,14 +570,14 @@ test("phone missing is blocked for qualification and email-only does not qualify
   assert.equal(capture.metadata.whatsappCandidate, false);
 });
 
-test("same marketplace name without phone reuses prospect contact and creates capture drafts", async () => {
+test("same marketplace name without phone creates capture drafts without any contact or deal", async () => {
   const repositories = createRepositories();
   const services = createWhispeRMServices(repositories);
   const first = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/name-1", externalId: "name-1", sellerPhone: undefined, phone: undefined, sellerEmail: "one@example.com", sellerProfileUrl: undefined, marketplaceIdentifier: undefined, sellerName: "Same Seller" });
   const second = await services.marketplaceAcquisition.capture(context, { ...captureInput, listingUrl: "https://market.example/listings/name-2", externalId: "name-2", sellerPhone: undefined, phone: undefined, sellerEmail: "two@example.com", sellerProfileUrl: undefined, marketplaceIdentifier: undefined, sellerName: "Same Seller" });
-  assert.equal(first.contactId, "contact-1");
-  assert.equal(second.contactId, "contact-1");
-  assert.equal(repositories.contactsById.size, 1);
-  assert.equal(repositories.dealsByExternalId.size, 2);
+  assert.equal(first.contactId, undefined);
+  assert.equal(second.contactId, undefined);
+  assert.equal(repositories.contactsById.size, 0);
+  assert.equal(repositories.dealsByExternalId.size, 0);
   assert.equal(repositories.draftInventoriesByCapture.size, 2);
 });
