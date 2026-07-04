@@ -1574,6 +1574,19 @@ if (isMainModule()) {
         await campaignRuntimeService.recordQualificationResult(context, input);
       },
     };
+    // ST1-003: createBootstrapOnlyWorkerDependencies wires InMemoryQueueRuntime, which registers
+    // job handlers but never polls or consumes any durable queue (no BullMQ/Redis/SQS backend is
+    // implemented anywhere in this repo). "worker started" below and a HEALTHY/READY status are
+    // therefore true statements about this process's internal bootstrap, but they do NOT mean any
+    // external queue is being drained -- processJob() only runs when something calls it directly.
+    // Every acquisition golden-path action (capture, invite, claim, CRM/deal update) already
+    // executes synchronously in apps/web and does not depend on this process. Log this loudly so
+    // an operator watching Railway logs never mistakes these lines for a working consumer.
+    logger.warn("worker bootstrap uses an in-memory, non-durable queue runtime; no external queue is polled or consumed by this process", {
+      tenantId: config.tenantId,
+      workerId: config.workerId,
+      queueRuntime: "InMemoryQueueRuntime",
+    });
     await runWorkerFromEnv({
       ...createBootstrapOnlyWorkerDependencies(config),
       services: {
