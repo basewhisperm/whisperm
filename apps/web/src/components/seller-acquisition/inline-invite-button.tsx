@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { SellerAcquisitionInviteChannel } from "./channel-selector";
+import { invitationResponseFromFetch } from "@/lib/seller-acquisition/invitation-response";
 
 interface InlineInviteButtonProps {
   readonly captureId: string;
@@ -27,16 +28,16 @@ export function InlineInviteButton({ captureId, onRefresh }: InlineInviteButtonP
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ preferredChannel: defaultPreferredChannel }),
       });
-      const result = await response.json().catch(() => ({}));
+      const result = await invitationResponseFromFetch(response);
 
-      if (!response.ok || result.status !== "SENT") {
+      if (!result.ok) {
         setState("error");
-        setMessage(typeof result.error === "string" ? result.error : "Seller invitation failed");
+        setMessage(result.errorMessage ?? "Seller invitation failed");
         return;
       }
 
       setState("sent");
-      setMessage(`Invitation ${result.status} by ${result.channel}.`);
+      setMessage(`Invitation sent via ${defaultPreferredChannel}.`);
     } catch {
       setState("error");
       setMessage("Seller invitation failed");

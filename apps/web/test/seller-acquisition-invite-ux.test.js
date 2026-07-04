@@ -28,22 +28,24 @@ test("invite panel uses ChannelSelector and preserves invite request contract", 
   assert.match(invitePanel, /import \{ ChannelSelector/u);
   assert.match(invitePanel, /<ChannelSelector onChange=\{setChannel\} value=\{channel\} \/>/u);
   assert.match(invitePanel, /body: JSON\.stringify\(\{ preferredChannel: channel \}\)/u);
-  assert.match(invitePanel, /result\.status !== "SENT"/u);
-  assert.match(invitePanel, /Seller invitation failed/u);
+  assert.match(invitePanel, /invitationResponseFromFetch/u);
 });
 
-test("InlineInviteButton preserves contract and only treats SENT JSON status as success", () => {
+test("InlineInviteButton preserves contract and delegates response parsing to the shared helper", () => {
   const button = read("components/seller-acquisition/inline-invite-button.tsx");
 
   assert.match(button, /captureId: string/u);
   assert.match(button, /onRefresh\?: \(\) => void \| Promise<void>/u);
   assert.match(button, /const defaultPreferredChannel: SellerAcquisitionInviteChannel = "WHATSAPP"/u);
   assert.match(button, /body: JSON\.stringify\(\{ preferredChannel: defaultPreferredChannel \}\)/u);
-  assert.match(button, /!response\.ok \|\| result\.status !== "SENT"/u);
+  assert.match(button, /invitationResponseFromFetch/u);
   assert.match(button, /setState\("error"\)/u);
   assert.match(button, /setState\("sent"\)/u);
   assert.match(button, /await onRefresh\?\.\(\)/u);
 });
+
+// Real success/failure/malformed-JSON handling is exercised end-to-end (fetch -> parser ->
+// rendered status text) in invite-components.test.js and invitation-response.test.js.
 
 test("acquisition board integration only applies when the board component exists", () => {
   const boardPath = join(appRoot, "components/seller-acquisition/acquisition-board.tsx");

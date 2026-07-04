@@ -2,14 +2,17 @@
 
 import { useState } from "react";
 import { ChannelSelector, type SellerAcquisitionInviteChannel } from "./channel-selector";
+import { invitationResponseFromFetch } from "@/lib/seller-acquisition/invitation-response";
 
 export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId: string }) {
   const [channel, setChannel] = useState<SellerAcquisitionInviteChannel>("WHATSAPP");
   const [status, setStatus] = useState("");
+  const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function sendInvite() {
     setBusy(true);
+    setFailed(false);
     setStatus("Sending Seller Acquisition invitation…");
 
     try {
@@ -19,21 +22,17 @@ export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId
         body: JSON.stringify({ preferredChannel: channel }),
       });
 
-      const result = await response.json().catch(() => ({}));
+      const result = await invitationResponseFromFetch(response);
 
-      if (!response.ok || result.status !== "SENT") {
-        const message =
-          typeof result.error === "string"
-            ? result.error
-            : typeof result.error?.message === "string"
-              ? result.error.message
-              : "Seller invitation failed. Check phone/email and provider configuration.";
-        setStatus(message);
+      if (!result.ok) {
+        setFailed(true);
+        setStatus(result.errorMessage ?? "Seller invitation failed. Check phone/email and provider configuration.");
         return;
       }
 
-      setStatus(`Invitation ${result.status} by ${result.channel}. Claim link expires in 7 days.`);
+      setStatus(`Seller invitation sent via ${channel}. Claim link expires in 7 days.`);
     } catch {
+      setFailed(true);
       setStatus("Seller invitation failed. Check your connection and try again.");
     } finally {
       setBusy(false);
@@ -74,7 +73,7 @@ export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId
         </div>
 
         {status !== "" && (
-          <p className={status.includes("failed") || status.includes("Check") ? "mt-4 text-sm font-medium text-red-700" : "mt-4 text-sm font-medium text-foreground"} role="status">
+          <p className={failed ? "mt-4 text-sm font-medium text-red-700" : "mt-4 text-sm font-medium text-foreground"} role="status">
             {status}
           </p>
         )}
