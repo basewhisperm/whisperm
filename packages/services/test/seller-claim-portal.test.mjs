@@ -23,7 +23,12 @@ function makeService(overrides = {}, extraDeps = {}) {
       async create(context, input) { assert.equal(context.tenantId, 'tenant-1'); const row = { id: `att-${state.attestations.length + 1}`, ...input, createdAt: now.toISOString(), updatedAt: now.toISOString() }; state.attestations.push(row); return row; },
     },
     pipelines: { async findByDefaultKey(tenantId, key) { assert.equal(tenantId, 'tenant-1'); assert.equal(key, 'marketplace_acquisition'); return { id: 'pipeline-1', tenantId, name: 'Marketplace Acquisition', defaultKey: key, stages: [{ id: 'stage-started', name: 'Claim Started' }, { id: 'stage-claimed', name: 'Claimed' }] }; } },
-    deals: { async updateStage(tenantId, dealId, stageId) { state.stages.push(stageId); return { id: dealId, tenantId, pipelineStageId: stageId, updatedAt: now.toISOString() }; } },
+    deals: {
+      dealsById: new Map([['deal-1', { id: 'deal-1', tenantId: 'tenant-1', metadata: { source: 'MARKETPLACE_ACQUISITION' }, updatedAt: now.toISOString() }]]),
+      async updateStage(tenantId, dealId, stageId) { state.stages.push(stageId); return { id: dealId, tenantId, pipelineStageId: stageId, updatedAt: now.toISOString() }; },
+      async findById(tenantId, dealId) { assert.equal(tenantId, 'tenant-1'); return this.dealsById.get(dealId) ?? null; },
+      async update(tenantId, dealId, input) { assert.equal(tenantId, 'tenant-1'); const existing = this.dealsById.get(dealId); const updated = { ...existing, ...input, updatedAt: now.toISOString() }; this.dealsById.set(dealId, updated); state.dealUpdates = state.dealUpdates ?? []; state.dealUpdates.push(updated); return updated; },
+    },
     auditLogs: { async append(context, input) { assert.equal(context.tenantId, input.tenantId); state.audits.push(input); return { id: `audit-${state.audits.length}`, ...input, createdAt: now.toISOString() }; } },
     activities: { async create(context, input) { assert.equal(context.tenantId, input.tenantId); state.activities.push(input); return { id: `activity-${state.activities.length}`, ...input, createdAt: now.toISOString(), updatedAt: now.toISOString() }; } },
     ...extraDeps,
@@ -74,23 +79,48 @@ test('accept requires terms, claims capture and draft, is idempotent, and blocks
   await assert.rejects(() => makeService({ token: { ...state.token, status: 'EXPIRED' } }).service.accept(baseContext, 'raw-token', { acceptedTerms: true }), SellerClaimPortalError);
 });
 
-test('accept executes CRM conversion inline and surfaces its real outcome, not a queued no-op', async () => {
-  const calls = [];
-  const crmConversionRuntime = { async enqueueForCompletedClaim(context, input) { calls.push({ context, input }); return { status: 'CONVERTED', contactId: 'contact-1', dealId: 'deal-1' }; } };
-  const { service, state } = makeService({ capture: { ...makeService().state.capture, status: 'CLAIM_STARTED' } }, { crmConversionRuntime });
+test('accept enriches the existing canonical Deal with claim metadata instead of running a second CRM conversion', async () => {
+  const { service, state } = makeService({ capture: { ...makeService().state.capture, status: 'CLAIM_STARTED' } });
   const result = await service.accept(baseContext, 'raw-token', { acceptedTerms: true });
   assert.equal(result.status, 'CLAIMED');
-  assert.equal(result.crmConversionStatus, 'CONVERTED');
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].input.claimTokenId, state.token.id);
-  assert.equal(calls[0].input.marketplaceCaptureId, state.capture.id);
+  assert.equal(result.contactId, 'contact-1');
+  assert.equal(result.dealId, 'deal-1');
+  assert.equal(result.crmConversionStatus, 'UPDATED');
+  assert.equal(state.dealUpdates.length, 1);
+  assert.equal(state.dealUpdates[0].metadata.claimTokenId, state.token.id);
+  assert.equal(state.dealUpdates[0].metadata.ownershipVerified, true);
+  assert.equal(state.dealUpdates[0].metadata.source, 'MARKETPLACE_ACQUISITION', 'enrichment preserves prior deal metadata');
 });
 
-test('accept still returns CLAIMED (never a false 500) when inline CRM conversion throws', async () => {
-  const crmConversionRuntime = { async enqueueForCompletedClaim() { throw new Error('conversion backend unavailable'); } };
-  const { service, state } = makeService({ capture: { ...makeService().state.capture, status: 'CLAIM_STARTED' } }, { crmConversionRuntime });
+test('repeat accept on an already-claimed capture reports ALREADY_CONVERTED without re-enriching', async () => {
+  const { service, state } = makeService({ capture: { ...makeService().state.capture, status: 'CLAIM_STARTED' } });
+  await service.accept(baseContext, 'raw-token', { acceptedTerms: true });
+  assert.equal(state.dealUpdates.length, 1);
   const result = await service.accept(baseContext, 'raw-token', { acceptedTerms: true });
   assert.equal(result.status, 'CLAIMED');
-  assert.equal(result.crmConversionStatus, 'CONVERSION_FAILED');
+  assert.equal(result.contactId, 'contact-1');
+  assert.equal(result.dealId, 'deal-1');
+  assert.equal(result.crmConversionStatus, 'ALREADY_CONVERTED');
+  assert.equal(state.dealUpdates.length, 1, 'repeat claim acceptance must not duplicate CRM enrichment');
+});
+
+test('accept still returns CLAIMED (never a false 500) when Deal enrichment fails, and never fabricates UPDATED', async () => {
+  const deals = { async findById() { throw new Error('deal backend unavailable'); }, async update() { throw new Error('deal backend unavailable'); }, async updateStage(tenantId, dealId, stageId) { return { id: dealId, tenantId, pipelineStageId: stageId, updatedAt: now.toISOString() }; } };
+  const { service, state } = makeService({ capture: { ...makeService().state.capture, status: 'CLAIM_STARTED' } }, { deals });
+  const result = await service.accept(baseContext, 'raw-token', { acceptedTerms: true });
+  assert.equal(result.status, 'CLAIMED');
+  assert.equal(result.contactId, 'contact-1');
+  assert.equal(result.dealId, 'deal-1');
+  assert.equal(result.crmConversionStatus, 'ALREADY_CONVERTED');
   assert.equal(state.capture.status, 'CLAIMED');
+});
+
+test('accept on a capture with no CRM linkage reports NOT_ELIGIBLE and never fabricates a conversion', async () => {
+  const { service, state } = makeService({ capture: { ...makeService().state.capture, status: 'CLAIM_STARTED', contactId: null, dealId: null } });
+  const result = await service.accept(baseContext, 'raw-token', { acceptedTerms: true });
+  assert.equal(result.status, 'CLAIMED');
+  assert.equal(result.contactId, undefined);
+  assert.equal(result.dealId, undefined);
+  assert.equal(result.crmConversionStatus, 'NOT_ELIGIBLE');
+  assert.deepEqual(state.dealUpdates ?? [], [], 'no deal update ever attempted');
 });

@@ -4,9 +4,9 @@ import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { createPrismaRepositories, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { createPrismaRepositories, PrismaAcquisitionUsageEventRepository, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { SellerAcquisitionCampaignService } from "@whisperm/services";
-import { createWhispeRMServices, ServiceError } from "@whisperm/services";
+import { AcquisitionUsageMeteringService, createWhispeRMServices, ServiceError } from "@whisperm/services";
 
 const clean = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
@@ -153,7 +153,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
-    const services = createWhispeRMServices(repositories);
+    const usageMetering = new AcquisitionUsageMeteringService({ usageEvents: new PrismaAcquisitionUsageEventRepository(prisma as unknown as PrismaPersistenceClient) });
+    const services = createWhispeRMServices({ ...repositories, usageMetering });
 
     const result = await services.marketplaceAcquisition.capture(
       {
@@ -175,7 +176,11 @@ export async function POST(request: NextRequest) {
         await campaignSvc.addSeller(
           { tenantId: tenant.id },
           campaignId,
-          { marketplaceCaptureId: result.captureId }
+          {
+            marketplaceCaptureId: result.captureId,
+            ...(result.contactId === undefined ? {} : { contactId: result.contactId }),
+            ...(result.dealId === undefined ? {} : { dealId: result.dealId }),
+          }
         );
       } catch {
         // Non-fatal: capture succeeded, campaign assignment failed silently

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { MarketplaceCaptureService } from "./marketplace-acquisition/capture-service.js";
 import { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
 import { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
+import { recordUsageEventBestEffort, type AcquisitionUsageMeteringService } from "./acquisition-usage-metering.js";
 export { SellerAcquisitionAnalyticsService } from "./acquisition-analytics.js";
 export { AcquisitionUsageMeteringService, recordUsageEventBestEffort } from "./acquisition-usage-metering.js";
 export type { AcquisitionUsageMeteringDependencies, RecordAcquisitionUsageEventInput, GetUsageSummaryInput, AcquisitionUsageEventRecord, AcquisitionUsageEventSummary, AcquisitionUsageEventTotal, AcquisitionUsageEventType } from "./acquisition-usage-metering.js";
@@ -332,6 +333,8 @@ export interface ServiceDependencies extends ServiceRepositories {
   readonly transactions?: ServiceTransactionManager | undefined;
   readonly contactPlans?: ContactPlanReader | undefined;
   readonly revenueAttribution?: RevenueAttributionTriggerPort | undefined;
+  /** ST-005: best-effort billable-usage recording for the canonical capture-time CRM conversion; never blocks capture on failure. */
+  readonly usageMetering?: Pick<AcquisitionUsageMeteringService, "recordUsageEvent"> | undefined;
 }
 
 export interface DomainEventInput {
@@ -1239,6 +1242,7 @@ const marketplaceCaptureInputSchema = z.object({
 export type MarketplaceCaptureServiceInput = z.output<typeof marketplaceCaptureInputSchema>;
 export type MarketplaceCaptureQualificationStatus = "QUALIFIED" | "UNQUALIFIED";
 export type MarketplaceCaptureQualificationReason = "PHONE_REQUIRED";
+export type MarketplaceCaptureCrmConversionStatus = "CREATED" | "EXISTING" | "NOT_ELIGIBLE";
 export interface MarketplaceCaptureServiceResult {
   readonly captureId: string;
   readonly contactId?: string | undefined;
@@ -1251,6 +1255,8 @@ export interface MarketplaceCaptureServiceResult {
   readonly status: string;
   readonly qualificationStatus: MarketplaceCaptureQualificationStatus;
   readonly qualificationReason?: MarketplaceCaptureQualificationReason | undefined;
+  /** ST-005: canonical CRM conversion signal -- capture-time Contact/Deal creation is the single conversion mechanism for V1. */
+  readonly crmConversionStatus: MarketplaceCaptureCrmConversionStatus;
   readonly contactCreated: boolean;
   readonly portfolioCaptureCount?: number | undefined;
   readonly createdCaptureIds?: readonly string[] | undefined;
@@ -1757,6 +1763,19 @@ export class MarketplaceAcquisitionCaptureService {
         });
       }
       await appendAudit(repositories, context, { action: "MARKETPLACE_CAPTURED", targetType: "MARKETPLACE_CAPTURE", targetId: finalCapture.id, metadata: { contactId: contactResult.contact.id, dealId: dealResult.deal.id } });
+      // ST-005: capture-time Contact/Deal creation is the single canonical CRM conversion mechanism for V1 --
+      // it is CREATED the first time a qualified seller gets a Contact/Deal pair, EXISTING on every idempotent
+      // re-capture of the same seller/listing afterward.
+      const crmConversionStatus: MarketplaceCaptureCrmConversionStatus = contactResult.strategy === "created" || dealResult.created ? "CREATED" : "EXISTING";
+      if (crmConversionStatus === "CREATED" && this.deps.usageMetering !== undefined) {
+        await recordUsageEventBestEffort(this.deps.usageMetering, tenantScope, {
+          eventType: "CRM_CONVERSION_CREATED",
+          captureId: finalCapture.id,
+          contactId: contactResult.contact.id,
+          dealId: dealResult.deal.id,
+          idempotencyKey: `usage:CRM_CONVERSION_CREATED:${context.tenantId}:${finalCapture.id}:${contactResult.contact.id}:${dealResult.deal.id}`,
+        });
+      }
       return {
         captureId: finalCapture.id,
         contactId: contactResult.contact.id,
@@ -1767,6 +1786,7 @@ export class MarketplaceAcquisitionCaptureService {
         draftInventoryId,
         status: finalCapture.status,
         qualificationStatus: "QUALIFIED",
+        crmConversionStatus,
         contactCreated: contactResult.strategy === "created",
         sellerIdentityStrategy: contactResult.strategy,
         portfolioCaptureCount: listingInputs.length,
@@ -1854,6 +1874,7 @@ export class MarketplaceAcquisitionCaptureService {
       status: finalCapture.status,
       qualificationStatus: "UNQUALIFIED",
       qualificationReason: reason,
+      crmConversionStatus: "NOT_ELIGIBLE",
       contactCreated: false,
       sellerIdentityStrategy: "unqualified",
       portfolioCaptureCount: listingInputs.length,

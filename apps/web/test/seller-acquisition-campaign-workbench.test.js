@@ -104,10 +104,12 @@ test('workbench renders claim intelligence state from API projection', () => {
   assert.match(domain, /Stalled reason/);
 });
 
-test('workbench renders CRM conversion state from capture metadata without executing conversion', () => {
+test('workbench renders CRM conversion state from canonical Contact/Deal linkage, not dead post-claim runtime metadata', () => {
   assert.match(component, /CRM conversion/u);
   assert.match(component, /crmConversionStatus\(record\)/u);
-  assert.match(component, /crmConversionContactId/u);
-  assert.match(component, /crmConversionDealId/u);
+  assert.match(component, /record\.contact !== null && record\.deal !== null/u);
+  assert.doesNotMatch(component, /crmConversionContactId/u);
+  assert.doesNotMatch(component, /crmConversionDealId/u);
+  assert.doesNotMatch(component, /crmConversionFailureCode/u);
   assert.doesNotMatch(component, /executeConversion\(/u);
 });

@@ -570,6 +570,75 @@ test("phone missing is blocked for qualification and email-only does not qualify
   assert.equal(capture.metadata.whatsappCandidate, false);
 });
 
+const createUsageMetering = () => {
+  const events = [];
+  return {
+    events,
+    async recordUsageEvent(scope, input) {
+      const existing = events.find((event) => event.idempotencyKey === input.idempotencyKey);
+      if (existing) return existing;
+      const event = { id: `usage-${events.length + 1}`, tenantId: scope.tenantId, ...input };
+      events.push(event);
+      return event;
+    },
+  };
+};
+
+test("qualified capture reports crmConversionStatus CREATED and records CRM_CONVERSION_CREATED exactly once", async () => {
+  const usageMetering = createUsageMetering();
+  const repositories = createRepositories();
+  const services = createWhispeRMServices({ ...repositories, usageMetering });
+
+  const result = await services.marketplaceAcquisition.capture(context, captureInput);
+
+  assert.equal(result.crmConversionStatus, "CREATED");
+  assert.equal(usageMetering.events.length, 1);
+  assert.equal(usageMetering.events[0].eventType, "CRM_CONVERSION_CREATED");
+  assert.equal(usageMetering.events[0].tenantId, "tenant-a");
+  assert.equal(usageMetering.events[0].captureId, result.captureId);
+  assert.equal(usageMetering.events[0].contactId, result.contactId);
+  assert.equal(usageMetering.events[0].dealId, result.dealId);
+});
+
+test("repeated qualified capture reports EXISTING and does not record a duplicate CRM_CONVERSION_CREATED event", async () => {
+  const usageMetering = createUsageMetering();
+  const repositories = createRepositories();
+  const services = createWhispeRMServices({ ...repositories, usageMetering });
+
+  const first = await services.marketplaceAcquisition.capture(context, captureInput);
+  const second = await services.marketplaceAcquisition.capture(context, captureInput);
+
+  assert.equal(first.crmConversionStatus, "CREATED");
+  assert.equal(second.crmConversionStatus, "EXISTING");
+  assert.equal(usageMetering.events.length, 1, "usage metering must fire exactly once for the canonical CRM conversion");
+});
+
+test("unqualified capture reports crmConversionStatus NOT_ELIGIBLE and records no CRM conversion usage event", async () => {
+  const usageMetering = createUsageMetering();
+  const repositories = createRepositories();
+  const services = createWhispeRMServices({ ...repositories, usageMetering });
+
+  const result = await services.marketplaceAcquisition.capture(context, { ...captureInput, sellerPhone: undefined, phone: undefined });
+
+  assert.equal(result.qualificationStatus, "UNQUALIFIED");
+  assert.equal(result.crmConversionStatus, "NOT_ELIGIBLE");
+  assert.equal(usageMetering.events.length, 0);
+});
+
+test("CRM conversion usage event idempotency key is scoped by tenant, capture, contact, and deal", async () => {
+  const usageMetering = createUsageMetering();
+  const repositories = createRepositories();
+  const services = createWhispeRMServices({ ...repositories, usageMetering });
+
+  const result = await services.marketplaceAcquisition.capture(context, captureInput);
+
+  const [event] = usageMetering.events;
+  assert.ok(event.idempotencyKey.includes("tenant-a"));
+  assert.ok(event.idempotencyKey.includes(result.captureId));
+  assert.ok(event.idempotencyKey.includes(result.contactId));
+  assert.ok(event.idempotencyKey.includes(result.dealId));
+});
+
 test("same marketplace name without phone creates capture drafts without any contact or deal", async () => {
   const repositories = createRepositories();
   const services = createWhispeRMServices(repositories);

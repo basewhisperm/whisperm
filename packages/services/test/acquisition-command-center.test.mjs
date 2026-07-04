@@ -123,12 +123,23 @@ test('claimed sellers advance the claimed funnel stage', async () => {
 });
 
 test('CRM converted sellers advance the crmConverted funnel stage', async () => {
-  const members = [member({ status: 'CONVERTED', dealId: 'deal-1' })];
+  const members = [member({ status: 'CONVERTED', contactId: 'contact-1', dealId: 'deal-1' })];
   const deals = [deal({ id: 'deal-1' })];
   const service = buildService({ members, deals });
   const snapshot = await service.getSnapshot({ tenantId: 'tenant-1' });
   assert.equal(snapshot.funnel.crmConverted, 1);
   assert.equal(snapshot.funnel.dealsCreated, 1);
+});
+
+test('crmConverted follows the canonical Contact+Deal signal, not the pipeline status label', async () => {
+  const members = [
+    member({ status: 'ADDED', contactId: 'contact-1', dealId: 'deal-1' }),
+    member({ status: 'CONVERTED', dealId: null }),
+  ];
+  const deals = [deal({ id: 'deal-1' })];
+  const service = buildService({ members, deals });
+  const snapshot = await service.getSnapshot({ tenantId: 'tenant-1' });
+  assert.equal(snapshot.funnel.crmConverted, 1, 'a Contact+Deal pair counts as converted even at status ADDED');
 });
 
 test('deals with revenue attribution feed revenue and the final funnel stage', async () => {
@@ -202,7 +213,7 @@ test('a paused campaign is flagged with a NO_ACTIVE_CAMPAIGN warning even though
 
 test('tenant isolation: another tenant\'s campaigns and members never surface in the snapshot', async () => {
   const campaigns = [campaign({ id: 'campaign-1', tenantId: 'tenant-1' }), campaign({ id: 'campaign-2', tenantId: 'tenant-2', name: 'Other tenant campaign' })];
-  const members = [member({ campaignId: 'campaign-2', tenantId: 'tenant-2', status: 'CONVERTED' })];
+  const members = [member({ campaignId: 'campaign-2', tenantId: 'tenant-2', status: 'CONVERTED', contactId: 'contact-other', dealId: 'deal-other' })];
   const service = buildService({ campaigns, members });
   const snapshot = await service.getSnapshot({ tenantId: 'tenant-1' });
   assert.equal(snapshot.campaignId, 'campaign-1');
