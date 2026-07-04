@@ -11,6 +11,7 @@ import {
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { AcquisitionUsageMeteringService, SellerClaimPortalService, type ClaimTokenRecord, type ClaimTokenRepository } from "@whisperm/services";
+import { createInlineCrmConversionForClaimPortal } from "./crm-conversion";
 
 const normalize = (value: unknown): unknown => {
   if (value instanceof Date) return value.toISOString();
@@ -49,5 +50,6 @@ export const createSellerClaimService = (): SellerClaimPortalService => {
     auditLogs: new PrismaAuditLogRepository(client),
     activities: new PrismaActivityRepository(client),
     usageMetering: new AcquisitionUsageMeteringService({ usageEvents: new PrismaAcquisitionUsageEventRepository(client) }),
+    crmConversionRuntime: createInlineCrmConversionForClaimPortal(client),
   });
 };

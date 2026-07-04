@@ -183,6 +183,74 @@ test('max retry exhaustion dead-letters invitation execution', async () => {
   assert.equal(result.metrics.invitationExecutionState, 'DEAD_LETTERED');
 });
 
+test('executeInvitation with an invitationExecutor sends inline and returns COMPLETED, not a queued success', async () => {
+  const sendCalls = [];
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    invitationExecutor: { async sendInvitation(context, input) { sendCalls.push({ context, input }); return { invitationId: 'invite-1', status: 'SENT', provider: 'WHATSAPP' }; } },
+    invitationQueue: { async enqueueInvitation() { throw new Error('golden path must not depend on the queue when an executor is configured'); } },
+  });
+  const execution = await runtime.executeInvitation(
+    { tenantId: 'tenant-1' },
+    { campaignId: 'campaign-1', opportunityId: 'capture-1', preferredChannel: 'WHATSAPP', initiatedBy: 'user-1', correlationId: 'corr-1' },
+  );
+  assert.equal(execution.status, 'COMPLETED');
+  assert.equal(execution.metrics.invitationExecutionState, 'DELIVERED');
+  assert.equal(execution.metrics.invitationId, 'invite-1');
+  assert.equal(sendCalls.length, 1);
+  assert.equal(sendCalls[0].input.captureId, 'capture-1');
+  assert.equal(sendCalls[0].input.channel, 'WHATSAPP');
+});
+
+test('executeInvitation reports FAILED (not a false success) when the inline executor throws', async () => {
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    invitationExecutor: { async sendInvitation() { const error = new Error('provider rejected'); error.code = 'SERVICE_PROVIDER_UNAVAILABLE'; error.retryable = false; throw error; } },
+  });
+  const execution = await runtime.executeInvitation(
+    { tenantId: 'tenant-1' },
+    { campaignId: 'campaign-1', opportunityId: 'capture-1', preferredChannel: 'WHATSAPP' },
+  );
+  assert.equal(execution.status, 'FAILED');
+  assert.equal(execution.errorCode, 'SERVICE_PROVIDER_UNAVAILABLE');
+  assert.equal(execution.metrics.invitationExecutionState, 'DEAD_LETTERED');
+});
+
+test('executeInvitation with an executor does not double-send when a prior invitation was already delivered', async () => {
+  const sendCalls = [];
+  const sellerInvitations = { async listSellerInvitationsByMarketplaceCaptureId() { return [{ channel: 'WHATSAPP', status: 'SENT', metadata: {} }]; } };
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    sellerInvitations,
+    invitationExecutor: { async sendInvitation(context, input) { sendCalls.push(input); return { invitationId: 'invite-2', status: 'SENT' }; } },
+  });
+  const execution = await runtime.executeInvitation(
+    { tenantId: 'tenant-1' },
+    { campaignId: 'campaign-1', opportunityId: 'capture-1', preferredChannel: 'WHATSAPP' },
+  );
+  assert.equal(execution.status, 'COMPLETED');
+  assert.equal(execution.metrics.suppressionReason, 'DUPLICATE_INVITATION_PREVENTED');
+  assert.equal(sendCalls.length, 0);
+});
+
+test('retryInvitationExecution with an invitationExecutor dispatches inline instead of only re-enqueueing', async () => {
+  const executions = new MemoryExecutions();
+  const sendCalls = [];
+  const service = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions,
+    invitationExecutor: { async sendInvitation(context, input) { sendCalls.push(input); return { invitationId: 'invite-1', status: 'SENT' }; } },
+    invitationQueue: { async enqueueInvitation() { throw new Error('manual retry must not depend on the queue when an executor is configured'); } },
+  });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'FAILED', metrics: { invitationExecutionState: 'DEAD_LETTERED', opportunityId: 'capture-1', invitationId: 'invite-1', channel: 'WHATSAPP', retryCount: 3, maxRetries: 3 } });
+  const result = await service.retryInvitationExecution({ tenantId: 'tenant-1' }, created.id);
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(sendCalls.length, 1);
+});
+
 test('manual retry is tenant-scoped and dispatches through existing queue path', async () => {
   const executions = new MemoryExecutions();
   const calls = [];

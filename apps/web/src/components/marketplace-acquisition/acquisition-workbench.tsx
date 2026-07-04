@@ -566,13 +566,18 @@ export function AcquisitionWorkbench({
         body: JSON.stringify({ captureIds: selectedBulkRecords.map((r) => r.capture.id), channel: "WHATSAPP" }),
       });
       const payload = await response.json().catch(() => ({}));
-      const queued = (payload as { data?: { queued?: number; invalid?: string[] } })?.data?.queued ?? 0;
-      const invalidCount = (payload as { data?: { invalid?: string[] } })?.data?.invalid?.length ?? 0;
+      const data = (payload as { data?: { completed?: number; pending?: number; failed?: number; invalid?: string[] } })?.data;
+      const completed = data?.completed ?? 0;
+      const pending = data?.pending ?? 0;
+      const failed = data?.failed ?? 0;
+      const invalidCount = data?.invalid?.length ?? 0;
       setSelectedBulkIds([]);
       await refreshRecords();
       setActionError(null);
       const parts: string[] = [];
-      if (queued > 0) parts.push(`${queued} invitation${queued === 1 ? "" : "s"} queued.`);
+      if (completed > 0) parts.push(`${completed} invitation${completed === 1 ? "" : "s"} sent.`);
+      if (pending > 0) parts.push(`${pending} invitation${pending === 1 ? "" : "s"} pending.`);
+      if (failed > 0) parts.push(`${failed} invitation${failed === 1 ? "" : "s"} failed.`);
       if (invalidCount > 0) parts.push(`${invalidCount} skipped — no valid phone.`);
       if (parts.length > 0) {
         setActionError(parts.join(" "));

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { PersistenceError, PrismaCampaignRuntimeExecutionRepository, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { CampaignRuntimeService, type CampaignRuntimeInvitationQueue } from "@whisperm/services";
+import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
 
 interface RouteContext { readonly params: { readonly campaignId: string; readonly executionId: string } }
 
@@ -43,6 +44,7 @@ const runtimeService = () => new CampaignRuntimeService({
   campaigns: new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient),
   executions: new PrismaCampaignRuntimeExecutionRepository(prisma as unknown as PrismaPersistenceClient),
   invitationQueue: invitationQueue(),
+  invitationExecutor: createSellerInvitationExecutor(prisma as unknown as PrismaPersistenceClient),
 });
 
 export async function POST(_request: Request, context: RouteContext) {
@@ -65,15 +67,18 @@ export async function POST(_request: Request, context: RouteContext) {
     if (existing === null || existing.campaignId !== context.params.campaignId) return errorResponse("Campaign runtime execution not found", 404);
     const execution = await service.retryInvitationExecution({ tenantId: tenant.id }, context.params.executionId);
     const metrics = typeof execution.metrics === "object" && execution.metrics !== null ? execution.metrics : {};
+    if (execution.status === "FAILED") {
+      return NextResponse.json({ ok: false, error: { message: execution.errorMessage ?? "Seller invitation retry failed", code: execution.errorCode ?? "INVITATION_DELIVERY_FAILED" } }, { status: 502 });
+    }
     return NextResponse.json({
       ok: true,
       data: {
         executionId: execution.id,
-        status: execution.status,
+        status: execution.status === "COMPLETED" ? "COMPLETED" : "PENDING",
         retryCount: typeof metrics.retryCount === "number" ? metrics.retryCount : 0,
         nextRetryAt: typeof metrics.nextRetryAt === "string" ? metrics.nextRetryAt : null,
       },
-    }, { status: 202 });
+    }, { status: execution.status === "COMPLETED" ? 200 : 202 });
   } catch (error) {
     if (error instanceof PersistenceError) return errorResponse(error.message, error.status);
     return errorResponse("Invitation execution retry failed.", 500);

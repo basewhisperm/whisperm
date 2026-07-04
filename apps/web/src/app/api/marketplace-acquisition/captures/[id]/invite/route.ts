@@ -9,10 +9,13 @@ import {
   PersistenceError,
   PrismaCampaignRuntimeExecutionRepository,
   PrismaSellerAcquisitionCampaignRepository,
+  PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { CampaignRuntimeService, type CampaignRuntimeInvitationQueue } from "@whisperm/services";
 import { sellerInvitationCreateRequestSchema } from "@whisperm/types";
+import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
+import { invitationExecutionResponse } from "@/lib/marketplace-acquisition/invitation-execution-response";
 
 interface RouteContext { readonly params: { readonly id: string } }
 
@@ -47,7 +50,9 @@ const invitationQueue = (): CampaignRuntimeInvitationQueue => ({
 const runtimeService = () => new CampaignRuntimeService({
   campaigns: new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient),
   executions: new PrismaCampaignRuntimeExecutionRepository(prisma as unknown as PrismaPersistenceClient),
+  sellerInvitations: new PrismaSellerInvitationRepository(prisma as unknown as PrismaPersistenceClient),
   invitationQueue: invitationQueue(),
+  invitationExecutor: createSellerInvitationExecutor(prisma as unknown as PrismaPersistenceClient),
 });
 
 const resolveCampaignId = async (tenantId: string, captureId: string): Promise<string | null> => {
@@ -103,7 +108,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         correlationId,
       },
     );
-    return NextResponse.json({ ok: true, data: { executionId: execution.id, status: "ACCEPTED" } }, { status: 202 });
+    return invitationExecutionResponse(execution);
   } catch (error) {
     if (error instanceof PersistenceError) {
       return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });

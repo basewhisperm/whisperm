@@ -64,7 +64,7 @@ export class SellerClaimPortalService {
     return this.toPreview(token, refreshed, draft, token.status);
   }
 
-  async accept(context: { readonly correlation: PersistenceCorrelationMetadata }, rawToken: string, input: unknown): Promise<{ readonly status: "CLAIMED"; readonly captureId: string; readonly draftInventoryId: string | null; readonly attestationId: string | null; readonly claimedAt: string }> {
+  async accept(context: { readonly correlation: PersistenceCorrelationMetadata }, rawToken: string, input: unknown): Promise<{ readonly status: "CLAIMED"; readonly captureId: string; readonly draftInventoryId: string | null; readonly attestationId: string | null; readonly claimedAt: string; readonly crmConversionStatus?: string | undefined }> {
     const data = acceptInputSchema.parse(input);
     const token = await this.resolveToken(context.correlation, rawToken);
     if (this.isExpired(token) || token.status === "EXPIRED") throw new SellerClaimPortalError({ code: "SERVICE_INVALID_STATE_TRANSITION", message: "Claim invitation is expired", status: 410, correlation: context.correlation });
@@ -115,8 +115,17 @@ export class SellerClaimPortalService {
         idempotencyKey: `usage:SELLER_CLAIMED:${token.tenantId}:${token.id}`,
       });
     }
-    await this.deps.crmConversionRuntime?.enqueueForCompletedClaim({ tenantId: token.tenantId, correlation: context.correlation }, { tenantId: token.tenantId, claimTokenId: token.id, marketplaceCaptureId: capture.id });
-    return { status: "CLAIMED", captureId: capture.id, draftInventoryId: draft.id, attestationId: attestation.id, claimedAt };
+    // CRM conversion runs inline in the same request when configured (ST-003): claim
+    // acceptance must already be recorded above, so a conversion failure here must never
+    // fail (or roll back the appearance of) the claim response the seller already completed.
+    let crmConversionStatus: string | undefined;
+    try {
+      const conversion = await this.deps.crmConversionRuntime?.enqueueForCompletedClaim({ tenantId: token.tenantId, correlation: context.correlation }, { tenantId: token.tenantId, claimTokenId: token.id, marketplaceCaptureId: capture.id });
+      crmConversionStatus = conversion !== null && typeof conversion === "object" && "status" in conversion ? String((conversion as { readonly status: unknown }).status) : undefined;
+    } catch {
+      crmConversionStatus = "CONVERSION_FAILED";
+    }
+    return { status: "CLAIMED", captureId: capture.id, draftInventoryId: draft.id, attestationId: attestation.id, claimedAt, ...(crmConversionStatus === undefined ? {} : { crmConversionStatus }) };
   }
 
   private async resolveToken(correlation: PersistenceCorrelationMetadata, rawToken: string): Promise<ClaimTokenRecord> { const clean = idSchema.parse(rawToken); const hash = hashClaimToken(clean); const token = await this.deps.claimTokens.findByTokenHash(hash); if (token === null || !safeEqual(token.tokenHash, hash)) throw new SellerClaimPortalError({ code: "SERVICE_NOT_FOUND", message: "Claim invitation not found", status: 404, correlation }); return token; }

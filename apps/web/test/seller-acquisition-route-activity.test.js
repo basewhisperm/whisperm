@@ -72,6 +72,10 @@ const repositories = (state) => ({
       state.invitations[index] = row;
       return row;
     },
+    async listSellerInvitationsByMarketplaceCaptureId(scope, id) {
+      assert.equal(scope.tenantId, tenantId);
+      return state.invitations.filter((row) => row.marketplaceCaptureId === id);
+    },
   },
   renderConversions: {
     async findSuccessfulSellerConversion() { return state.conversions.find((row) => row.conversionKind === 'SELLER' && row.status === 'SUCCESS') ?? null; },
@@ -92,19 +96,41 @@ const claimService = (state) => new SellerClaimPortalService({
 const servicesUrl = import.meta.resolve('@whisperm/services');
 const typesUrl = import.meta.resolve('@whisperm/types');
 
+const sharedModuleReplacements = (tempDir) => (source) => source
+  .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
+  .replaceAll('from "@whisperm/provider-adapters"', `from "${join(tempDir, 'provider-adapters.mjs')}"`)
+  .replaceAll('from "@whisperm/types"', `from "${typesUrl}"`)
+  .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
+  .replaceAll('from "@whisperm/services"', `from "${servicesUrl}"`);
+
+// The invite route pulls in these two web-only lib modules (not aliased elsewhere in this
+// harness); transpile the real source with the same stub redirections so the E2E test still
+// exercises the actual inline-dispatch logic instead of a hand-written stand-in.
+const transpileWebLib = (relativeLibPath, tempDir, fileName) => {
+  const libPath = new URL(`../src/${relativeLibPath}`, import.meta.url).pathname;
+  const source = sharedModuleReplacements(tempDir)(readFileSync(libPath, 'utf8'));
+  const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const file = join(tempDir, fileName);
+  writeFileSync(file, output);
+  return file;
+};
+
 const transpileRoute = (routePath, tempDir) => {
-  let source = readFileSync(routePath, 'utf8')
-    .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
+  let source = sharedModuleReplacements(tempDir)(readFileSync(routePath, 'utf8'))
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
     .replace(/from "@\/lib\/acquisition-governance"/gu, `from "${join(tempDir, 'acquisition-governance.mjs')}"`)
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
     .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
     .replace(/from "@\/lib\/claims\/seller-claim-service"/gu, `from "${join(tempDir, 'claim-service.mjs')}"`)
-    .replace(/from "@\/lib\/api\/request-body"/gu, `from "${join(tempDir, 'request-body.mjs')}"`)
-    .replaceAll('from "@whisperm/provider-adapters"', `from "${join(tempDir, 'provider-adapters.mjs')}"`)
-    .replaceAll('from "@whisperm/types"', `from "${typesUrl}"`)
-    .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
-    .replaceAll('from "@whisperm/services"', `from "${servicesUrl}"`);
+    .replace(/from "@\/lib\/api\/request-body"/gu, `from "${join(tempDir, 'request-body.mjs')}"`);
+  if (source.includes('@/lib/marketplace-acquisition/invitation-executor')) {
+    const file = transpileWebLib('lib/marketplace-acquisition/invitation-executor.ts', tempDir, 'invitation-executor.mjs');
+    source = source.replace(/from "@\/lib\/marketplace-acquisition\/invitation-executor"/gu, `from "${file}"`);
+  }
+  if (source.includes('@/lib/marketplace-acquisition/invitation-execution-response')) {
+    const file = transpileWebLib('lib/marketplace-acquisition/invitation-execution-response.ts', tempDir, 'invitation-execution-response.mjs');
+    source = source.replace(/from "@\/lib\/marketplace-acquisition\/invitation-execution-response"/gu, `from "${file}"`);
+  }
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
   const file = join(tempDir, `${relative(new URL('../src/app/api/marketplace-acquisition', import.meta.url).pathname, routePath).replaceAll('/', '-')}.mjs`);
   writeFileSync(file, output);
@@ -151,7 +177,7 @@ const createHarness = async (state, options = {}) => {
     'export class PrismaSellerInvitationRepository { constructor() { return globalThis.__routeRepositories.sellerInvitations; } }',
     'export class PersistenceError extends Error { constructor(input = {}) { super(input.message ?? "Persistence error"); this.code = input.code ?? "PERSISTENCE_ERROR"; this.status = input.status ?? 500; this.details = input.details; } }',
     'export class PrismaSellerAcquisitionCampaignRepository { constructor() { return { async findById() { return { id: "campaign-1", tenantId: "tenant-1", name: "Test Campaign", status: "ACTIVE", createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z", metadata: {} }; } }; } }',
-    'export class PrismaCampaignRuntimeExecutionRepository { constructor() { return { async create(scope, input) { const row = { id: "execution-1", ...input, createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; }, async update(scope, id, input) { const row = { ...(globalThis.__routeState.execution ?? { id, tenantId: scope.tenantId, campaignId: "campaign-1" }), ...input, id, updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; } }; } }',
+    'export class PrismaCampaignRuntimeExecutionRepository { constructor() { return { async create(scope, input) { const row = { id: "execution-1", ...input, createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; }, async findById(scope, id) { const row = globalThis.__routeState.execution; return row && row.id === id ? row : null; }, async update(scope, id, input) { const row = { ...(globalThis.__routeState.execution ?? { id, tenantId: scope.tenantId, campaignId: "campaign-1" }), ...input, id, updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; } }; } }',
     'export const createPrismaRepositories = () => globalThis.__routeRepositories;',
     '',
   ].join('\n'));
@@ -266,16 +292,26 @@ test('seller acquisition invite-to-completion route E2E creates claim token and 
   try {
     const inviteResponse = await harness.invite.POST(makeRequest({ preferredChannel: 'SMS' }), { params: { id: captureId } });
     const inviteText = await inviteResponse.text();
-    assert.equal(inviteResponse.status, 202, inviteText);
+    assert.equal(inviteResponse.status, 200, inviteText);
     const inviteJson = JSON.parse(inviteText);
 
+    // ST-003: a 2xx invite response must mean the invitation was actually sent, not merely
+    // queued -- COMPLETED here reflects the real inline SMS send via the stubbed provider.
     assert.deepEqual(inviteJson, {
       ok: true,
       data: {
         executionId: 'execution-1',
-        status: 'ACCEPTED',
+        status: 'COMPLETED',
+        invitationId: 'invite-1',
+        channel: 'SMS',
       },
     });
+    assert.equal(sentMessages.length, 1);
+
+    // ST-003: the invite now genuinely creates its own claim token/invite link (rather than
+    // enqueueing a no-op job), so the claim step must use the real token from the sent SMS
+    // body instead of the pre-seeded fixture token.
+    const sentToken = sentMessages[0].body.split('/').pop();
 
     for (const [route, body] of [
       [harness.accept, { acceptedTerms: true, claimantName: 'Sam Seller' }],
@@ -283,7 +319,7 @@ test('seller acquisition invite-to-completion route E2E creates claim token and 
       [harness.inventory],
       [harness.complete],
     ]) {
-      const response = await route.POST(makeRequest(body), { params: route === harness.accept ? { token } : { id: captureId } });
+      const response = await route.POST(makeRequest(body), { params: route === harness.accept ? { token: sentToken } : { id: captureId } });
       assert.equal(response.status, 200, await response.text());
     }
   } finally {
