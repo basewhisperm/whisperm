@@ -30,6 +30,7 @@ export function ChannelSelector({
         return (
           <button
             aria-pressed={selected}
+            data-testid={`channel-option-${option}`}
             className={
               selected
                 ? "rounded-full bg-whisper px-4 py-2 text-sm font-semibold text-white"

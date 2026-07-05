@@ -22,14 +22,14 @@ function Field({ name, value, onChange }: { readonly name: string; readonly valu
   return (
     <label className="block rounded-xl bg-secondary p-3 text-sm" style={{ border: "0.5px solid hsl(var(--border))" }}>
       <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{name}</span>
-      <input className="mt-2 w-full rounded-md bg-background px-3 py-2 text-foreground" value={value} onChange={(event) => onChange(name, event.target.value)} />
+      <input data-testid={`intake-field-${name}`} className="mt-2 w-full rounded-md bg-background px-3 py-2 text-foreground" value={value} onChange={(event) => onChange(name, event.target.value)} />
     </label>
   );
 }
 
 function ResultRow({ label, ok, detail }: { readonly label: string; readonly ok: boolean; readonly detail: string }) {
   return (
-    <div className="flex items-start justify-between gap-3 rounded-xl bg-background p-3" style={{ border: "0.5px solid hsl(var(--border))" }}>
+    <div data-testid={`result-row-${label.toLowerCase().replace(/\s+/g, "-")}`} className="flex items-start justify-between gap-3 rounded-xl bg-background p-3" style={{ border: "0.5px solid hsl(var(--border))" }}>
       <div>
         <p className="text-sm font-medium text-foreground">{label}</p>
         <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
@@ -59,10 +59,10 @@ function CaptureResult({ data }: { readonly data: Record<string, unknown> | unde
   const nextAction = isQualified ? "Send WhatsApp invitation" : "Edit phone and retry qualification";
 
   return (
-    <section className="rounded-2xl bg-secondary p-4" style={{ border: "0.5px solid hsl(var(--border))" }}>
+    <section data-testid="capture-result" className="rounded-2xl bg-secondary p-4" style={{ border: "0.5px solid hsl(var(--border))" }}>
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Capture result</p>
-        <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: isQualified ? "var(--color-secondary)" : "var(--color-muted)", color: isQualified ? "var(--color-growth)" : "var(--color-health-amber)" }}>
+        <span data-testid="capture-qualification-badge" className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: isQualified ? "var(--color-secondary)" : "var(--color-muted)", color: isQualified ? "var(--color-growth)" : "var(--color-health-amber)" }}>
           {badgeLabel}
         </span>
       </div>
@@ -171,7 +171,7 @@ function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCap
         </label>
       ) : null}
 
-      <button className="rounded-full bg-whisper px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={state.status === "submitting" || selectedCampaignId.trim().length === 0} onClick={submit} type="button">
+      <button data-testid="intake-submit" className="rounded-full bg-whisper px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={state.status === "submitting" || selectedCampaignId.trim().length === 0} onClick={submit} type="button">
         {state.status === "submitting" ? "Saving capture…" : "Submit capture"}
       </button>
 

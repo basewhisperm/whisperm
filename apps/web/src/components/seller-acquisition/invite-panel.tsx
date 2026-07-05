@@ -60,6 +60,7 @@ export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
+            data-testid="invite-send-button"
             className="inline-flex h-10 items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:opacity-60"
             disabled={busy}
             onClick={sendInvite}
@@ -73,7 +74,7 @@ export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId
         </div>
 
         {status !== "" && (
-          <p className={failed ? "mt-4 text-sm font-medium text-red-700" : "mt-4 text-sm font-medium text-foreground"} role="status">
+          <p data-testid="invite-status" data-failed={failed} className={failed ? "mt-4 text-sm font-medium text-red-700" : "mt-4 text-sm font-medium text-foreground"} role="status">
             {status}
           </p>
         )}

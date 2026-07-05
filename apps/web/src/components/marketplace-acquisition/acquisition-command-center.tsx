@@ -160,7 +160,7 @@ export function AcquisitionCommandCenter({ campaignId }: { readonly campaignId?:
   const hasCampaign = snapshot.campaignId.length > 0;
 
   return (
-    <section className="space-y-4 rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Acquisition command center">
+    <section data-testid="command-center" className="space-y-4 rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Acquisition command center">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Revenue engine status</p>
@@ -179,8 +179,8 @@ export function AcquisitionCommandCenter({ campaignId }: { readonly campaignId?:
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
-        <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{formatCurrency(snapshot.revenue.pipelineValue, snapshot.revenue.currency)}</p><p className="text-muted-foreground">pipeline value</p></div>
-        <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{formatCurrency(snapshot.revenue.attributedRevenue, snapshot.revenue.currency)}</p><p className="text-muted-foreground">attributed revenue</p></div>
+        <div data-testid="revenue-pipeline-value" className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{formatCurrency(snapshot.revenue.pipelineValue, snapshot.revenue.currency)}</p><p className="text-muted-foreground">pipeline value</p></div>
+        <div data-testid="revenue-attributed-value" className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{formatCurrency(snapshot.revenue.attributedRevenue, snapshot.revenue.currency)}</p><p className="text-muted-foreground">attributed revenue</p></div>
         <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{formatRate(snapshot.rates.claimRate)}</p><p className="text-muted-foreground">claim rate</p></div>
         <div className="rounded-xl bg-secondary p-3"><p className="font-semibold text-foreground">{formatRate(snapshot.rates.crmConversionRate)}</p><p className="text-muted-foreground">CRM conversion rate</p></div>
       </div>
@@ -200,7 +200,7 @@ export function AcquisitionCommandCenter({ campaignId }: { readonly campaignId?:
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Revenue funnel</p>
         <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs sm:grid-cols-7" aria-label="Revenue funnel">
           {funnelStages.map((stage) => (
-            <div key={stage.key} className="rounded-xl bg-secondary p-3">
+            <div key={stage.key} data-testid={`funnel-${stage.key}`} className="rounded-xl bg-secondary p-3">
               <p className="text-lg font-semibold text-foreground">{snapshot.funnel[stage.key]}</p>
               <p className="text-muted-foreground">{stage.label}</p>
             </div>
