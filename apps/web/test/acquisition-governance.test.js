@@ -2,35 +2,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+// ST1-010: the governance route's runtime behavior (auth, never-hard-gated snapshot passthrough,
+// and safe error handling) is now proven executably in
+// apps/web/test/marketplace-acquisition-governance.test.js, which transpiles and invokes the real
+// route against a fake AcquisitionGovernanceRepository instead of regex-matching its source. What
+// remains here are structural checks not covered there (only-GET, no direct Prisma aggregation,
+// component rendering).
 const route = readFileSync("src/app/api/marketplace-acquisition/governance/route.ts", "utf8");
 const component = readFileSync("src/components/marketplace-acquisition/governance-panel.tsx", "utf8");
 const globalPage = readFileSync("src/app/(app)/marketplace-acquisition/page.tsx", "utf8");
 const service = readFileSync("../../packages/services/src/acquisition-governance.ts", "utf8");
 
-test("governance route authenticates and delegates to the service", () => {
-  assert.match(route, /getTenantForCurrentUser/u);
-  assert.match(route, /AcquisitionGovernanceService/u);
-  assert.match(route, /getGovernanceSnapshot/u);
-  assert.match(route, /ok: true, data: snapshot/u);
-});
-
 test("governance route only exposes GET", () => {
   assert.match(route, /export async function GET\(/u);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)\(/u);
-});
-
-test("governance route returns 401 when there is no tenant", () => {
-  assert.match(route, /if \(!tenant\) return errorResponse\("Unauthorized", 401\)/u);
-});
-
-test("governance route never hard-gates the snapshot behind the feature flag -- the snapshot itself reports the disabled state", () => {
-  assert.doesNotMatch(route, /requireSellerAcquisitionFeatureForApi/u);
-});
-
-test("governance route returns a safe 500 message on service failure and never leaks internals", () => {
-  assert.match(route, /catch/u);
-  assert.match(route, /Failed to load acquisition governance\./u);
-  assert.doesNotMatch(route, /(secret|password|apiKey|tokenHash)/iu);
 });
 
 test("governance route performs no direct Prisma aggregation beyond repository construction", () => {

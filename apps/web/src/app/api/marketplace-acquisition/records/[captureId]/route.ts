@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
@@ -81,8 +80,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       body,
     );
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return errorResponse(error.issues[0]?.message ?? "Invalid input", 400);
+    // NOTE: editExtractInputSchema is validated inside @whisperm/services, which pins a
+    // different zod major version than this package, so `instanceof z.ZodError` never
+    // matches across that boundary. Match by name instead -- both zod v3 and v4 set
+    // `this.name = "ZodError"` and both expose the same `.issues` shape.
+    if (error instanceof Error && error.name === "ZodError") {
+      const issues = (error as { readonly issues?: readonly { readonly message?: string }[] }).issues;
+      return errorResponse(issues?.[0]?.message ?? "Invalid input", 400);
     }
     const asErr = error as { readonly status?: number; readonly message?: string };
     if (asErr.status === 404) return errorResponse("Marketplace capture not found.", 404);

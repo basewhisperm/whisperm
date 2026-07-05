@@ -2,46 +2,25 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+// ST1-010: the usage route's runtime behavior (auth, feature gating, period validation, the
+// real per-tenant summary shape, and safe error handling) is now proven executably in
+// apps/web/test/marketplace-acquisition-usage-metering.test.js, which transpiles and invokes the
+// real route against a fake repository instead of regex-matching its source. What remains here
+// are cheap structural/content checks that are reasonable to leave as source-text assertions
+// (only-GET, no-secrets, component rendering) because they are not behavioral claims.
 const route = readFileSync("src/app/api/marketplace-acquisition/usage/route.ts", "utf8");
 const component = readFileSync("src/components/marketplace-acquisition/usage-metering-panel.tsx", "utf8");
 const globalPage = readFileSync("src/app/(app)/marketplace-acquisition/page.tsx", "utf8");
 const service = readFileSync("../../packages/services/src/acquisition-usage-metering.ts", "utf8");
 const governanceService = readFileSync("../../packages/services/src/acquisition-governance.ts", "utf8");
 
-test("usage route authenticates, gates the feature flag, and delegates to the service", () => {
-  assert.match(route, /getTenantForCurrentUser/u);
-  assert.match(route, /requireSellerAcquisitionFeatureForApi/u);
-  assert.match(route, /AcquisitionUsageMeteringService/u);
-  assert.match(route, /getUsageSummary/u);
-  assert.match(route, /ok: true/u);
-});
-
 test("usage route only exposes GET", () => {
   assert.match(route, /export async function GET\(/u);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)\(/u);
 });
 
-test("usage route returns 401 when there is no tenant", () => {
-  assert.match(route, /if \(!tenant\) return errorResponse\("Unauthorized", 401\)/u);
-});
-
-test("usage route returns 400 for invalid period dates", () => {
-  assert.match(route, /querySchema\.safeParse/u);
-  assert.match(route, /if \(!parsed\.success\) return errorResponse\(.*400\)/u);
-});
-
-test("usage route accepts periodStart and periodEnd query params", () => {
-  assert.match(route, /searchParams\.get\("periodStart"\)/u);
-  assert.match(route, /searchParams\.get\("periodEnd"\)/u);
-});
-
 test("usage route response contains no secrets or provider tokens", () => {
   assert.doesNotMatch(route, /(secret|password|apiKey|tokenHash|stripe|paystack)/iu);
-});
-
-test("usage route returns a safe 500 message on service failure and never leaks internals", () => {
-  assert.match(route, /catch \(error\)/u);
-  assert.doesNotMatch(route, /error\.stack/u);
 });
 
 test("usage service never mutates billing plans or campaign/execution state", () => {
