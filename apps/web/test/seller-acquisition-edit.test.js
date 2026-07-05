@@ -167,6 +167,11 @@ test('PATCH route handles ZodError with a 400 response', () => {
   assert.match(text, /400/u);
 });
 
+test('ST1-009: PATCH route constructs the canonical capture service with usageMetering so requalification records SELLER_QUALIFIED/CRM_CONVERSION_CREATED', () => {
+  const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
+  assert.match(text, /createAcquisitionServiceBundle/u);
+});
+
 // ---------------------------------------------------------------------------
 // UI (page.tsx)
 // ---------------------------------------------------------------------------

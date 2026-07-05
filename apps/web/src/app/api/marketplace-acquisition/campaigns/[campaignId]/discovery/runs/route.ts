@@ -6,10 +6,12 @@ import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { DISCOVERY_FEATURE, DISCOVERY_CREDITS_DEFAULT } from "@/lib/tenant-feature-keys";
 import {
+  createPrismaRepositories,
   PrismaMarketplaceDiscoveryRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { MarketplaceDiscoveryService } from "@whisperm/services";
+import { createAcquisitionUsageMetering } from "@/lib/marketplace-acquisition/acquisition-services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
@@ -19,8 +21,10 @@ interface RouteContext {
 }
 
 const makeDiscoveryService = () => {
-  const repo = new PrismaMarketplaceDiscoveryRepository(prisma as unknown as PrismaPersistenceClient);
-  return new MarketplaceDiscoveryService({ discoveryRepo: repo });
+  const persistence = prisma as unknown as PrismaPersistenceClient;
+  const repo = new PrismaMarketplaceDiscoveryRepository(persistence);
+  const usageMetering = createAcquisitionUsageMetering(createPrismaRepositories(persistence));
+  return new MarketplaceDiscoveryService({ discoveryRepo: repo, usageMetering });
 };
 
 export async function GET(_request: NextRequest, context: RouteContext) {

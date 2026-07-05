@@ -14,6 +14,11 @@ test("growth route coordinates through CampaignRuntimeService rather than comput
   assert.doesNotMatch(growthRoute, /GrowthLoopWorker/u);
 });
 
+test("ST1-009: growth route constructs CampaignRuntimeService with usageMetering so GROWTH_LOOP_EVALUATED is recorded", () => {
+  assert.match(growthRoute, /usageMetering/u);
+  assert.match(growthRoute, /createAcquisitionServiceBundle/u);
+});
+
 test("growth recommendation route delegates apply/dismiss to campaign runtime ownership", () => {
   assert.match(recommendationRoute, /requireSellerAcquisitionFeatureForApi/u);
   assert.match(recommendationRoute, /applyGrowthRecommendation/u);

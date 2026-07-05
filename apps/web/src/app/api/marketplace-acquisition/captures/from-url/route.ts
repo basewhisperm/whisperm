@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
-import { prisma } from "@/lib/prisma";
 import { readJsonOrFormBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { createPrismaRepositories, PrismaAcquisitionUsageEventRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
-import { AcquisitionUsageMeteringService, createWhispeRMServices, ServiceError } from "@whisperm/services";
+import { ServiceError } from "@whisperm/services";
+import { createAcquisitionServiceBundle } from "@/lib/marketplace-acquisition/acquisition-services";
 
 const parseRequest = (value: unknown): { readonly url: string } | null => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -67,9 +66,7 @@ export async function POST(request: NextRequest) {
     const html = (await response.text()).slice(0, 500_000);
     const captureInput = extractMarketplaceUrlCapture(response.url || url, html);
 
-    const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
-    const usageMetering = new AcquisitionUsageMeteringService({ usageEvents: new PrismaAcquisitionUsageEventRepository(prisma as unknown as PrismaPersistenceClient) });
-    const services = createWhispeRMServices({ ...repositories, usageMetering });
+    const { services } = createAcquisitionServiceBundle();
 
     const result = await services.marketplaceAcquisition.capture(
       {

@@ -5,11 +5,11 @@ import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import {
-  createPrismaRepositories,
   PrismaCampaignRuntimeExecutionRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { CampaignRuntimeService } from "@whisperm/services";
+import { createAcquisitionServiceBundle } from "@/lib/marketplace-acquisition/acquisition-services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
@@ -24,13 +24,14 @@ interface RouteContext {
 // coordinates only; it never computes signals or mutates targeting/schedule itself.
 const runtimeService = () => {
   const persistence = prisma as unknown as PrismaPersistenceClient;
-  const repositories = createPrismaRepositories(persistence);
+  const { repositories, usageMetering } = createAcquisitionServiceBundle();
   return new CampaignRuntimeService({
     campaigns: repositories.sellerAcquisitionCampaigns,
     executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
     opportunities: repositories.businessGrowthOpportunities,
     deals: repositories.deals,
     auditLogs: repositories.auditLogs,
+    usageMetering,
   });
 };
 

@@ -7,10 +7,10 @@ import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import {
   PrismaMarketplaceAcquisitionRepository,
-  createPrismaRepositories,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { createWhispeRMServices, MarketplaceRequalificationService, SellerAcquisitionEditService } from "@whisperm/services";
+import { MarketplaceRequalificationService, SellerAcquisitionEditService } from "@whisperm/services";
+import { createAcquisitionServiceBundle } from "@/lib/marketplace-acquisition/acquisition-services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
@@ -26,8 +26,7 @@ export async function GET(_request: Request, context: RouteContext) {
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
-  const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
-  const services = createWhispeRMServices(repositories);
+  const { services } = createAcquisitionServiceBundle();
   const record = await services.sellerAcquisitionRecords.findByCaptureId(
     { tenantId: tenant.id },
     context.params.captureId,
@@ -52,8 +51,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     body = {};
   }
   const prismaPersistenceClient = prisma as unknown as PrismaPersistenceClient;
-  const repositories = createPrismaRepositories(prismaPersistenceClient);
-  const services = createWhispeRMServices(repositories);
+  const { repositories, services } = createAcquisitionServiceBundle();
 
   const requalification = new MarketplaceRequalificationService({
     marketplaceCaptures: repositories.marketplaceCaptures,

@@ -53,6 +53,11 @@ test("the discovery run trigger route still gates GET reads behind the feature f
   assert.doesNotMatch(getBody, /authorizeAcquisitionActionForApi/u);
 });
 
+test("ST1-009: the discovery run trigger route constructs MarketplaceDiscoveryService with usageMetering so SELLER_DISCOVERED is recorded", () => {
+  assert.match(discoveryRunsRoute, /usageMetering/u);
+  assert.match(discoveryRunsRoute, /createAcquisitionUsageMetering/u);
+});
+
 test("the growth recommendation apply/dismiss route authorizes GROWTH_LOOP before mutating the campaign", () => {
   assert.match(growthRecommendationRoute, /authorizeAcquisitionActionForApi/u);
   assert.match(growthRecommendationRoute, /capability: "GROWTH_LOOP"/u);
