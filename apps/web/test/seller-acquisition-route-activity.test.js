@@ -214,7 +214,27 @@ const createHarness = async (state, options = {}) => {
   writeFileSync(join(tempDir, 'acquisition-governance.mjs'), 'export const acquisitionGovernanceService = () => ({ authorizeAcquisitionAction: async () => ({ status: "ALLOW", capability: "INVITATION", reason: null, message: "ok", limits: [], warnings: [], auditEvent: { action: "ACQUISITION_GOVERNANCE_ALLOW", capability: "INVITATION", status: "ALLOW", reason: null, recordedAt: new Date().toISOString(), persisted: false } }) });\nexport const authorizeAcquisitionActionForApi = async () => ({ decision: await acquisitionGovernanceService().authorizeAcquisitionAction(), denied: null });\n');
   writeFileSync(join(tempDir, 'claim-service.mjs'), 'export const createSellerClaimService = () => globalThis.__routeClaimService;\n');
   writeFileSync(join(tempDir, 'request-body.mjs'), 'export class RequestBodyError extends Error { constructor(message, code = "REQUEST_BODY_INVALID", status = 400) { super(message); this.code = code; this.status = status; } }\nexport const readJsonBody = async (request) => request.json();\n');
-  writeFileSync(join(tempDir, 'provider-adapters.mjs'), 'export const createHttpSmsProviderFromEnv = () => globalThis.__routeSmsProvider;\nexport const createMetaWhatsAppCloudProviderFromEnv = () => globalThis.__routeWhatsappProvider;\n');
+  writeFileSync(join(tempDir, 'provider-adapters.mjs'), [
+    // ST1-013: invitation-executor.ts now wires notifications through the canonical registry
+    // factory instead of calling the individual create*FromEnv functions directly, so the stub
+    // exposes that same surface here (still backed by the per-test globalThis provider fixtures).
+    'export const createMessagingProviderRegistryFromEnv = () => ({',
+    '  getWhatsAppProvider: () => globalThis.__routeWhatsappProvider,',
+    '  getSmsProvider: () => globalThis.__routeSmsProvider,',
+    '  getEmailProvider: () => undefined,',
+    '  isAvailable: (id) => (id === "WHATSAPP" ? globalThis.__routeWhatsappProvider !== undefined : id === "SMS" ? globalThis.__routeSmsProvider !== undefined : false),',
+    '  health: () => [],',
+    '});',
+    'export const createConsoleMessagingProviderLogger = () => ({ info() {}, warn() {}, error() {} });',
+    'export const buildSellerInvitationNotificationPorts = (registry, env) => ({',
+    '  whatsappEnabled: env.SELLER_INVITATION_WHATSAPP_ENABLED !== "false",',
+    '  fallbackToSmsWhenWhatsappMissing: env.SELLER_INVITATION_FALLBACK_TO_SMS !== "false",',
+    '  inviteBaseUrl: env.SELLER_INVITATION_BASE_URL,',
+    '  ...(registry.getWhatsAppProvider() ? { whatsapp: registry.getWhatsAppProvider() } : {}),',
+    '  ...(registry.getSmsProvider() ? { sms: registry.getSmsProvider() } : {}),',
+    '});',
+    '',
+  ].join('\n'));
   globalThis.__routeState = state;
   globalThis.__routeRepositories = repositories(state);
   globalThis.__routeClaimService = claimService(state);

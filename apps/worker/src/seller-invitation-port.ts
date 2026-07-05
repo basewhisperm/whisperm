@@ -1,26 +1,28 @@
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { SellerInvitationService } from "@whisperm/services";
-import { createMetaWhatsAppCloudProviderFromEnv, createHttpSmsProviderFromEnv } from "@whisperm/provider-adapters";
+import {
+  buildSellerInvitationNotificationPorts,
+  createMessagingProviderRegistryFromEnv,
+  createConsoleMessagingProviderLogger,
+  type MessagingProviderRegistry,
+} from "@whisperm/provider-adapters";
 import type { SellerInvitationServicePort } from "./index.js";
 import type { CorrelationMetadata } from "@whisperm/types";
 
+/**
+ * ST1-013: worker and API both wire seller invitation notifications through this same
+ * MessagingProviderRegistry factory -- neither instantiates the WhatsApp/SMS/Email provider
+ * clients independently.
+ */
 export const createSellerInvitationServicePort = (
   prisma: PrismaPersistenceClient,
   env: NodeJS.ProcessEnv = process.env,
   claimLifecycleScheduler?: ConstructorParameters<typeof SellerInvitationService>[0]["claimLifecycleScheduler"],
+  registry: MessagingProviderRegistry = createMessagingProviderRegistryFromEnv({ env, logger: createConsoleMessagingProviderLogger() }),
 ): SellerInvitationServicePort => {
   const repositories = createPrismaRepositories(prisma);
 
-  const whatsapp = createMetaWhatsAppCloudProviderFromEnv(env);
-  const sms = createHttpSmsProviderFromEnv(env);
-
-  const notifications = {
-    whatsappEnabled: env.SELLER_INVITATION_WHATSAPP_ENABLED !== "false",
-    fallbackToSmsWhenWhatsappMissing: env.SELLER_INVITATION_FALLBACK_TO_SMS !== "false",
-    inviteBaseUrl: env.SELLER_INVITATION_BASE_URL,
-    ...(whatsapp === undefined ? {} : { whatsapp }),
-    ...(sms === undefined ? {} : { sms }),
-  };
+  const notifications = buildSellerInvitationNotificationPorts(registry, env);
 
   const service = new SellerInvitationService({
     ...repositories,

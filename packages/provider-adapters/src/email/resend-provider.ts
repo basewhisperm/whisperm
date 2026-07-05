@@ -39,13 +39,16 @@ export class ResendEmailProvider implements EmailProvider {
   }
 }
 
+/**
+ * ST1-013: Email is an optional provider, same as WhatsApp/SMS -- missing config must degrade
+ * the email channel only, not crash the process constructing this port. Returns `undefined`
+ * (instead of throwing) whenever RESEND_API_KEY isn't set.
+ */
 export const createResendEmailProviderFromEnv = (
   env: NodeJS.ProcessEnv = process.env,
-): ResendEmailProvider => {
-  const apiKey = env.RESEND_API_KEY;
-  if (apiKey === undefined || apiKey.trim().length === 0) {
-    throw new Error("RESEND_API_KEY is required");
-  }
+): ResendEmailProvider | undefined => {
+  const apiKey = env.RESEND_API_KEY?.trim();
+  if (!apiKey) return undefined;
 
   return new ResendEmailProvider({
     apiKey,

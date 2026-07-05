@@ -1,6 +1,17 @@
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
-import { createHttpSmsProviderFromEnv, createMetaWhatsAppCloudProviderFromEnv } from "@whisperm/provider-adapters";
+import {
+  buildSellerInvitationNotificationPorts,
+  createConsoleMessagingProviderLogger,
+  createMessagingProviderRegistryFromEnv,
+  type MessagingProviderRegistry,
+} from "@whisperm/provider-adapters";
 import { SellerInvitationService, type CampaignRuntimeInvitationExecutor } from "@whisperm/services";
+
+// ST1-013: constructed once per process at module scope (same idiom as the shared `prisma`
+// client) so every request in this process reuses the same WhatsApp/SMS/Email providers
+// instead of re-parsing env and re-constructing clients on every invite request. apps/worker
+// wires the identical registry factory in seller-invitation-port.ts.
+const messagingProviderRegistry = createMessagingProviderRegistryFromEnv({ logger: createConsoleMessagingProviderLogger() });
 
 // ST-003: the golden-path invite route calls this directly instead of only enqueueing a
 // QueueJob row, so a successful response means the invitation was actually created/sent
@@ -8,18 +19,10 @@ import { SellerInvitationService, type CampaignRuntimeInvitationExecutor } from 
 export const createSellerInvitationExecutor = (
   prisma: PrismaPersistenceClient,
   env: NodeJS.ProcessEnv = process.env,
+  registry: MessagingProviderRegistry = messagingProviderRegistry,
 ): CampaignRuntimeInvitationExecutor => {
   const repositories = createPrismaRepositories(prisma);
-  const whatsapp = createMetaWhatsAppCloudProviderFromEnv(env);
-  const sms = createHttpSmsProviderFromEnv(env);
-
-  const notifications = {
-    whatsappEnabled: env.SELLER_INVITATION_WHATSAPP_ENABLED !== "false",
-    fallbackToSmsWhenWhatsappMissing: env.SELLER_INVITATION_FALLBACK_TO_SMS !== "false",
-    inviteBaseUrl: env.SELLER_INVITATION_BASE_URL,
-    ...(whatsapp === undefined ? {} : { whatsapp }),
-    ...(sms === undefined ? {} : { sms }),
-  };
+  const notifications = buildSellerInvitationNotificationPorts(registry, env);
 
   const service = new SellerInvitationService({
     ...repositories,
