@@ -70,11 +70,13 @@ export async function seedAcquisitionE2E(prisma, options) {
 
 const isDirectRun = import.meta.url === `file://${process.argv[1]}`;
 if (isDirectRun) {
+  const email = process.env.E2E_USER_EMAIL;
+  if (!email) throw new Error("E2E_USER_EMAIL is required to seed the acquisition E2E fixtures.");
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required to seed the acquisition E2E fixtures (point it at a disposable/test Postgres database).");
+
   const { PrismaClient } = await import("@prisma/client");
   const prisma = new PrismaClient();
   try {
-    const email = process.env.E2E_USER_EMAIL;
-    if (!email) throw new Error("E2E_USER_EMAIL is required to seed the acquisition E2E fixtures.");
     const result = await seedAcquisitionE2E(prisma, { email, tenantSlug: process.env.E2E_TENANT_SLUG });
     console.log(JSON.stringify(result));
   } finally {
