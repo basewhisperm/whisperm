@@ -5,7 +5,11 @@ const isPublicRoute = createRouteMatcher([
   '/sign-up(.*)',
   '/',
   '/api/marketplace-acquisition/notifications/webhook',
-  '/marketplace-acquisition/claim(.*)',
+  // ST1-011: the seller claim portal is reached by sellers clicking a WhatsApp/SMS link,
+  // so it must be reachable without a WhisperM session. The route lives at /claim/[token]
+  // (not /marketplace-acquisition/claim), with its API under /api/marketplace-acquisition/claims.
+  '/claim(.*)',
+  '/api/marketplace-acquisition/claims(.*)',
 ]);
 
 export default clerkMiddleware((auth, request) => {

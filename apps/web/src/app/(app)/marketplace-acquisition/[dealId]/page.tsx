@@ -132,8 +132,9 @@ async function archiveAcquisition(formData: FormData) {
 }
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+  const testId = `detail-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`;
   return (
-    <div className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+    <div data-testid={testId} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
       <div className="mt-2 text-sm font-medium text-foreground">{children}</div>
     </div>
@@ -222,7 +223,7 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
             <h1 className="mt-2 text-2xl font-semibold text-foreground">{deal.title ?? "Untitled acquisition opportunity"}</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium text-muted-foreground">{stage?.name ?? "Unknown stage"}</span>
+            <span data-testid="deal-stage-badge" className="rounded-full bg-muted px-3 py-1 text-sm font-medium text-muted-foreground">{stage?.name ?? "Unknown stage"}</span>
             {stage?.name !== "Expired" && stage?.name !== "Converted" && (
               <form action={archiveAcquisition}>
                 <input name="dealId" type="hidden" value={deal.id} />
@@ -281,8 +282,8 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
           ) : (
             <div className="mt-4 space-y-3">
               {capture.sellerInvitations.map((invitation) => (
-                <div key={invitation.id} className="rounded-xl bg-secondary p-3 text-sm">
-                  <p className="font-semibold text-foreground">{invitation.channel} · {invitation.status}</p>
+                <div key={invitation.id} data-testid="invitation-row" className="rounded-xl bg-secondary p-3 text-sm">
+                  <p data-testid="invitation-status-text" className="font-semibold text-foreground">{invitation.channel} · {invitation.status}</p>
                   <p className="mt-1 break-all text-muted-foreground">{invitation.recipient}</p>
                   <p className="mt-1 text-xs text-muted-foreground">Created {formatDate(invitation.createdAt)} · Expires {formatDate(invitation.expiresAt)}</p>
                 </div>

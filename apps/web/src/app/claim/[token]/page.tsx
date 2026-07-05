@@ -154,7 +154,7 @@ export default function SellerClaimPage({ params }: { readonly params: { readonl
       ) : null}
 
       {success !== null ? (
-        <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-900">
+        <section data-testid="claim-success" className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-900">
           <h2 className="text-xl font-semibold">Claim successful.</h2>
           <p className="mt-2 text-sm">Accepted at {formatDate(success.claimedAt)}. Your inventory is being prepared for activation.</p>
         </section>
@@ -176,7 +176,7 @@ export default function SellerClaimPage({ params }: { readonly params: { readonl
             <div className="rounded-2xl border border-border bg-background p-5">
               <h2 className="text-xl font-semibold text-foreground">Claim status</h2>
               <dl className="mt-4 grid gap-2 text-sm">
-                <div><dt className="font-medium">Current stage</dt><dd className="text-muted-foreground">{preview.currentStage}</dd></div>
+                <div><dt className="font-medium">Current stage</dt><dd data-testid="claim-stage" className="text-muted-foreground">{preview.currentStage}</dd></div>
                 <div><dt className="font-medium">Invitation expires</dt><dd className="text-muted-foreground">{formatDate(preview.expiresAt)}</dd></div>
                 <div><dt className="font-medium">Marketplace</dt><dd className="text-muted-foreground">{inventory?.marketplaceSource ?? preview.capture.marketplaceSource ?? "Captured marketplace"}</dd></div>
               </dl>
@@ -206,7 +206,7 @@ export default function SellerClaimPage({ params }: { readonly params: { readonl
 
               <label className="grid gap-1 text-sm font-medium">
                 Your name *
-                <input className="rounded-xl border border-border bg-card px-3 py-2" required value={claimantName} onChange={(event) => setClaimantName(event.target.value)} />
+                <input data-testid="claim-name-input" className="rounded-xl border border-border bg-card px-3 py-2" required value={claimantName} onChange={(event) => setClaimantName(event.target.value)} />
               </label>
 
               <label className="grid gap-1 text-sm font-medium">
@@ -225,11 +225,11 @@ export default function SellerClaimPage({ params }: { readonly params: { readonl
               </label>
 
               <label className="flex items-start gap-3 rounded-xl border border-border p-4 text-sm">
-                <input className="mt-1" type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} />
+                <input data-testid="claim-accept-checkbox" className="mt-1" type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} />
                 <span>I confirm that I am the seller or authorized representative for this captured profile and inventory.</span>
               </label>
 
-              <button className="rounded-xl bg-whisper px-4 py-3 font-semibold text-white disabled:opacity-50" disabled={!canSubmit} onClick={submit}>
+              <button data-testid="claim-accept-button" className="rounded-xl bg-whisper px-4 py-3 font-semibold text-white disabled:opacity-50" disabled={!canSubmit} onClick={submit}>
                 {submitting ? "Claiming…" : "Accept ownership"}
               </button>
             </div>
