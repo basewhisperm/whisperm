@@ -34,6 +34,7 @@ const makeState = () => ({
   draftInventories: [],
   activities: [],
   auditLogs: [],
+  usageEvents: [],
   pipeline: {
     id: 'pipeline-1',
     name: 'Marketplace Acquisition',
@@ -237,6 +238,18 @@ const auditLogsRepo = (state) => ({
   async listByTarget() { return { items: [] }; },
 });
 
+const acquisitionUsageEventsRepo = (state) => ({
+  async createIfNotExists(scope, input) {
+    const existing = state.usageEvents.find((event) => event.tenantId === scope.tenantId && event.idempotencyKey === input.idempotencyKey);
+    if (existing !== undefined) return existing;
+    const record = { id: `usage-${state.usageEvents.length + 1}`, tenantId: scope.tenantId, quantity: 1, billable: true, ...input, createdAt: now };
+    state.usageEvents.push(record);
+    return record;
+  },
+  async summarizeByTenantAndPeriod() { return { periodStart: now, periodEnd: now, totals: [], totalQuantity: 0, billableTotalQuantity: 0 }; },
+  async listByTenantAndPeriod() { return { items: [] }; },
+});
+
 const fakeCreatePrismaRepositories = (state) => () => ({
   tenants: {},
   users: {},
@@ -254,6 +267,7 @@ const fakeCreatePrismaRepositories = (state) => () => ({
   billing: {},
   auditLogs: auditLogsRepo(state),
   marketplaceAcquisition: {},
+  acquisitionUsageEvents: acquisitionUsageEventsRepo(state),
 });
 
 const servicesUrl = import.meta.resolve('@whisperm/services');
@@ -264,6 +278,7 @@ const transpileRoute = (routePath, tempDir) => {
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
     .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
+    .replace(/from "@\/lib\/marketplace-acquisition\/acquisition-services"/gu, `from "${join(tempDir, 'acquisition-services.mjs')}"`)
     .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
     .replaceAll('from "@whisperm/services"', `from "${servicesUrl}"`);
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -288,6 +303,17 @@ const createHarness = async (state) => {
     'export class PrismaMarketplaceDiscoveryRepository { constructor() { return globalThis.__promoteRouteRepos.discoveryRepo; } }',
     'export class PrismaSellerAcquisitionCampaignRepository { constructor() { return globalThis.__promoteRouteRepos.campaignRepo; } }',
     'export const createPrismaRepositories = () => globalThis.__promoteRouteRepos.createRepositories();',
+  ].join('\n'));
+  writeFileSync(join(tempDir, 'acquisition-services.mjs'), [
+    `import { createPrismaRepositories } from ${JSON.stringify(join(tempDir, 'repositories.mjs'))};`,
+    `import { AcquisitionUsageMeteringService, createWhispeRMServices } from ${JSON.stringify(servicesUrl)};`,
+    'export const createAcquisitionUsageMetering = (repositories) => new AcquisitionUsageMeteringService({ usageEvents: repositories.acquisitionUsageEvents });',
+    'export const createAcquisitionServiceBundle = () => {',
+    '  const repositories = createPrismaRepositories();',
+    '  const usageMetering = createAcquisitionUsageMetering(repositories);',
+    '  const services = createWhispeRMServices({ ...repositories, usageMetering });',
+    '  return { repositories, usageMetering, services };',
+    '};',
   ].join('\n'));
   globalThis.__promoteRouteState = state;
   globalThis.__promoteRouteRepos = {
@@ -345,6 +371,10 @@ test('successful promote of a seller with a phone number returns canonical Quali
     assert.equal(body.data.dealId, state.deals[0].id);
     assert.equal(state.sellers[0].status, 'PROMOTED');
     assert.equal(state.sellers[0].promotedCaptureId, state.captures[0].id);
+    // ST1-009: discovery promotion must construct the canonical capture pipeline with
+    // usageMetering wired so SELLER_QUALIFIED and CRM_CONVERSION_CREATED are recorded.
+    assert.equal(state.usageEvents.filter((event) => event.eventType === 'SELLER_QUALIFIED').length, 1);
+    assert.equal(state.usageEvents.filter((event) => event.eventType === 'CRM_CONVERSION_CREATED').length, 1);
   } finally {
     harness.cleanup();
   }
@@ -384,6 +414,9 @@ test('repeated promote returns the same capture/member without duplication and a
     assert.equal(second.data.marketplaceCaptureId, first.data.marketplaceCaptureId);
     assert.equal(second.data.campaignMemberId, first.data.campaignMemberId);
     assert.equal(second.data.alreadyPromoted, true);
+    // ST1-009: re-promoting an already-promoted seller must not duplicate usage events.
+    assert.equal(state.usageEvents.filter((event) => event.eventType === 'SELLER_QUALIFIED').length, 1);
+    assert.equal(state.usageEvents.filter((event) => event.eventType === 'CRM_CONVERSION_CREATED').length, 1);
   } finally {
     harness.cleanup();
   }

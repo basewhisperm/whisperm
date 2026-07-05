@@ -584,6 +584,8 @@ const createUsageMetering = () => {
   };
 };
 
+const byEventType = (events, eventType) => events.filter((event) => event.eventType === eventType);
+
 test("qualified capture reports crmConversionStatus CREATED and records CRM_CONVERSION_CREATED exactly once", async () => {
   const usageMetering = createUsageMetering();
   const repositories = createRepositories();
@@ -592,12 +594,14 @@ test("qualified capture reports crmConversionStatus CREATED and records CRM_CONV
   const result = await services.marketplaceAcquisition.capture(context, captureInput);
 
   assert.equal(result.crmConversionStatus, "CREATED");
-  assert.equal(usageMetering.events.length, 1);
-  assert.equal(usageMetering.events[0].eventType, "CRM_CONVERSION_CREATED");
-  assert.equal(usageMetering.events[0].tenantId, "tenant-a");
-  assert.equal(usageMetering.events[0].captureId, result.captureId);
-  assert.equal(usageMetering.events[0].contactId, result.contactId);
-  assert.equal(usageMetering.events[0].dealId, result.dealId);
+  const created = byEventType(usageMetering.events, "CRM_CONVERSION_CREATED");
+  assert.equal(created.length, 1);
+  assert.equal(created[0].tenantId, "tenant-a");
+  assert.equal(created[0].captureId, result.captureId);
+  assert.equal(created[0].contactId, result.contactId);
+  assert.equal(created[0].dealId, result.dealId);
+  // ST1-009: capture-time qualification is metered alongside CRM conversion.
+  assert.equal(byEventType(usageMetering.events, "SELLER_QUALIFIED").length, 1);
 });
 
 test("repeated qualified capture reports EXISTING and does not record a duplicate CRM_CONVERSION_CREATED event", async () => {
@@ -610,7 +614,8 @@ test("repeated qualified capture reports EXISTING and does not record a duplicat
 
   assert.equal(first.crmConversionStatus, "CREATED");
   assert.equal(second.crmConversionStatus, "EXISTING");
-  assert.equal(usageMetering.events.length, 1, "usage metering must fire exactly once for the canonical CRM conversion");
+  assert.equal(byEventType(usageMetering.events, "CRM_CONVERSION_CREATED").length, 1, "usage metering must fire exactly once for the canonical CRM conversion");
+  assert.equal(byEventType(usageMetering.events, "SELLER_QUALIFIED").length, 1, "usage metering must fire exactly once for qualification");
 });
 
 test("unqualified capture reports crmConversionStatus NOT_ELIGIBLE and records no CRM conversion usage event", async () => {
@@ -632,7 +637,7 @@ test("CRM conversion usage event idempotency key is scoped by tenant, capture, c
 
   const result = await services.marketplaceAcquisition.capture(context, captureInput);
 
-  const [event] = usageMetering.events;
+  const [event] = byEventType(usageMetering.events, "CRM_CONVERSION_CREATED");
   assert.ok(event.idempotencyKey.includes("tenant-a"));
   assert.ok(event.idempotencyKey.includes(result.captureId));
   assert.ok(event.idempotencyKey.includes(result.contactId));

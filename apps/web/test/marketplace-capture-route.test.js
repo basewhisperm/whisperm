@@ -75,6 +75,7 @@ const sharedModuleReplacements = (tempDir) => (source) => source
   .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
   .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
   .replace(/from "@\/lib\/api\/request-body"/gu, `from "${join(tempDir, 'request-body.mjs')}"`)
+  .replace(/from "@\/lib\/marketplace-acquisition\/acquisition-services"/gu, `from "${join(tempDir, 'acquisition-services.mjs')}"`)
   .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
   .replaceAll('from "@whisperm/services"', `from "${import.meta.resolve('@whisperm/services')}"`);
 
@@ -92,10 +93,21 @@ const createHarness = async (state) => {
     'export const createPrismaRepositories = () => globalThis.__captureRouteRepositories;',
     '',
   ].join('\n'));
+  writeFileSync(join(tempDir, 'acquisition-services.mjs'), [
+    `import { createPrismaRepositories } from ${JSON.stringify(join(tempDir, 'repositories.mjs'))};`,
+    `import { AcquisitionUsageMeteringService, createWhispeRMServices } from ${JSON.stringify(import.meta.resolve('@whisperm/services'))};`,
+    'export const createAcquisitionUsageMetering = (repositories) => new AcquisitionUsageMeteringService({ usageEvents: repositories.acquisitionUsageEvents });',
+    'export const createAcquisitionServiceBundle = () => {',
+    '  const repositories = createPrismaRepositories();',
+    '  const usageMetering = createAcquisitionUsageMetering(repositories);',
+    '  const services = createWhispeRMServices({ ...repositories, usageMetering });',
+    '  return { repositories, usageMetering, services };',
+    '};',
+  ].join('\n'));
 
   globalThis.__captureRouteState = { tenantContext: { tenant: { id: tenantId }, tenantUserId: 'user-1' }, state };
-  globalThis.__captureRouteRepositories = repositories(state);
   globalThis.__captureRouteUsageEvents = usageEventRepository(state);
+  globalThis.__captureRouteRepositories = { ...repositories(state), acquisitionUsageEvents: globalThis.__captureRouteUsageEvents };
 
   const routePath = new URL('../src/app/api/marketplace-acquisition/captures/route.ts', import.meta.url).pathname;
   const source = sharedModuleReplacements(tempDir)(readFileSync(routePath, 'utf8'));
@@ -128,8 +140,8 @@ test('capture API returns contactId/dealId and crmConversionStatus CREATED for a
     assert.equal(typeof body.data.contactId, 'string');
     assert.equal(typeof body.data.dealId, 'string');
     assert.equal(body.data.crmConversionStatus, 'CREATED');
-    assert.equal(state.usageEvents.length, 1);
-    assert.equal(state.usageEvents[0].eventType, 'CRM_CONVERSION_CREATED');
+    assert.equal(state.usageEvents.filter((event) => event.eventType === 'CRM_CONVERSION_CREATED').length, 1);
+    assert.equal(state.usageEvents.filter((event) => event.eventType === 'SELLER_QUALIFIED').length, 1);
   } finally {
     harness.cleanup();
   }
@@ -166,7 +178,8 @@ test('repeated capture API calls for the same listing do not duplicate Contact/D
     assert.equal(first.data.dealId, second.data.dealId);
     assert.equal(state.contacts.size, 1);
     assert.equal(state.deals.size, 1);
-    assert.equal(state.usageEvents.length, 1, 'CRM_CONVERSION_CREATED must fire exactly once across repeated capture calls');
+    assert.equal(state.usageEvents.filter((event) => event.eventType === 'CRM_CONVERSION_CREATED').length, 1, 'CRM_CONVERSION_CREATED must fire exactly once across repeated capture calls');
+    assert.equal(state.usageEvents.filter((event) => event.eventType === 'SELLER_QUALIFIED').length, 1, 'SELLER_QUALIFIED must fire exactly once across repeated capture calls');
   } finally {
     harness.cleanup();
   }

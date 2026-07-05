@@ -1763,6 +1763,20 @@ export class MarketplaceAcquisitionCaptureService {
         });
       }
       await appendAudit(repositories, context, { action: "MARKETPLACE_CAPTURED", targetType: "MARKETPLACE_CAPTURE", targetId: finalCapture.id, metadata: { contactId: contactResult.contact.id, dealId: dealResult.deal.id } });
+      // ST1-009: this branch is only reached when determineQualification found the capture
+      // QUALIFIED, and finalCapture.id is stable across retries/re-capture/requalification of the
+      // same seller (createOrMatchCapture matches by listing URL/external id), so keying on it
+      // records SELLER_QUALIFIED exactly once no matter how many times capture() runs afterward --
+      // covers manual capture, URL capture, discovery promotion, and requalification alike.
+      if (this.deps.usageMetering !== undefined) {
+        await recordUsageEventBestEffort(this.deps.usageMetering, tenantScope, {
+          eventType: "SELLER_QUALIFIED",
+          captureId: finalCapture.id,
+          contactId: contactResult.contact.id,
+          dealId: dealResult.deal.id,
+          idempotencyKey: `usage:SELLER_QUALIFIED:${context.tenantId}:${finalCapture.id}`,
+        });
+      }
       // ST-005: capture-time Contact/Deal creation is the single canonical CRM conversion mechanism for V1 --
       // it is CREATED the first time a qualified seller gets a Contact/Deal pair, EXISTING on every idempotent
       // re-capture of the same seller/listing afterward.
