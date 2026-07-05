@@ -65,6 +65,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { tenantId: tenant.id },
       { campaignId: context.params.campaignId, trigger: parsed.data.trigger ?? "MANUAL" },
     );
+    // ST1-012: no production discoveryQueue/worker is wired for autonomous discovery, so
+    // startCampaignExecution reports FAILED with an explicit "not configured" code instead of a
+    // false COMPLETED. Surface that honestly rather than returning 201 for unprocessed work.
+    if (execution.status === "FAILED") {
+      return NextResponse.json(
+        { ok: false, error: { message: execution.errorMessage ?? "Campaign runtime execution is not supported.", code: execution.errorCode ?? "CAMPAIGN_RUNTIME_WORKER_FAILED" } },
+        { status: execution.errorCode === "CAMPAIGN_RUNTIME_DISCOVERY_NOT_CONFIGURED" ? 501 : 502 },
+      );
+    }
     return NextResponse.json({ data: { execution } }, { status: 201 });
   } catch (error) {
     if (error instanceof PersistenceError) return errorResponse(error.message, error.status);

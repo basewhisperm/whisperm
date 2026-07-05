@@ -59,12 +59,13 @@ test('Campaign outside tenant is blocked', async () => {
   );
 });
 
-test('successful no-op worker records COMPLETED', async () => {
+test('ST1-012: startCampaignExecution fails safely when no discovery queue or worker is configured', async () => {
   const { service } = makeService();
   const execution = await service.startCampaignExecution({ tenantId: 'tenant-1' }, { campaignId: 'campaign-1' });
-  assert.equal(execution.status, 'COMPLETED');
-  assert.deepEqual(execution.metrics, { noop: true });
-  assert.ok(execution.completedAt);
+  assert.equal(execution.status, 'FAILED');
+  assert.equal(execution.errorCode, 'CAMPAIGN_RUNTIME_DISCOVERY_NOT_CONFIGURED');
+  assert.ok(execution.failedAt);
+  assert.equal(execution.metrics.discoveryStatus, 'UNSUPPORTED');
 });
 
 test('failed worker records FAILED with sanitized error', async () => {
