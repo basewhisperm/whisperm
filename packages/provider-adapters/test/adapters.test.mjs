@@ -413,9 +413,28 @@ test('HTTP SMS provider posts seller invitation payload with environment configu
   });
 });
 
-test('HTTP SMS provider requires complete seller invitation SMS environment', () => {
-  assert.throws(
-    () => createHttpSmsProviderFromEnv({ SELLER_INVITATION_SMS_PROVIDER: 'generic-http', SELLER_INVITATION_SMS_API_URL: 'https://sms.test/send', SELLER_INVITATION_SMS_API_KEY: 'secret-key' }),
-    /SELLER_INVITATION_SMS_SENDER_ID/u,
+// ST1-012: SMS is an optional provider. Incomplete/missing env must degrade to "not configured"
+// (undefined) instead of throwing, so a worker or route that constructs this port unconditionally
+// does not crash when the operator has not configured SMS.
+test('createHttpSmsProviderFromEnv returns undefined for incomplete seller invitation SMS environment', () => {
+  assert.equal(
+    createHttpSmsProviderFromEnv({ SELLER_INVITATION_SMS_PROVIDER: 'generic-http', SELLER_INVITATION_SMS_API_URL: 'https://sms.test/send', SELLER_INVITATION_SMS_API_KEY: 'secret-key' }),
+    undefined,
   );
+});
+
+test('createHttpSmsProviderFromEnv returns undefined when no SMS environment is configured at all', () => {
+  assert.equal(createHttpSmsProviderFromEnv({}), undefined);
+});
+
+test('createHttpSmsProviderFromEnv constructs a working provider when fully configured', async () => {
+  const calls = [];
+  const provider = createHttpSmsProviderFromEnv(
+    { SELLER_INVITATION_SMS_PROVIDER: 'generic-http', SELLER_INVITATION_SMS_API_URL: 'https://sms.test/send', SELLER_INVITATION_SMS_API_KEY: 'secret-key', SELLER_INVITATION_SMS_SENDER_ID: 'WhispeRM' },
+    async (url, init) => { calls.push({ url, init }); return new Response('{}', { status: 202 }); },
+  );
+  assert.ok(provider);
+  await provider.send({ to: '+15555550123', body: 'Invite link' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://sms.test/send');
 });

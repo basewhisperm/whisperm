@@ -1,4 +1,4 @@
-import { NoopCampaignRuntimeWorker, type CampaignRuntimeWorker } from "@whisperm/campaign-runtime";
+import type { CampaignRuntimeWorker } from "@whisperm/campaign-runtime";
 import type {
   AuditLogRepository,
   BusinessGrowthOpportunityRecord,
@@ -385,12 +385,19 @@ const errorCode = (error: unknown): string => {
 };
 
 export class CampaignRuntimeService {
-  private readonly worker: CampaignRuntimeWorker;
+  /**
+   * ST1-012: no default. Every production call site enqueues discovery via `discoveryQueue`
+   * instead; `worker` only exists for tests that want to exercise the inline execute()/catch
+   * branch directly. Defaulting this to NoopCampaignRuntimeWorker used to make
+   * startCampaignExecution silently report COMPLETED with `{ noop: true }` metrics whenever no
+   * discoveryQueue was configured -- see the ST1-012 "no worker configured" branch below.
+   */
+  private readonly worker: CampaignRuntimeWorker | undefined;
   private readonly optimizationWorker: DiscoveryOptimizationWorker;
   private readonly growthLoopWorker: GrowthLoopWorker;
 
   constructor(private readonly deps: CampaignRuntimeServiceDependencies) {
-    this.worker = deps.worker ?? new NoopCampaignRuntimeWorker();
+    this.worker = deps.worker;
     this.optimizationWorker = deps.optimizationWorker ?? new DiscoveryOptimizationWorker();
     this.growthLoopWorker = deps.growthLoopWorker ?? new GrowthLoopWorker();
   }
@@ -523,6 +530,20 @@ export class CampaignRuntimeService {
       return this.deps.executions.update(context, running.id, {
         status: "RUNNING",
         metrics: { ...(running.metrics ?? {}), discoveryStatus: "RUNNING", discoveryStartedAt: running.startedAt ?? new Date().toISOString(), targetingSnapshot: targetingValidation.targeting },
+      });
+    }
+
+    if (this.worker === undefined) {
+      // ST1-012: no discoveryQueue and no explicit worker configured. Autonomous discovery
+      // execution is not a supported V1 production path (there is no real queue consumer wired
+      // in apps/worker) -- fail honestly instead of silently reporting COMPLETED for work that
+      // never ran.
+      return this.deps.executions.update(context, running.id, {
+        status: "FAILED",
+        failedAt: new Date().toISOString(),
+        errorCode: "CAMPAIGN_RUNTIME_DISCOVERY_NOT_CONFIGURED",
+        errorMessage: "Autonomous discovery execution is not configured for this environment.",
+        metrics: { ...(running.metrics ?? {}), discoveryStatus: "UNSUPPORTED" },
       });
     }
 
