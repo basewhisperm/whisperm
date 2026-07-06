@@ -96,23 +96,15 @@ test('upsertForCapture is called when no DraftInventory row exists yet', () => {
 // ---------------------------------------------------------------------------
 // API route
 // ---------------------------------------------------------------------------
+// ST1-010: the PATCH route's runtime behavior (auth, feature gating, requalification actually
+// firing on a phone edit, Contact/Deal created exactly once, 404/400 handling, response shape) is
+// now proven executably in apps/web/test/marketplace-acquisition-requalification.test.js, which
+// transpiles and invokes the real route against fake repositories instead of regex-matching its
+// source.
 
 test('PATCH handler exists on the records/[captureId] route', () => {
   const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
   assert.match(text, /export async function PATCH/u);
-});
-
-test('PATCH route is feature-gated identically to GET', () => {
-  const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
-  // Count occurrences -- both GET and PATCH must call the feature gate
-  const matches = text.match(/requireSellerAcquisitionFeatureForApi/gu) ?? [];
-  assert.ok(matches.length >= 2, 'requireSellerAcquisitionFeatureForApi should appear in both GET and PATCH');
-});
-
-test('PATCH route returns the updated record in the response body', () => {
-  const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
-  assert.match(text, /findByCaptureId/u);
-  assert.match(text, /data: \{ record, \.\.\.editResult \}/u);
 });
 
 // ---------------------------------------------------------------------------
@@ -152,24 +144,6 @@ test('MarketplaceRequalificationService records an audit event with previous/new
   assert.match(text, /previousQualificationStatus/u);
   assert.match(text, /newQualificationStatus/u);
   assert.match(text, /actorId: context\.actorId/u);
-});
-
-test('PATCH route wires MarketplaceRequalificationService into SellerAcquisitionEditService', () => {
-  const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
-  assert.match(text, /MarketplaceRequalificationService/u);
-  assert.match(text, /requalification/u);
-  assert.match(text, /actorId: tenantContext\.tenantUserId/u);
-});
-
-test('PATCH route handles ZodError with a 400 response', () => {
-  const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
-  assert.match(text, /ZodError/u);
-  assert.match(text, /400/u);
-});
-
-test('ST1-009: PATCH route constructs the canonical capture service with usageMetering so requalification records SELLER_QUALIFIED/CRM_CONVERSION_CREATED', () => {
-  const text = source('src/app/api/marketplace-acquisition/records/[captureId]/route.ts');
-  assert.match(text, /createAcquisitionServiceBundle/u);
 });
 
 // ---------------------------------------------------------------------------

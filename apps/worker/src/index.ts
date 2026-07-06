@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
+import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
 import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { z } from "zod";
 import {
@@ -1500,9 +1500,19 @@ export const createClaimLifecycleServicePort = (prisma: PrismaPersistenceClient)
     activities: repositories.activities,
     scheduler: createClaimLifecycleScheduler(prisma.queueJob),
     notifications: {
+      // ST1-012: previously a `void input` no-op that returned a fake `{ channel }` success
+      // without sending anything. No production path currently schedules claim reminders (the
+      // golden-path invite executor in apps/web does not wire claimLifecycleScheduler, and this
+      // worker's queue is never drained -- see the InMemoryQueueRuntime warning above), so fail
+      // loudly instead of lying about delivery if this is ever reached.
       async sendClaimReminder(input) {
-        void input;
-        return { channel: input.preferredChannel ?? "WHATSAPP" };
+        throw new WorkerRuntimeError({
+          code: "WORKER_RUNTIME_VALIDATION_FAILED",
+          message: "Claim reminder notifications are not implemented for this worker process",
+          status: 501,
+          retryable: false,
+          correlation: input.correlation,
+        });
       },
     },
   });
@@ -1548,18 +1558,31 @@ if (isMainModule()) {
       scheduleClaimLifecycle: (context, invitationId) => claimLifecycle.scheduleClaimLifecycle(context, invitationId),
     });
     const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
-    const discoveryQueue = { async enqueueDiscovery(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true; readonly targeting: z.output<typeof campaignTargetingConfigSchema> }) { void input; } };
-    const qualificationQueue = { async enqueueQualification(input: { readonly tenantId: string; readonly campaignId: string; readonly executionId: string; readonly correlationId?: string | undefined; readonly replaySafe: true }) { void input; } };
-    const usageMetering = new AcquisitionUsageMeteringService({ usageEvents: createPrismaRepositories(persistence).acquisitionUsageEvents });
+    const repositories = createPrismaRepositories(persistence);
+    const usageMetering = new AcquisitionUsageMeteringService({ usageEvents: repositories.acquisitionUsageEvents });
+    // ST1-012: this service instance backs only runDueScheduledCampaigns (the "scheduler.tick"
+    // job), which nothing in this repo ever enqueues -- there is no cron/scheduler producer for
+    // it. Deliberately no discoveryQueue/qualificationQueue is wired here: if this dead path is
+    // ever reached, CampaignRuntimeService now fails the execution honestly (see
+    // CAMPAIGN_RUNTIME_DISCOVERY_NOT_CONFIGURED in campaign-runtime.ts) instead of silently
+    // enqueuing into fake `void input` adapters that dropped the job on the floor.
     const campaignRuntimeService = new CampaignRuntimeService({
       campaigns,
       executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
       sellerInvitations: new PrismaSellerInvitationRepository(persistence),
-      discoveryQueue,
-      qualificationQueue,
       opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence),
       usageMetering,
     });
+    const acquisitionGovernanceService = new AcquisitionGovernanceService({
+      governance: repositories.acquisitionGovernance,
+      campaigns: repositories.sellerAcquisitionCampaigns,
+      auditLogs: repositories.auditLogs,
+      usageEvents: repositories.acquisitionUsageEvents,
+    });
+    const acquisitionGovernance = {
+      authorize: (context: { readonly tenantId: string }, input: { readonly capability: AcquisitionGovernanceCapability; readonly campaignId?: string | undefined; readonly provider?: "WHATSAPP" | "SMS" | "EMAIL" | "DISCOVERY" | undefined; readonly hasCapturedData?: boolean | undefined }): Promise<AcquisitionGovernanceDecision> =>
+        acquisitionGovernanceService.authorizeAcquisitionAction({ tenantId: context.tenantId }, input),
+    };
     const campaignRuntime = {
       async runDueScheduledCampaigns(context: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[0], input: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[1]) {
         return campaignRuntimeService.runDueScheduledCampaigns(context, input);
@@ -1597,6 +1620,7 @@ if (isMainModule()) {
         marketplaceDiscovery: createMarketplaceDiscoveryExecutionPort({ campaigns, discovery: new MarketplaceDiscoveryService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence), usageMetering }) }),
         marketplaceQualification: createMarketplaceQualificationExecutionPort({ qualification: new MarketplaceQualificationExecutionService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence), businessGrowthOpportunities: new BusinessGrowthOpportunityService({ opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence) }) }) }),
         growthLoop: createGrowthLoopServicePort(persistence),
+        acquisitionGovernance,
       },
     });
     await new Promise<void>((resolve) => {

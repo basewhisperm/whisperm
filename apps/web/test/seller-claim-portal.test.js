@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+// ST1-010: the accept route's runtime behavior -- canonical CRM conversion never duplicating a
+// Contact/Deal on claim, idempotent repeat accepts, expired/unknown token handling -- is now
+// proven executably in apps/web/test/marketplace-acquisition-crm-conversion.test.js, which
+// transpiles and invokes the real route against fake repositories instead of regex-matching its
+// source. What remains here are UI/content checks that are not behavioral claims.
 const page = readFileSync(new URL('../src/app/claim/[token]/page.tsx', import.meta.url), 'utf8');
 const route = readFileSync(new URL('../src/app/api/marketplace-acquisition/claims/[token]/route.ts', import.meta.url), 'utf8');
 const accept = readFileSync(new URL('../src/app/api/marketplace-acquisition/claims/[token]/accept/route.ts', import.meta.url), 'utf8');

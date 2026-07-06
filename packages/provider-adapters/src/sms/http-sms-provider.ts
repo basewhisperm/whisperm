@@ -47,13 +47,26 @@ export class HttpSmsProvider implements SmsProvider {
   }
 }
 
+/**
+ * ST1-012: SMS is an optional provider, same as WhatsApp -- missing config must degrade the SMS
+ * channel only, not crash the process constructing this port. Returns `undefined` (instead of
+ * constructing an HttpSmsProvider that would throw on first use, or previously throwing here
+ * synchronously) whenever the required env vars aren't set.
+ */
 export const createHttpSmsProviderFromEnv = (
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl?: typeof fetch,
-): HttpSmsProvider => new HttpSmsProvider({
-  providerName: env.SELLER_INVITATION_SMS_PROVIDER,
-  apiUrl: env.SELLER_INVITATION_SMS_API_URL ?? "",
-  apiKey: env.SELLER_INVITATION_SMS_API_KEY ?? "",
-  senderId: env.SELLER_INVITATION_SMS_SENDER_ID ?? "",
-  ...(fetchImpl === undefined ? {} : { fetchImpl }),
-});
+): HttpSmsProvider | undefined => {
+  const apiUrl = env.SELLER_INVITATION_SMS_API_URL?.trim();
+  const apiKey = env.SELLER_INVITATION_SMS_API_KEY?.trim();
+  const senderId = env.SELLER_INVITATION_SMS_SENDER_ID?.trim();
+  if (!apiUrl || !apiKey || !senderId) return undefined;
+
+  return new HttpSmsProvider({
+    providerName: env.SELLER_INVITATION_SMS_PROVIDER,
+    apiUrl,
+    apiKey,
+    senderId,
+    ...(fetchImpl === undefined ? {} : { fetchImpl }),
+  });
+};

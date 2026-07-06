@@ -733,3 +733,4 @@ export { RenderSellerHttpConnector, RenderSellerConnectorError, createRenderSell
 export type { RenderSellerConnector, RenderSellerPayload, CreateRenderSellerInput, CreateRenderSellerResult } from "./render-seller.js";
 
 export * from "./discovery.js";
+export * from "./registry.js";
