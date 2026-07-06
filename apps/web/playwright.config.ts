@@ -5,6 +5,15 @@ import { defineConfig, devices } from '@playwright/test';
 const smsMockPort = Number(process.env.E2E_SMS_MOCK_PORT ?? 4310);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 
+// ST1-011: when PLAYWRIGHT_BASE_URL points at a Vercel preview/staging deployment, Vercel
+// Deployment Protection redirects every request to vercel.com/login before it ever reaches
+// this app's own /sign-in -- Clerk never even gets a chance to run. Sending this header (a
+// "Protection Bypass for Automation" secret, configured in Vercel and exported as an env var
+// here, never hardcoded) satisfies Vercel's check so requests pass through to the real app.
+// Undefined -- and therefore ignored by Playwright -- for local dev, where there's no
+// deployment protection to bypass in the first place.
+const vercelBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -17,6 +26,11 @@ export default defineConfig({
     baseURL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    extraHTTPHeaders: vercelBypassSecret
+      ? {
+          'x-vercel-protection-bypass': vercelBypassSecret,
+        }
+      : undefined,
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
