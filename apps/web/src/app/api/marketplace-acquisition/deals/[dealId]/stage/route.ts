@@ -16,10 +16,21 @@ const STATUS_BY_STAGE = new Map<string, string>([
   ["Converted", "CONVERTED"],
   ["Expired", "EXPIRED"],
 ]);
+// "Invited", "Claim Started", and "Claimed" are deliberately NOT reachable through this generic
+// stage-move endpoint. Each already has a canonical, evidence-backed execution path that moves
+// the deal's stage as a side effect of real work: SellerInvitationService.createSellerInvitation
+// (-> moveToInvited) only advances to "Invited" after an invitation is actually sent, and
+// SellerClaimPortalService only advances to "Claim Started"/"Claimed" when the seller themselves
+// opens the claim link / submits their ownership attestation. Allowing a bare PATCH to fake those
+// transitions let a capture be marked "Claimed" with zero attestation on record, which then
+// permanently blocked the real seller from ever attesting (SellerClaimPortalService treats an
+// already-"CLAIMED" capture as already claimed). "Expired" and "Converted" have no such evidence
+// requirement -- expiring is a safe, conservative override, and "Converted" already routes
+// through the canonical DealService.recordOutcome/RevenueAttributionRuntimeService below.
 const ALLOWED_TRANSITIONS = new Map<string, readonly string[]>([
-  ["Captured", ["Invited", "Expired"]],
-  ["Invited", ["Claim Started", "Expired"]],
-  ["Claim Started", ["Claimed", "Expired"]],
+  ["Captured", ["Expired"]],
+  ["Invited", ["Expired"]],
+  ["Claim Started", ["Expired"]],
   ["Claimed", ["Converted"]],
   // ST1-008: Converted is the revenue-generating outcome for this pipeline. Allowing the
   // self-transition keeps repeated completion requests idempotent (revenue attribution is

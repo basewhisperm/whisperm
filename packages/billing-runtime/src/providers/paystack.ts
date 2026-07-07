@@ -6,6 +6,8 @@
  * so internal consumers are provider-agnostic.
  */
 
+import { timingSafeEqual } from "node:crypto";
+
 import type { StripeSubscriptionStatus, BillingSubscriptionSnapshot, SubscriptionChangedEvent } from "./stripe.js";
 
 export interface PaystackSubscriptionData {
@@ -156,7 +158,9 @@ export const verifyPaystackSignature = async (
   const hex = Array.from(new Uint8Array(mac))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return hex === signature;
+  const expected = Buffer.from(hex, "utf8");
+  const actual = Buffer.from(signature, "utf8");
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 };
 
 export const PAYSTACK_PRICING_GHS = {

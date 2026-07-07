@@ -183,6 +183,7 @@ export default function DealsPage() {
   const [selected, setSelected] = useState<Deal | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
+  const [stageMoveError, setStageMoveError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,30 +216,9 @@ export default function DealsPage() {
     return stageDeals(stageId).reduce((sum, deal) => sum + (deal.value ?? 0), 0);
   }
 
-  function handleDrop(stageId: string) {
-    if (dragging === null) return;
+  function moveDealStage(dealId: string, stageId: string, previousStageId: string) {
+    setStageMoveError(null);
 
-    setDeals((currentDeals) =>
-      currentDeals.map((deal) => (deal.id === dragging ? { ...deal, pipelineStageId: stageId } : deal)),
-    );
-
-    setSelected((currentDeal) =>
-      currentDeal !== null && currentDeal.id === dragging ? { ...currentDeal, pipelineStageId: stageId } : currentDeal,
-    );
-
-    setDragging(null);
-    setDragOver(null);
-
-    fetch(`/api/deals/${dragging}/stage`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ stageId }),
-    }).catch(() => {
-      // Keep the optimistic UI update. A follow-up slice can add toast/error rollback behavior.
-    });
-  }
-
-  function handleStageChange(dealId: string, stageId: string) {
     setDeals((currentDeals) =>
       currentDeals.map((deal) => (deal.id === dealId ? { ...deal, pipelineStageId: stageId } : deal)),
     );
@@ -251,9 +231,49 @@ export default function DealsPage() {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ stageId }),
-    }).catch(() => {
-      // Keep the optimistic UI update. A follow-up slice can add toast/error rollback behavior.
-    });
+    })
+      .then(async (response) => {
+        if (response.ok) return;
+
+        setDeals((currentDeals) =>
+          currentDeals.map((deal) => (deal.id === dealId ? { ...deal, pipelineStageId: previousStageId } : deal)),
+        );
+        setSelected((currentDeal) =>
+          currentDeal !== null && currentDeal.id === dealId ? { ...currentDeal, pipelineStageId: previousStageId } : currentDeal,
+        );
+
+        const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        setStageMoveError(payload?.error?.message ?? "Could not move the deal. Please try again.");
+      })
+      .catch(() => {
+        setDeals((currentDeals) =>
+          currentDeals.map((deal) => (deal.id === dealId ? { ...deal, pipelineStageId: previousStageId } : deal)),
+        );
+        setSelected((currentDeal) =>
+          currentDeal !== null && currentDeal.id === dealId ? { ...currentDeal, pipelineStageId: previousStageId } : currentDeal,
+        );
+        setStageMoveError("Could not move the deal. Please try again.");
+      });
+  }
+
+  function handleDrop(stageId: string) {
+    if (dragging === null) return;
+
+    const previousStageId = deals.find((deal) => deal.id === dragging)?.pipelineStageId;
+    const dealId = dragging;
+
+    setDragging(null);
+    setDragOver(null);
+
+    if (previousStageId === undefined || previousStageId === stageId) return;
+    moveDealStage(dealId, stageId, previousStageId);
+  }
+
+  function handleStageChange(dealId: string, stageId: string) {
+    const previousStageId = deals.find((deal) => deal.id === dealId)?.pipelineStageId;
+    if (previousStageId === undefined || previousStageId === stageId) return;
+
+    moveDealStage(dealId, stageId, previousStageId);
   }
 
   if (loading) {
@@ -270,7 +290,19 @@ export default function DealsPage() {
   }
 
   return (
-    <div className="flex gap-4">
+    <div className="flex flex-col gap-3">
+      {stageMoveError && (
+        <div
+          className="flex items-center justify-between rounded-xl px-4 py-2 text-xs font-medium"
+          style={{ background: "var(--color-muted)", color: "var(--color-health-amber)" }}
+        >
+          <span>{stageMoveError}</span>
+          <button type="button" onClick={() => setStageMoveError(null)} className="rounded p-0.5 hover:opacity-70">
+            <IconX className="size-3.5" stroke={1.8} />
+          </button>
+        </div>
+      )}
+      <div className="flex gap-4">
       <div className="min-w-0 flex-1 overflow-x-auto">
         <div className="flex gap-3 pb-4" style={{ minWidth: "fit-content" }}>
           {pipeline.stages.map((stage, index) => {
@@ -353,6 +385,7 @@ export default function DealsPage() {
           />
         </div>
       )}
+      </div>
     </div>
   );
 }

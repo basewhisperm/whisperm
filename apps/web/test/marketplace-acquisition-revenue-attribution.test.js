@@ -160,6 +160,34 @@ test('an unsupported stage transition (Claimed -> Captured) is rejected with 422
   }
 });
 
+test('this endpoint cannot be used to fake a seller Claim: Claim Started -> Claimed is rejected with 422', async () => {
+  const state = makeState();
+  state.deals[0].pipelineStageId = 'stage-claim-started';
+  state.captures[0].status = 'CLAIM_STARTED';
+  const harness = await createHarness(state);
+  try {
+    const response = await harness.route.PATCH(makeRequest('Claimed'), { params: { dealId: 'deal-1' } });
+    assert.equal(response.status, 422);
+    assert.equal(state.captures[0].status, 'CLAIM_STARTED');
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('this endpoint cannot be used to fake sending an invitation: Captured -> Invited is rejected with 422', async () => {
+  const state = makeState();
+  state.deals[0].pipelineStageId = 'stage-captured';
+  state.captures[0].status = 'CAPTURED';
+  const harness = await createHarness(state);
+  try {
+    const response = await harness.route.PATCH(makeRequest('Invited'), { params: { dealId: 'deal-1' } });
+    assert.equal(response.status, 422);
+    assert.equal(state.captures[0].status, 'CAPTURED');
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test('transitioning a deal to Converted triggers revenue attribution and threads the result into the response', async () => {
   const state = makeState();
   state.recordOutcomeResult = { status: 'ATTRIBUTED', dealId: 'deal-1', idempotent: false, snapshot: { idempotencyKey: 'attribution:deal-1', revenueAmount: '150.00' } };
@@ -187,7 +215,7 @@ test('a valid transition to a non-Converted stage never calls recordOutcome and 
   state.deals[0].pipelineStageId = 'stage-captured';
   const harness = await createHarness(state);
   try {
-    const response = await harness.route.PATCH(makeRequest('Invited'), { params: { dealId: 'deal-1' } });
+    const response = await harness.route.PATCH(makeRequest('Expired'), { params: { dealId: 'deal-1' } });
     const body = await response.json();
     assert.equal(response.status, 200, JSON.stringify(body));
     assert.equal(body.data.revenueAttributed, false);
