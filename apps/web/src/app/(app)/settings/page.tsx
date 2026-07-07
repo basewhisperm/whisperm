@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { IconBell, IconMail, IconCalendarStats, IconUsers, IconCurrencyDollar, IconLayoutKanban, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconAlertCircle, IconBell, IconMail, IconCalendarStats, IconUsers, IconCurrencyDollar, IconLayoutKanban, IconPlus, IconTrash } from "@tabler/icons-react";
 
 interface ToggleSetting {
   id: string;
@@ -92,6 +92,14 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
+      <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs" style={{ background: "var(--color-muted)", color: "var(--color-health-amber)" }}>
+        <IconAlertCircle className="mt-0.5 size-3.5 shrink-0" stroke={1.8} />
+        <span>
+          Preview only: changes on this page are not saved yet and will reset on reload. Workspace
+          preferences, pipeline stages, and team invites aren&apos;t wired to the backend yet.
+        </span>
+      </div>
+
       <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
         <h2 className="mb-4 text-sm font-semibold text-foreground" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
           Workspace preferences

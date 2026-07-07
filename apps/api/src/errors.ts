@@ -1,6 +1,7 @@
 import { AuthError } from "./auth/errors.js";
 import { OAuthError } from "./auth/oauth.js";
 import { EventIngestionError } from "./events/errors.js";
+import { OnboardingAccessError } from "./billing/onboarding.js";
 
 export type ApiErrorCode =
   | "API_KEY_MISSING"
@@ -98,7 +99,8 @@ export const mapErrorToHttp = (
     error instanceof ApiError ||
     error instanceof AuthError ||
     error instanceof EventIngestionError ||
-    error instanceof OAuthError
+    error instanceof OAuthError ||
+    error instanceof OnboardingAccessError
   ) {
     return {
       statusCode: error.statusCode,

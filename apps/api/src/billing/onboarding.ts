@@ -31,7 +31,7 @@ export const computeOnboardingChecklist = async (
 ): Promise<OnboardingChecklist> => {
   const member = await port.isMember(workspaceId, requestingUserId);
   if (!member) {
-    throw Object.assign(new Error("Not a member of this workspace"), { code: "ONBOARDING_ACCESS_DENIED", statusCode: 403 });
+    throw new OnboardingAccessError();
   }
 
   const [contactCount, pipeline, memberCount] = await Promise.all([
