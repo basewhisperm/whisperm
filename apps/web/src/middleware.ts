@@ -10,6 +10,10 @@ const isPublicRoute = createRouteMatcher([
   // (not /marketplace-acquisition/claim), with its API under /api/marketplace-acquisition/claims.
   '/claim(.*)',
   '/api/marketplace-acquisition/claims(.*)',
+  // Stripe/Paystack call these directly with no Clerk session; signature verification inside
+  // the handlers is the actual authentication boundary.
+  '/api/webhooks/stripe',
+  '/api/webhooks/paystack',
 ]);
 
 export default clerkMiddleware((auth, request) => {

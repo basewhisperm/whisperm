@@ -2,7 +2,12 @@
 
 **Issue:** [S4.8] Production deployment
 **Target:** https://whisperm.io
-**Stack:** Vercel (web), Railway (api + worker), Supabase (PostgreSQL), Redis (Railway)
+**Stack:** Vercel (web), Railway (worker), Supabase (PostgreSQL), Redis (Railway)
+
+There is no standalone API service. `apps/api` (a second, disconnected CRM/billing
+implementation that never actually ran in production) was archived — all CRM, billing
+(Stripe/Paystack), and self-serve signup logic lives in `apps/web`'s own Next.js API routes,
+backed by `@whisperm/billing-runtime` and `@whisperm/repositories`.
 
 ---
 
@@ -10,10 +15,10 @@
 
 - [ ] Vercel account
 - [ ] Supabase project (Pro plan)
-- [ ] Railway account
+- [ ] Railway account (worker only)
+- [ ] Clerk application (production instance)
 - [ ] Stripe dashboard
 - [ ] Paystack dashboard
-- [ ] Resend account
 - [ ] Domain registrar for whisperm.io
 - [ ] GitHub repo access
 
@@ -44,27 +49,27 @@ Zero DROP TABLE, DROP COLUMN, or TRUNCATE statements found.
 
 Run:
   export DATABASE_URL="postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres"
-  pnpm --filter @whisperm/api exec prisma migrate deploy
+  pnpm --filter @whisperm/repositories exec prisma migrate deploy --schema=../../prisma/schema.prisma
 
 Verify:
-  pnpm --filter @whisperm/api exec prisma db pull --print | head -30
+  pnpm --filter @whisperm/repositories exec prisma db pull --print --schema=../../prisma/schema.prisma | head -30
 
 Confirm tables: Tenant, TenantUser, Contact, Deal, Activity, Pipeline,
-PipelineStage, Subscription, OutboxEvent, InboxEvent, QueueJob, ScheduledJob
+PipelineStage, Subscription, BillingWebhookEvent, OutboxEvent, InboxEvent, QueueJob, ScheduledJob
 
 ---
 
 ## 3. Environment variables
 
-See .env.example in each app directory. Set all in platform secret storage — never in committed files.
-
-apps/api (Railway):
-  DATABASE_URL, DIRECT_URL, JWT_SECRET, JWT_ISSUER,
-  STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, PAYSTACK_SECRET_KEY,
-  RESEND_API_KEY, EMAIL_FROM, REDIS_URL, NODE_ENV
+See `.env.example` in each app directory. Set all in platform secret storage — never in
+committed files.
 
 apps/web (Vercel):
-  NEXT_PUBLIC_API_URL, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY,
+  DATABASE_URL, NEXT_PUBLIC_APP_URL,
+  STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+  STRIPE_PRICE_STARTER, STRIPE_PRICE_GROWTH, STRIPE_PRICE_PRO,
+  PAYSTACK_SECRET_KEY, NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
 
 apps/worker (Railway):
   DATABASE_URL, REDIS_URL, NODE_ENV
@@ -76,45 +81,29 @@ apps/worker (Railway):
 1. https://vercel.com/new → Import basewhisperm/whisperm
 2. Root directory: apps/web
 3. Framework: Next.js (auto-detected)
-4. Add environment variables
-5. Deploy → verify returns 200
+4. Add environment variables (section 3)
+5. Deploy → verify https://whisperm.io returns 200
+
+Every CRM, billing, and Seller Acquisition endpoint lives under `apps/web/src/app/api/*` and
+deploys as part of this same Vercel deployment — no separate API service to configure.
 
 ---
 
-## 5. Deploy apps/api → Railway
+## 5. Deploy apps/worker → Railway (long-running, NOT serverless)
 
-The API is a persistent Node.js HTTP server — NOT serverless.
-
-1. New Railway project → Deploy from GitHub → basewhisperm/whisperm
-2. Root directory: apps/api
-3. Start command: node dist/index.js
-4. Build command: pnpm --filter @whisperm/api build
-5. Add Redis service in same project → copy REDIS_URL
-6. Add all environment variables
-7. Add custom domain api.whisperm.io → Railway provisions TLS automatically
-
-Verify:
-  curl https://api.whisperm.io/healthz
-  -> {"ok":true,"data":{"status":"ok"}}
-
-  curl https://api.whisperm.io/readyz
-  -> {"ok":true,"data":{"status":"ready"}}
-
----
-
-## 6. Deploy apps/worker → Railway (long-running, NOT serverless)
-
-**ST1-003 status check (verify before relying on this section):** as of this writing, apps/worker's
+**Status check (verify before relying on this section):** as of this writing, apps/worker's
 production bootstrap (`apps/worker/src/index.ts`, `isMainModule()` block) wires `InMemoryQueueRuntime`
 -- it registers job handlers and logs "worker started", but does not poll or consume any durable
 queue. No BullMQ/Redis/SQS adapter is implemented anywhere in this repo despite REDIS_URL being
-listed below; nothing in the codebase reads that variable. A "worker started" log line or a HEALTHY
+listed above; nothing in the codebase reads that variable. A "worker started" log line or a HEALTHY
 readiness check from this process is true about its own bootstrap but is **not** proof that any
 queued job (event ingestion, score recomputation, trial reminders, publish, scheduler) will ever
-execute. Do not treat step 6's checklist below as verified until a real queue backend is wired in.
+execute. Do not treat step 5's checklist below as verified until a real queue backend is wired in.
 This does not block deploying apps/web: the seller-acquisition golden path (capture, campaign
 assignment, invitation send, claim, CRM/deal update) executes synchronously inside apps/web request
-handlers and does not depend on this worker process.
+handlers and does not depend on this worker process. Trial-reminder emails are similarly recorded
+as durable `QueueJob` rows (`apps/web/src/lib/billing/notification-schedule-adapter.ts`) but are
+not yet actually sent, for the same reason.
 
 Intended design (once a real queue backend is implemented): worker runs BullMQ consumers with
 persistent Redis connections.
@@ -143,11 +132,10 @@ being consumed -- see status check above):
 
 ---
 
-## 7. DNS — whisperm.io
+## 6. DNS — whisperm.io
 
   whisperm.io       A      76.76.21.21 (Vercel)
   www.whisperm.io   CNAME  cname.vercel-dns.com
-  api.whisperm.io   CNAME  Railway-provided domain
 
 Add whisperm.io and www.whisperm.io in Vercel Project Settings → Domains. TLS automatic.
 
@@ -156,21 +144,21 @@ Verify:
 
 ---
 
-## 8. Webhooks
+## 7. Webhooks
 
 Stripe:
-1. Stripe Dashboard → Webhooks → Add endpoint: https://api.whisperm.io/webhooks/stripe
+1. Stripe Dashboard → Webhooks → Add endpoint: https://whisperm.io/api/webhooks/stripe
 2. Events: customer.subscription.created, customer.subscription.updated,
    customer.subscription.deleted, invoice.payment_succeeded, invoice.payment_failed
 3. Copy signing secret → set as STRIPE_WEBHOOK_SECRET
 
 Paystack:
-1. Paystack Dashboard → Settings → Developer → Webhook URL: https://api.whisperm.io/webhooks/paystack
+1. Paystack Dashboard → Settings → Developer → Webhook URL: https://whisperm.io/api/webhooks/paystack
 2. Signed via x-paystack-signature using PAYSTACK_SECRET_KEY — no separate webhook secret needed
 
 ---
 
-## 9. Backups
+## 8. Backups
 
 Supabase Pro includes daily backups and 30-day PITR automatically.
 1. Supabase Dashboard → Project → Database → Backups
@@ -179,70 +167,50 @@ Supabase Pro includes daily backups and 30-day PITR automatically.
 
 ---
 
-## 10. Smoke test
+## 9. Smoke test
 
-  BASE=https://api.whisperm.io
-
-  # 1. Health
-  curl $BASE/healthz
-
-  # 2. Create workspace
-  curl -X POST $BASE/workspaces \
-    -H "Content-Type: application/json" \
-    -d '{"userId":"smoke-u1","userEmail":"smoke@whisperm.io","firmName":"Smoke Test Co","country":"US"}'
-
-  # 3. Verify trial subscription in Supabase:
-  # SELECT status, "trialEndsAt" FROM "Subscription" WHERE "tenantId" = '[workspaceId]';
-
-  # 4. Create contact
-  curl -X POST $BASE/contacts \
-    -H "Content-Type: application/json" \
-    -H "x-tenant-id: [workspaceId]" \
-    -d '{"email":"client@example.com","stage":"PROSPECT"}'
-
-  # 5. View dashboard
-  curl $BASE/dashboard -H "x-tenant-id: [workspaceId]"
-
-  # 6. Verify worker logs show job processing in Railway
-
-  # 7. Cleanup
-  # DELETE FROM "Tenant" WHERE name = 'Smoke Test Co';
+1. Sign up with a fresh email at https://whisperm.io/sign-up
+2. Confirm you land on a populated (if empty) dashboard, not an error — this exercises the
+   self-serve auto-provisioning path (`apps/web/src/lib/get-tenant.ts`), which creates a
+   trial `Tenant`/`TenantUser`/`Pipeline`/`Subscription` on first login.
+3. Verify in Supabase: `SELECT status, "trialEndsAt" FROM "Subscription" WHERE "tenantId" = '[tenantId]'`
+4. Create a contact and a deal from the UI; confirm they appear on the Dashboard/Pipeline
+5. Capture a marketplace listing (Marketplace Acquisition → Capture)
+6. From Settings → Billing, click "Upgrade to Growth" and confirm redirect to a live Stripe/Paystack checkout page (use a test card/test mode first)
+7. Complete the test payment and confirm the workspace's plan updates within a few seconds (Stripe/Paystack webhook → `/api/webhooks/stripe` or `/api/webhooks/paystack`)
+8. Cleanup: delete the smoke-test tenant from Supabase
 
 ---
 
-## 11. Deployment checklist
+## 10. Deployment checklist
 
-  1.  Database connectivity        | prisma db pull succeeds                  | [ ]
-  2.  Migrations applied           | All tables present in Supabase           | [ ]
-  3.  API health                   | GET /healthz -> 200                      | [ ]
-  4.  Frontend health              | https://whisperm.io -> 200               | [ ]
-  5.  Worker health                | All 5 workers started in Railway logs    | [ ]
-  6.  Queue processing             | Job visible in logs after workspace create | [ ]
-  7.  Signup flow                  | Google OAuth redirect works              | [ ]
-  8.  Workspace creation           | POST /workspaces -> 201                  | [ ]
-  9.  Contact creation             | POST /contacts -> 201                    | [ ]
-  10. Activity creation            | Activity endpoint -> 201                 | [ ]
-  11. Dashboard load               | GET /dashboard -> 200                    | [ ]
-  12. TLS validity                 | Valid cert, not expired                  | [ ]
-  13. Backup status                | Supabase shows >= 1 backup               | [ ]
-  14. Stripe webhook               | Test event -> 200                        | [ ]
-  15. Paystack webhook             | Test event -> 200                        | [ ]
-  16. HSTS header                  | strict-transport-security present        | [ ]
-  17. CSP header                   | content-security-policy present          | [ ]
-  18. No secrets in logs           | Search Railway/Vercel logs               | [ ]
+  1.  Database connectivity        | prisma db pull succeeds                     | [ ]
+  2.  Migrations applied           | All tables present in Supabase              | [ ]
+  3.  Frontend health              | https://whisperm.io -> 200                  | [ ]
+  4.  Worker health                | All 5 workers started in Railway logs       | [ ]
+  5.  Self-serve signup            | Fresh sign-up lands on a populated dashboard | [ ]
+  6.  Manual capture               | Capture a listing -> 201                    | [ ]
+  7.  Dashboard load               | Dashboard renders contacts/pipeline value   | [ ]
+  8.  TLS validity                 | Valid cert, not expired                     | [ ]
+  9.  Backup status                | Supabase shows >= 1 backup                  | [ ]
+  10. Stripe upgrade + webhook     | Test checkout completes, plan updates       | [ ]
+  11. Paystack upgrade + webhook   | Test checkout completes, plan updates       | [ ]
+  12. HSTS header                  | strict-transport-security present           | [ ]
+  13. CSP header                   | content-security-policy present             | [ ]
+  14. No secrets in logs           | Search Railway/Vercel logs                  | [ ]
 
 ---
 
-## 12. Rollback plan
+## 11. Rollback plan
 
   Web        | Vercel -> Deployments -> Instant Rollback
-  API/Worker | Railway -> Deployments -> Redeploy previous
+  Worker     | Railway -> Deployments -> Redeploy previous
   Database   | No rollback needed — all migrations are expand-only
   DNS        | Revert A/CNAME (set TTL=60s before deploy)
 
 ---
 
-## 13. Post-deployment
+## 12. Post-deployment
 
 1. Swap test Stripe/Paystack keys for live keys
 2. Delete smoke test workspace from Supabase

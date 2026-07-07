@@ -1,7 +1,116 @@
 "use client";
 
-import { useState } from "react";
-import { IconAlertCircle, IconBell, IconMail, IconCalendarStats, IconUsers, IconCurrencyDollar, IconLayoutKanban, IconPlus, IconTrash } from "@tabler/icons-react";
+import { useEffect, useState } from "react";
+import { IconAlertCircle, IconBell, IconMail, IconCalendarStats, IconUsers, IconCurrencyDollar, IconLayoutKanban, IconPlus, IconTrash, IconCreditCard } from "@tabler/icons-react";
+
+interface BillingStatus {
+  plan: "STARTER" | "GROWTH" | "PRO" | null;
+  status: "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "UNPAID" | null;
+  trialEndsAt: string | null;
+}
+
+const UPGRADE_PLANS: { readonly plan: "GROWTH" | "PRO"; readonly label: string; readonly blurb: string }[] = [
+  { plan: "GROWTH", label: "Growth", blurb: "Unlimited contacts, up to 5 pipelines, reports & health scores" },
+  { plan: "PRO", label: "Pro", blurb: "Everything unlimited, plus API access" },
+];
+
+function daysRemaining(iso: string): number {
+  return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+}
+
+function BillingCard() {
+  const [status, setStatus] = useState<BillingStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/billing/status")
+      .then((res) => res.json())
+      .then((body: { data?: BillingStatus }) => {
+        if (!cancelled) setStatus(body.data ?? null);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function upgrade(plan: "GROWTH" | "PRO") {
+    setUpgrading(plan);
+    setError(null);
+    try {
+      const res = await fetch("/api/billing/upgrade", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ plan }),
+      });
+      const body = await res.json() as { ok?: boolean; data?: { checkoutUrl: string }; error?: { message?: string } };
+      if (!res.ok || !body.ok || !body.data) {
+        setError(body.error?.message ?? "Could not start checkout. Please try again.");
+        setUpgrading(null);
+        return;
+      }
+      window.location.href = body.data.checkoutUrl;
+    } catch {
+      setError("Could not start checkout. Please try again.");
+      setUpgrading(null);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
+      <div className="mb-4 flex items-center gap-2" style={{ paddingBottom: "12px", borderBottom: "0.5px solid hsl(var(--border))" }}>
+        <IconCreditCard className="size-4" style={{ color: "var(--color-whisper)" }} stroke={1.8} />
+        <h2 className="text-sm font-semibold text-foreground">Billing</h2>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : (
+        <>
+          <div className="mb-4 flex items-center justify-between rounded-xl px-3 py-2.5 bg-secondary" style={{ border: "0.5px solid hsl(var(--border))" }}>
+            <div>
+              <p className="text-sm font-medium text-foreground">{status?.plan ?? "No plan"}</p>
+              <p className="text-xs text-muted-foreground">
+                {status?.status === "TRIALING" && status.trialEndsAt
+                  ? `Trial — ${daysRemaining(status.trialEndsAt)} day${daysRemaining(status.trialEndsAt) === 1 ? "" : "s"} remaining`
+                  : status?.status ?? "No active subscription"}
+              </p>
+            </div>
+            <span
+              className="text-xs font-medium px-2.5 py-0.5 rounded-full"
+              style={{ background: "var(--color-mist)", color: "var(--color-whisper)" }}
+            >
+              {status?.status ?? "NONE"}
+            </span>
+          </div>
+
+          {error && <p className="mb-3 text-xs" style={{ color: "var(--color-health-amber)" }}>{error}</p>}
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {UPGRADE_PLANS.map(({ plan, label, blurb }) => (
+              <div key={plan} className="rounded-xl p-3" style={{ border: "0.5px solid hsl(var(--border))" }}>
+                <p className="text-sm font-medium text-foreground">{label}</p>
+                <p className="mb-2 text-xs text-muted-foreground">{blurb}</p>
+                <button
+                  onClick={() => upgrade(plan)}
+                  disabled={upgrading !== null || status?.plan === plan}
+                  className="h-8 w-full rounded-lg text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                  style={{ background: "var(--color-whisper)" }}
+                >
+                  {status?.plan === plan ? "Current plan" : upgrading === plan ? "Redirecting…" : `Upgrade to ${label}`}
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 interface ToggleSetting {
   id: string;
@@ -92,10 +201,12 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
+      <BillingCard />
+
       <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs" style={{ background: "var(--color-muted)", color: "var(--color-health-amber)" }}>
         <IconAlertCircle className="mt-0.5 size-3.5 shrink-0" stroke={1.8} />
         <span>
-          Preview only: changes on this page are not saved yet and will reset on reload. Workspace
+          Preview only: changes below are not saved yet and will reset on reload. Workspace
           preferences, pipeline stages, and team invites aren&apos;t wired to the backend yet.
         </span>
       </div>

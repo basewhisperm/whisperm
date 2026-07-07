@@ -46,7 +46,6 @@ test('app shell UI strings use translation keys', () => {
 test('audited code has no raw currency display concatenation', () => {
   const files = [
     ...collectFiles(join(appRoot), (file) => /\.(tsx|ts)$/u.test(file)),
-    ...collectFiles(join(repoRoot, 'apps/api/src'), (file) => /\.(ts)$/u.test(file)),
     ...collectFiles(join(repoRoot, 'packages'), (file) => /\.(ts)$/u.test(file) && !file.includes('/node_modules/')),
   ];
 

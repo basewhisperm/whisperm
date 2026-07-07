@@ -33,8 +33,8 @@ Use these lifecycle names consistently in product documentation, implementation 
 
 ## Route ownership
 
-- `apps/web` routes are production-facing for Seller Acquisition user and app-router flows.
-- `apps/api` routes may exist for platform API handlers, service coverage, or historical compatibility, but they are not the only source of truth.
+- `apps/web` routes are the sole production-facing surface for Seller Acquisition user and app-router flows.
+- `apps/api` has been archived (RESOLVED as of the billing/self-serve-signup work: it was never deployed and confirmed to have zero consumers before removal). Its sound business logic (workspace provisioning, billing/webhook handling) was ported into `packages/billing-runtime`, consumed directly by `apps/web`.
 - Route ownership must be verified against current code before deleting, replacing, or moving any endpoint.
 - Business logic should remain in tenant-scoped services and repositories so route handlers stay thin and route ownership can evolve without changing domain behavior.
 
@@ -83,7 +83,7 @@ This record documents the baseline that was performed. Before relying on it for 
 The following items must be verified against current code or production records before being represented as complete:
 
 - Whether any production-facing Seller Acquisition route still depends on `MarketplaceSellerVerification`.
-- Whether any `apps/api` route remains externally consumed by production clients instead of only service or compatibility coverage.
+- RESOLVED: no `apps/api` route was externally consumed (confirmed by a full repo-wide reference search before removal); `apps/api` has been deleted.
 - Whether all lifecycle transitions above have route-level and service-level coverage in the current test suite.
 - Whether production `_prisma_migrations` still matches the documented Neon baseline after subsequent deployments.
 

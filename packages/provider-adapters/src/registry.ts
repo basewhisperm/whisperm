@@ -6,8 +6,8 @@ import type { EmailProvider, SmsProvider, WhatsAppProvider } from "./email/resen
 /**
  * ST1-013: canonical messaging provider registry. WhatsApp/SMS/Email are external, optional
  * capabilities configured from process environment at boot -- this is the single place that
- * constructs them, so apps/api (via apps/web routes) and apps/worker never instantiate a
- * provider independently and can never disagree about whether one is available.
+ * constructs them, so apps/web and apps/worker never instantiate a provider independently and
+ * can never disagree about whether one is available.
  */
 export const messagingProviderIds = ["WHATSAPP", "SMS", "EMAIL"] as const;
 export type MessagingProviderId = (typeof messagingProviderIds)[number];
@@ -147,7 +147,7 @@ export interface MessagingProviderRegistryOptions {
 /**
  * Canonical provider registry: constructs WhatsApp/SMS/Email exactly once per instance and
  * exposes their capability + health. `createMessagingProviderRegistryFromEnv` is the only
- * sanctioned way to build one -- apps/api and apps/worker both call it instead of touching the
+ * sanctioned way to build one -- apps/web and apps/worker both call it instead of touching the
  * individual `create*FromEnv` factories directly.
  */
 export class MessagingProviderRegistry {

@@ -233,6 +233,7 @@ model Tenant {
   pipelines                        Pipeline[]
   pipelineStages                   PipelineStage[]
   subscriptions                    Subscription[]
+  billingWebhookEvents             BillingWebhookEvent[]
   marketplaceSources               MarketplaceSource[]
   marketplaceCaptures              MarketplaceCapture[]
   draftInventories                 DraftInventory[]
@@ -724,6 +725,26 @@ model Subscription {
   @@index([tenantId, status])
   @@index([tenantId, plan, status])
   @@index([tenantId, trialEndsAt])
+}
+
+// Dedup marker for Stripe/Paystack webhook processing. A row is created in the
+// same transaction as the Subscription upsert it guards, so "the dedup row
+// exists" and "the subscription change was applied" can never disagree --
+// there is no reserve-then-apply window where a retry could be told
+// "duplicate" while the update was never actually persisted.
+model BillingWebhookEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  provider        String
+  providerEventId String
+  eventType       String
+  processedAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, providerEventId])
+  @@index([tenantId, provider, eventType])
 }
 
 // Persistence foundation models below are additive and tenant-scoped. They are

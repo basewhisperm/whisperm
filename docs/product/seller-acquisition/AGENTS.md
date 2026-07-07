@@ -32,7 +32,7 @@ The Seller Acquisition pipeline key is `marketplace_acquisition`. Use the export
 
 ## Deployment responsibilities
 
-`apps/web` routes are production-facing for Seller Acquisition user and app-router flows. `apps/api` routes may exist for platform API handlers, service coverage, or historical compatibility, but they are not the only source of truth. Verify current route ownership before deleting, replacing, or moving endpoints.
+`apps/web` routes are the sole production-facing surface for Seller Acquisition user and app-router flows. `apps/api` (a second, disconnected route implementation that was never actually deployed or consumed) has been archived. Shared business logic that previously lived only in `apps/api` (workspace provisioning, billing/webhook handling) now lives in `packages/billing-runtime`, consumed directly by `apps/web`.
 
 Keep business behavior in services and repositories so both API and web entry points can stay thin. Route handlers should validate/authenticate, construct tenant-scoped context, call the service, and format HTTP responses.
 

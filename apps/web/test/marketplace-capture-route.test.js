@@ -74,6 +74,7 @@ const sharedModuleReplacements = (tempDir) => (source) => source
   .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
   .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
   .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
+  .replace(/from "@\/lib\/billing\/require-manual-capture-quota"/gu, `from "${join(tempDir, 'require-manual-capture-quota.mjs')}"`)
   .replace(/from "@\/lib\/api\/request-body"/gu, `from "${join(tempDir, 'request-body.mjs')}"`)
   .replace(/from "@\/lib\/marketplace-acquisition\/acquisition-services"/gu, `from "${join(tempDir, 'acquisition-services.mjs')}"`)
   .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
@@ -86,6 +87,7 @@ const createHarness = async (state) => {
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantContextForCurrentUser = async () => globalThis.__captureRouteState.tenantContext;\n');
   writeFileSync(join(tempDir, 'prisma.mjs'), 'export const prisma = {};\n');
   writeFileSync(join(tempDir, 'tenant-features.mjs'), 'export const requireSellerAcquisitionFeatureForApi = async () => null;\n');
+  writeFileSync(join(tempDir, 'require-manual-capture-quota.mjs'), 'export const requireManualCaptureQuota = async () => null;\n');
   writeFileSync(join(tempDir, 'request-body.mjs'), 'export class RequestBodyError extends Error { constructor(message, status = 400, code) { super(message); this.status = status; this.code = code; } }\nexport const readJsonBody = async (request) => request.json();\n');
   writeFileSync(join(tempDir, 'repositories.mjs'), [
     'export class PrismaAcquisitionUsageEventRepository { constructor() { return globalThis.__captureRouteUsageEvents; } }',

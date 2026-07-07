@@ -803,3 +803,35 @@ export type {
   PaystackSubscriptionData,
   PaystackChargeData,
 } from "./providers/paystack.js";
+
+export { BillingError } from "./errors.js";
+export type { BillingErrorInput } from "./errors.js";
+
+export { createWorkspace, generateWorkspaceSlug, currencyForCountry, DEFAULT_PIPELINE_STAGES } from "./workspace-provisioning.js";
+export type { WorkspaceProvisioningPort, CreateWorkspaceInput, CreateWorkspaceResult, CreatedTenant, CreatedUser, CreatedPipeline } from "./workspace-provisioning.js";
+
+export { createTrialEndsAt, isTrialExpired, createTrialGate } from "./trial.js";
+export type { TrialGateSubscriptionReader } from "./trial.js";
+
+export { initWorkspaceTrial } from "./trial-init.js";
+export type { WorkspaceTrialStore, TrialSubscription, InitTrialInput, InitTrialResult } from "./trial-init.js";
+
+export { createRequireActiveSubscription, TRIAL_EXPIRED } from "./require-active-subscription.js";
+export type { RequireActiveSubscription } from "./require-active-subscription.js";
+
+export { planLimits, isUnlimited, hasFeature } from "./plan-limits.js";
+export type { PlanName, QuotaResource, GatedFeature, QuotaLimit, PlanLimits as BillingPlanLimits } from "./plan-limits.js";
+
+export { evaluateContactCreateQuota, evaluatePipelineCreateQuota, evaluateTeamMemberQuota } from "./quota.js";
+export type { BillingQuotaPlan, BillingQuotaContext, BillingQuotaReader, PipelineQuotaReader, BillingQuotaDecision } from "./quota.js";
+
+export { initiateUpgrade } from "./upgrade.js";
+export type { UpgradeServicePorts, UpgradeWorkspaceContext, UpgradeResult, StripeUpgradePort, PaystackUpgradePort } from "./upgrade.js";
+
+export { processStripeWebhook } from "./webhooks/stripe.js";
+export type { StripeWebhookInput, StripeWebhookOptions } from "./webhooks/stripe.js";
+
+export { processPaystackWebhook } from "./webhooks/paystack.js";
+export type { PaystackWebhookInput, PaystackWebhookOptions } from "./webhooks/paystack.js";
+
+export type { BillingWebhookPort, ApplySubscriptionChangeInput, WebhookResult } from "./webhooks/contracts.js";

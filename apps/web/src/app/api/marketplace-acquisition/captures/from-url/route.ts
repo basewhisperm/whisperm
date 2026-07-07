@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { readJsonOrFormBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
+import { requireManualCaptureQuota } from "@/lib/billing/require-manual-capture-quota";
 import { ServiceError } from "@whisperm/services";
 import { createAcquisitionServiceBundle } from "@/lib/marketplace-acquisition/acquisition-services";
 
@@ -25,6 +26,8 @@ export async function POST(request: NextRequest) {
   const { tenant, tenantUserId } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
+  const quotaDenied = await requireManualCaptureQuota(tenant.id);
+  if (quotaDenied) return quotaDenied;
 
   let body: Record<string, unknown>;
   try {

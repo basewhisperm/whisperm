@@ -5,6 +5,7 @@ import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
+import { requireActivePlanForApi } from "@/lib/billing/require-paid-plan";
 import {
   PrismaCampaignRuntimeExecutionRepository,
   PrismaSellerAcquisitionCampaignRepository,
@@ -65,6 +66,8 @@ export async function POST(request: NextRequest) {
   const { tenant, tenantUserId } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
+  const planDenied = await requireActivePlanForApi(tenant.id);
+  if (planDenied) return planDenied;
 
   let body: unknown;
   try {
