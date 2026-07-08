@@ -342,6 +342,7 @@ export default function SellerAcquisitionCampaignsPage() {
                 const readiness = getCampaignTargetingReadiness(campaign.metadata);
                 const memberCount = campaign.memberCount ?? 0;
                 const workbenchHref = `/marketplace-acquisition/campaigns/${campaign.id}/workbench`;
+                const discoveryHref = `/marketplace-acquisition/campaigns/${campaign.id}/discovery`;
 
                 return (
                   <>
@@ -375,13 +376,13 @@ export default function SellerAcquisitionCampaignsPage() {
                           <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={workbenchHref}>
                             Review sellers
                           </Link>
-                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={workbenchHref}>
+                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={discoveryHref}>
                             Run discovery again
                           </Link>
                         </>
                       ) : (
                         <>
-                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={workbenchHref}>
+                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={discoveryHref}>
                             Run discovery
                           </Link>
                           <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={workbenchHref}>

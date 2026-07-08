@@ -51,10 +51,12 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
-  const campaign = await campaignService().findById({ tenantId: tenant.id }, context.params.campaignId);
+  const service = campaignService();
+  const campaign = await service.findById({ tenantId: tenant.id }, context.params.campaignId);
   if (campaign === null) return errorResponse("Seller acquisition campaign not found.", 404);
+  const memberCount = await service.countMembers({ tenantId: tenant.id }, campaign.id);
 
-  return NextResponse.json({ ok: true, data: { campaign } });
+  return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount } } });
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -85,6 +87,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const campaign = input.archive === true || parsed === null
     ? await service.archive({ tenantId: tenant.id }, context.params.campaignId)
     : await service.update({ tenantId: tenant.id }, context.params.campaignId, updateData as never);
+  const memberCount = await service.countMembers({ tenantId: tenant.id }, campaign.id);
 
-  return NextResponse.json({ ok: true, data: { campaign } });
+  return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount } } });
 }

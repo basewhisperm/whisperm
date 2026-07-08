@@ -326,6 +326,7 @@ export interface SellerAcquisitionCampaignRepository {
   addSeller(context: TenantScoped, input: CreateSellerAcquisitionCampaignMemberInput): Promise<SellerAcquisitionCampaignMemberRecord>;
   removeSeller(context: TenantScoped, campaignId: string, memberId: string): Promise<SellerAcquisitionCampaignMemberRecord>;
   listMembers(context: TenantScoped, campaignId: string, page?: PageRequest): Promise<Page<SellerAcquisitionCampaignMemberRecord>>;
+  countMembers(context: TenantScoped, campaignId: string): Promise<number>;
   findMemberByCapture(context: TenantScoped, campaignId: string, marketplaceCaptureId: string): Promise<SellerAcquisitionCampaignMemberRecord | null>;
   listMembersByCapture(context: TenantScoped, marketplaceCaptureId: string): Promise<readonly SellerAcquisitionCampaignMemberRecord[]>;
   updateMember(context: TenantScoped, memberId: string, input: UpdateSellerAcquisitionCampaignMemberInput): Promise<SellerAcquisitionCampaignMemberRecord>;
@@ -1438,6 +1439,16 @@ export class PrismaSellerAcquisitionCampaignRepository implements SellerAcquisit
       orderBy: { assignedAt: "desc" },
     });
     return paginate(rows.map((row) => parseRecord(sellerAcquisitionCampaignMemberRecordSchema, row)), limit);
+  }
+
+  async countMembers(context: TenantScoped, campaignId: string): Promise<number> {
+    ensureContext(context);
+    const where = withTenant(context, { campaignId, removedAt: null });
+    if (this.prisma.sellerAcquisitionCampaignMember.count === undefined) {
+      const rows = await this.prisma.sellerAcquisitionCampaignMember.findMany({ where });
+      return rows.length;
+    }
+    return this.prisma.sellerAcquisitionCampaignMember.count({ where });
   }
 
   async findMemberByCapture(context: TenantScoped, campaignId: string, marketplaceCaptureId: string): Promise<SellerAcquisitionCampaignMemberRecord | null> {

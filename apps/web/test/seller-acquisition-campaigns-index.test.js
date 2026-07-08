@@ -41,3 +41,12 @@ test("campaigns index renders targeting, runtime, and members as distinct truthf
   assert.match(page, /Ready to run discovery/u);
   assert.match(page, /Configure targeting/u);
 });
+
+// Review finding: the "Run discovery"/"Run discovery again" CTAs pointed at the workbench, which
+// only reads runtime state -- the actual discovery trigger (POST .../discovery/runs) lives under
+// the campaign's /discovery route. Both discovery CTAs must link there, not to the workbench.
+test("run discovery CTAs link to the campaign discovery route, not the workbench", () => {
+  assert.match(page, /const discoveryHref = `\/marketplace-acquisition\/campaigns\/\$\{campaign\.id\}\/discovery`;/u);
+  assert.match(page, /href=\{discoveryHref\}>\s*Run discovery\s*<\/Link>/u);
+  assert.match(page, /href=\{discoveryHref\}>\s*Run discovery again\s*<\/Link>/u);
+});

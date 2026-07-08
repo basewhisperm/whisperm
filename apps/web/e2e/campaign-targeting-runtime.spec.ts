@@ -44,7 +44,7 @@ test.describe("Campaign targeting runtime truth", () => {
     await expect(cardAfterReload.getByText(/Ready to run discovery/i)).toBeVisible();
 
     // The workbench must never contradict the card: it reads the same canonical targeting.
-    await cardAfterReload.getByRole("link", { name: /open workbench|run discovery/i }).first().click();
+    await cardAfterReload.getByRole("link", { name: /open workbench/i }).click();
     await expect(page.getByText(/Jiji Ghana/i)).toBeVisible();
     await expect(page.getByText(/Ready to run discovery/i)).toBeVisible();
   });

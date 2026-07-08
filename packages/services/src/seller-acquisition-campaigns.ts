@@ -47,4 +47,8 @@ export class SellerAcquisitionCampaignService {
   listMembers(context: TenantScoped, campaignId: string, page?: PageRequest) {
     return this.campaigns.listMembers(context, campaignId, page);
   }
+
+  countMembers(context: TenantScoped, campaignId: string): Promise<number> {
+    return this.campaigns.countMembers(context, campaignId);
+  }
 }
