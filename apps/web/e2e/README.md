@@ -71,3 +71,16 @@ seeds its own tenant/campaign and runs against the `DATABASE_URL`/`PLAYWRIGHT_BA
 `playwright/.auth/` (gitignored) is reserved for a future storage-state cache so authenticated
 specs can sign in once instead of per test; not implemented yet -- every spec currently signs in
 independently via `helpers/auth.ts`'s `signIn()`.
+
+## No Playwright coverage for a forced /dashboard load failure (ST1-013H)
+
+`/dashboard` is a server component: `getDashboardDataForCurrentTenant()` (`src/lib/dashboard-data.ts`)
+runs entirely inside the Next.js server process during SSR, before any HTML reaches the browser.
+Playwright's `page.route()` only intercepts requests the *browser* makes, so there is no
+browser-visible network call to fail-inject for this path -- unlike, say, the sandboxed SMS
+provider, which the app really does call over HTTP and which `POST /__control/fail-next` can
+break on command. Forcing a real failure here would mean breaking the tenant/DB/service layer
+itself (e.g. pointing `DATABASE_URL` at a broken database for one run), which is a different,
+heavier kind of test than this suite's per-spec fixtures support -- not a `page.route()` mock.
+Failure-path coverage for `getDashboardDataForCurrentTenant()` instead lives in
+`apps/web/test/dashboard-data.test.js` and `apps/web/test/dashboard-api-route.test.js`.

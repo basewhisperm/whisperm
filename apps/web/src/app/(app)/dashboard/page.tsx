@@ -11,104 +11,9 @@ import {
   IconSend,
   IconUsers,
 } from "@tabler/icons-react";
-import type { AcquisitionMetrics } from "@whisperm/services/acquisition-metrics";
 
-interface DashboardData {
-  activeContacts: number;
-  pipelineValue: number;
-  activities: { id: string; type: string; note?: string | null; createdAt: string }[];
-}
-
-interface AcquisitionRecord {
-  capture: { id: string; title?: string | null; createdAt: string; capturedAt?: string | null };
-  healthStatus: string;
-  nextAction: string;
-  missingRequirements: readonly string[];
-  latestInvitation: { status: string; createdAt: string } | null;
-  claimTokenStatus: { status: string; expiresAt?: string | null } | null;
-  sellerConversion: unknown | null;
-  inventoryConversion: unknown | null;
-}
-
-interface SellerAcquisitionCampaign {
-  id: string;
-  name: string;
-  status: "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED" | "ARCHIVED";
-  goalSellerCount?: number | null;
-  memberCount?: number | null;
-}
-
-async function getDashboardData(): Promise<DashboardData> {
-  try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/dashboard`, {
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-    });
-    if (!res.ok) throw new Error("Failed to fetch dashboard");
-    return res.json() as Promise<DashboardData>;
-  } catch {
-    return { activeContacts: 0, pipelineValue: 0, activities: [] };
-  }
-}
-
-async function getAcquisitionRecords(): Promise<readonly AcquisitionRecord[]> {
-  try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/marketplace-acquisition/records`, {
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-    });
-    if (!res.ok) throw new Error("Failed to fetch acquisition records");
-    const payload = await res.json() as { data?: { records?: AcquisitionRecord[] } };
-    return payload.data?.records ?? [];
-  } catch {
-    return [];
-  }
-}
-
-async function getSellerAcquisitionCampaigns(): Promise<readonly SellerAcquisitionCampaign[]> {
-  try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/marketplace-acquisition/campaigns`, {
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-    });
-    if (!res.ok) throw new Error("Failed to fetch acquisition campaigns");
-    const payload = await res.json() as { data?: { campaigns?: SellerAcquisitionCampaign[] } };
-    return payload.data?.campaigns ?? [];
-  } catch {
-    return [];
-  }
-}
-
-const EMPTY_ACQUISITION_METRICS: AcquisitionMetrics = {
-  totalCaptured: 0,
-  needsReview: 0,
-  phoneReady: 0,
-  invitationReady: 0,
-  invitationPending: 0,
-  waitingClaim: 0,
-  claimed: 0,
-  readyConversion: 0,
-  converted: 0,
-  blocked: 0,
-  totalCampaignMembers: 0,
-};
-
-// ST1-013E: this is the same AcquisitionMetricsService response Workbench,
-// Campaigns, and Command Center read -- the Dashboard renders these numbers
-// directly, it never filters or reduces `records` itself.
-async function getAcquisitionMetrics(): Promise<AcquisitionMetrics> {
-  try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/marketplace-acquisition/metrics`, {
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-    });
-    if (!res.ok) throw new Error("Failed to fetch acquisition metrics");
-    const payload = await res.json() as { data?: { metrics?: AcquisitionMetrics } };
-    return payload.data?.metrics ?? EMPTY_ACQUISITION_METRICS;
-  } catch {
-    return EMPTY_ACQUISITION_METRICS;
-  }
-}
+import { DashboardStatusPanel } from "@/components/dashboard/dashboard-status-panel";
+import { getDashboardDataForCurrentTenant, type DashboardLoadErrorCode } from "@/lib/dashboard-data";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -118,20 +23,40 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+const STATUS_PANEL_TITLE: Readonly<Record<DashboardLoadErrorCode, string>> = {
+  AUTH_REQUIRED: "Workspace access could not be resolved.",
+  TENANT_REQUIRED: "Workspace access could not be resolved.",
+  FEATURE_DISABLED: "Marketplace acquisition is disabled for this workspace.",
+  CONFIGURATION_ERROR: "Dashboard data could not be loaded.",
+  UPSTREAM_ERROR: "Dashboard data could not be loaded.",
+  UNKNOWN_ERROR: "Dashboard data could not be loaded.",
+};
+
 export default async function DashboardPage() {
-  const [dashboard, records, campaigns, acquisitionMetrics] = await Promise.all([
-    getDashboardData(),
-    getAcquisitionRecords(),
-    getSellerAcquisitionCampaigns(),
-    getAcquisitionMetrics(),
-  ]);
+  const result = await getDashboardDataForCurrentTenant();
+
+  if (!result.ok) {
+    const { error } = result;
+    return (
+      <div className="space-y-6">
+        <DashboardStatusPanel
+          {...(error.code === "AUTH_REQUIRED" ? { actionHref: "/sign-in", actionLabel: "Sign in" } : {})}
+          code={error.code}
+          message={error.detail ? `${error.message} ${error.detail}` : error.message}
+          title={STATUS_PANEL_TITLE[error.code]}
+        />
+      </div>
+    );
+  }
+
+  const { activeContacts, pipelineValue, activities, acquisitionMetrics, acquisitionRecords, campaigns } = result.data;
 
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === "ACTIVE").length;
   const totalCampaigns = campaigns.length;
   const campaignGoalTotal = campaigns.reduce((sum, campaign) => sum + (campaign.goalSellerCount ?? 0), 0);
-  const campaignAssignedTotal = campaigns.reduce((sum, campaign) => sum + (campaign.memberCount ?? 0), 0);
+  const campaignAssignedTotal = campaigns.reduce((sum, campaign) => sum + campaign.memberCount, 0);
 
-  const sellersCaptured = acquisitionMetrics.totalCaptured || dashboard.activeContacts;
+  const sellersCaptured = acquisitionMetrics.totalCaptured || activeContacts;
   const needsReview = acquisitionMetrics.needsReview;
 
   const cards = [
@@ -139,11 +64,14 @@ export default async function DashboardPage() {
     { label: "Sellers Captured", value: String(sellersCaptured), detail: "Captured marketplace seller records", icon: IconUsers },
     { label: "Ready to Invite", value: String(acquisitionMetrics.invitationReady), detail: "WhatsApp-first outreach queue", icon: IconSend },
     { label: "Claims Pending", value: String(acquisitionMetrics.waitingClaim), detail: "Waiting for seller claim", icon: IconClock },
-    { label: "Conversions", value: String(acquisitionMetrics.converted || acquisitionMetrics.readyConversion), detail: "Ready or completed conversion flow", icon: IconCircleCheck },
-    { label: "Revenue Pipeline", value: formatCurrency(dashboard.pipelineValue), detail: "CRM pipeline tied to acquisition", icon: IconCurrencyDollar },
+    // ST1-013H: "Ready for Conversion" and "Converted" are reported separately -- a
+    // seller ready to convert must never be counted as an already-completed conversion.
+    { label: "Ready for Conversion", value: String(acquisitionMetrics.readyConversion), detail: "Claimed sellers ready to convert", icon: IconClock },
+    { label: "Converted", value: String(acquisitionMetrics.converted), detail: "Completed conversion flow", icon: IconCircleCheck },
+    { label: "Revenue Pipeline", value: formatCurrency(pipelineValue), detail: "CRM pipeline tied to acquisition", icon: IconCurrencyDollar },
   ];
 
-  const priorityRecords = records
+  const priorityRecords = acquisitionRecords
     .filter((record) => record.nextAction !== "NONE" || record.healthStatus !== "COMPLETED")
     .slice(0, 6);
 
@@ -237,9 +165,9 @@ export default async function DashboardPage() {
                     {campaign.status}
                   </span>
                 </div>
-                <p className="mt-4 text-2xl font-semibold text-foreground">{campaign.memberCount ?? 0}</p>
+                <p className="mt-4 text-2xl font-semibold text-foreground">{campaign.memberCount}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  assigned seller{(campaign.memberCount ?? 0) === 1 ? "" : "s"}
+                  assigned seller{campaign.memberCount === 1 ? "" : "s"}
                   {campaign.goalSellerCount ? ` · goal ${campaign.goalSellerCount}` : ""}
                 </p>
               </Link>
@@ -289,14 +217,14 @@ export default async function DashboardPage() {
             <p className="mt-1 text-xs text-muted-foreground">Latest CRM and acquisition activity across campaign capture, invitation, claim, and conversion work.</p>
           </div>
 
-          {dashboard.activities.length === 0 ? (
+          {activities.length === 0 ? (
             <div className="py-8 text-center">
               <IconClock aria-hidden="true" className="mx-auto size-8 text-muted-foreground" stroke={1.6} />
               <p className="mt-3 text-sm font-medium text-foreground">No acquisition activity yet.</p>
               <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">Captures, invitations, claims, and conversions will appear as your team works.</p>
             </div>
           ) : (
-            dashboard.activities.map((activity) => (
+            activities.map((activity) => (
               <div key={activity.id} className="border-b-hairline py-3">
                 <p className="text-sm font-medium text-foreground">{activity.note ?? activity.type}</p>
                 <p className="text-xs text-muted-foreground">{new Date(activity.createdAt).toLocaleDateString()}</p>

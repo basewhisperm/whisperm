@@ -1,31 +1,25 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getTenantForCurrentUser } from "@/lib/get-tenant";
-import { PrismaDashboardRepository } from "@whisperm/repositories";
+
+import { getDashboardDataForCurrentTenant, type DashboardLoadErrorCode } from "@/lib/dashboard-data";
+
+// ST1-013H: thin read-model route -- getDashboardDataForCurrentTenant() is the
+// only place that aggregates /dashboard data, shared with dashboard/page.tsx.
+// This route never falls back to zeros on failure; it returns the typed error.
+const STATUS_BY_ERROR_CODE: Readonly<Record<DashboardLoadErrorCode, number>> = {
+  AUTH_REQUIRED: 401,
+  TENANT_REQUIRED: 401,
+  FEATURE_DISABLED: 403,
+  CONFIGURATION_ERROR: 503,
+  UPSTREAM_ERROR: 502,
+  UNKNOWN_ERROR: 500,
+};
 
 export async function GET() {
-  const tenant = await getTenantForCurrentUser();
-  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const result = await getDashboardDataForCurrentTenant();
 
-  const context = { tenantId: tenant.id };
-  const repo = new PrismaDashboardRepository(prisma as any);
+  if (!result.ok) {
+    return NextResponse.json({ ok: false, error: result.error }, { status: STATUS_BY_ERROR_CODE[result.error.code] });
+  }
 
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 7);
-
-  const [activeContacts, pipelineValue, healthContacts, followUpAlerts, activities] = await Promise.all([
-    repo.countActiveContacts(context),
-    repo.sumOpenPipelineValue(context),
-    repo.listContactsForHealth(context),
-    repo.listContactsForFollowUpAlerts(context, cutoff),
-    repo.listLatestActivities(context, 5),
-  ]);
-
-  return NextResponse.json({
-    activeContacts,
-    pipelineValue,
-    healthContacts,
-    followUpAlerts,
-    activities,
-  });
+  return NextResponse.json({ ok: true, data: result.data });
 }
