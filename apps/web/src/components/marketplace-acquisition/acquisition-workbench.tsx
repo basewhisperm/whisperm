@@ -43,7 +43,6 @@ import {
   type SellerRollup,
   acquisitionScore,
   badgeTone,
-  capturedAge,
   confidence,
   errorMessageFromPayload,
   hasPhone,
@@ -74,6 +73,7 @@ import {
   workflowBlockersFromRecord,
 } from "@/lib/marketplace-acquisition/workbench-domain";
 import { WorkflowProgress } from "@/components/marketplace-acquisition/workflow-progress";
+import { SellerCard } from "@/components/marketplace-acquisition/seller-card";
 
 
 
@@ -674,6 +674,19 @@ export function AcquisitionWorkbench({
     setRecords((prev) => prev.map((r) => r.capture.id === updated.capture.id ? updated : r));
   }, []);
 
+  // Shared by every Seller Card's primary action button -- same
+  // runPrimaryAction() the Workbench dossier panel uses, so a card's CTA and
+  // the dossier's CTA can never disagree about what happens on click.
+  const runCardPrimaryAction = useCallback(async (target: SellerAcquisitionRecord) => {
+    setActionError(null);
+    try {
+      await runPrimaryAction(target);
+      await refreshRecords();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Workbench action failed.");
+    }
+  }, [refreshRecords]);
+
   return (
     <div className="w-full max-w-full min-w-0 space-y-6 overflow-x-hidden" data-testid="acquisition-workbench">
       <section className="flex flex-col gap-4 rounded-2xl bg-background p-5 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
@@ -900,6 +913,7 @@ export function AcquisitionWorkbench({
                         selectedBulkIds={selectedBulkIds}
                         bulkEligibleRecords={bulkEligibleRecords}
                         onBulkToggle={() => toggleBulkRollup(rollup.records)}
+                        onPrimaryAction={runCardPrimaryAction}
                         onSelect={() => setSelectedCaptureId(rollup.primary.capture.id)}
                       />
                     ))}
@@ -922,6 +936,7 @@ export function AcquisitionWorkbench({
                         selectedBulkIds={selectedBulkIds}
                         bulkEligibleRecords={bulkEligibleRecords}
                         onBulkToggle={() => toggleBulkRollup(rollup.records)}
+                        onPrimaryAction={runCardPrimaryAction}
                         onSelect={() => setSelectedCaptureId(rollup.primary.capture.id)}
                       />
                     ))}
@@ -1073,12 +1088,13 @@ function CheckLine({ label, passed, detail }: { readonly label: string; readonly
   );
 }
 
-function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkEligibleRecords, onBulkToggle, onSelect }: {
+function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkEligibleRecords, onBulkToggle, onPrimaryAction, onSelect }: {
   readonly rollup: SellerRollup;
   readonly selectedCaptureId: string | null;
   readonly selectedBulkIds: readonly string[];
   readonly bulkEligibleRecords: readonly SellerAcquisitionRecord[];
   readonly onBulkToggle: () => void;
+  readonly onPrimaryAction: (record: SellerAcquisitionRecord) => Promise<void>;
   readonly onSelect: () => void;
 }) {
   const eligibleIds = rollup.records
@@ -1092,13 +1108,15 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-2">
-      <RecordCard
+      <SellerCard
+        bulkEligible={bulkEligible}
+        bulkSelected={bulkSelected}
+        listingCountOverride={rollupListingCount(rollup)}
+        onBulkToggle={onBulkToggle}
+        onPrimaryAction={() => onPrimaryAction(primary)}
+        onSelect={onSelect}
         record={primary}
         selected={selected}
-        bulkSelected={bulkSelected}
-        bulkEligible={bulkEligible}
-        onBulkToggle={onBulkToggle}
-        onSelect={onSelect}
       />
       {rollup.records.length > 1 || childTitles.length > 1 ? (
         <div className="min-w-0 max-w-full rounded-2xl bg-secondary px-4 py-3 text-xs text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>
@@ -1111,94 +1129,6 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
         </div>
       ) : null}
     </div>
-  );
-}
-
-function InventoryThumbnail({ src, alt }: { readonly src?: string | null | undefined; readonly alt: string }) {
-  const [failed, setFailed] = useState(false);
-  const normalizedSrc = typeof src === "string" ? src.trim() : "";
-  const isUsableSrc = !failed && /^https?:\/\//i.test(normalizedSrc);
-
-  if (!isUsableSrc) {
-    return (
-      <div className="flex aspect-[4/3] w-full shrink-0 items-center justify-center rounded-xl bg-secondary px-2 text-center text-[11px] font-medium text-muted-foreground sm:w-24">
-        Captured inventory
-      </div>
-    );
-  }
-
-  return (
-    <img
-      alt={alt}
-      className="aspect-[4/3] w-full shrink-0 rounded-xl object-cover sm:w-24"
-      loading="lazy"
-      onError={() => setFailed(true)}
-      src={normalizedSrc}
-    />
-  );
-}
-
-function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle, onSelect }: {
-  readonly record: SellerAcquisitionRecord;
-  readonly selected: boolean;
-  readonly bulkSelected: boolean;
-  readonly bulkEligible: boolean;
-  readonly onBulkToggle: () => void;
-  readonly onSelect: () => void;
-}) {
-  const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
-  const workflowStage = workflowStageFromRecord(record);
-  const workflowNextAction = workflowNextActionFromRecord(record);
-  return (
-    <article
-      className={`w-full min-w-0 max-w-full rounded-2xl bg-background p-4 text-left transition hover:opacity-90 sm:p-5 ${selected ? "ring-2 ring-pulse" : ""}`}
-      data-testid="seller-card"
-      style={{ border: "0.5px solid var(--color-border)" }}
-    >
-      <div className="flex min-w-0 items-start gap-3">
-        <input
-          aria-label={`Select ${sellerName(record)} for bulk invite`}
-          checked={bulkSelected}
-          className="mt-1 size-4 shrink-0"
-          disabled={!bulkEligible}
-          onChange={onBulkToggle}
-          type="checkbox"
-        />
-        <button className="min-w-0 flex-1 text-left" onClick={onSelect} type="button">
-          <h3 className="break-words text-base font-semibold leading-snug text-foreground sm:text-lg">{sellerName(record)}</h3>
-          <p className="mt-1 min-w-0 break-words text-xs text-muted-foreground">
-            {hasPhone(record) ? phone(record) : "Mobile required"} · {source(record)}{location(record) ? ` · ${location(record)}` : ""}
-          </p>
-        </button>
-      </div>
-
-      <button className="mt-3 grid w-full min-w-0 gap-3 text-left sm:grid-cols-[6rem_minmax(0,1fr)]" onClick={onSelect} type="button">
-        <InventoryThumbnail alt={`${sellerName(record)} captured inventory`} src={record.images[0]} />
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{listingCount(record)} listing{listingCount(record) === 1 ? "" : "s"}</p>
-          <p className="line-clamp-2 break-words text-xs text-foreground">{title(record)}</p>
-          <p className="mt-1 text-xs font-medium text-foreground">{price(record)}</p>
-        </div>
-      </button>
-
-      <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
-        <Badge tone={blocked ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}>{workflowStage.replaceAll("_", " ")}</Badge>
-        <span className="text-muted-foreground">Next: <span className="font-semibold text-foreground">{workflowNextAction.label}</span></span>
-      </div>
-      <div className="mt-2 flex min-w-0 flex-wrap gap-2">
-        <Badge>{capturedAge(record)}</Badge>
-      </div>
-      {record.deal?.deal.id ? (
-        <Link
-          className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-2xl px-4 text-sm font-semibold text-whisper sm:w-auto"
-          data-testid="seller-card-open-detail"
-          href={`/marketplace-acquisition/${record.deal.deal.id}`}
-          style={{ border: "0.5px solid var(--color-border)" }}
-        >
-          View Seller Detail
-        </Link>
-      ) : null}
-    </article>
   );
 }
 

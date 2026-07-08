@@ -55,9 +55,11 @@ test('bookmarklet source omits private browser state and full page HTML collecti
 
 test('marketplace acquisition detail route links safe capture fields without raw metadata', () => {
   const detailPage = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/[dealId]/page.tsx', import.meta.url), 'utf8');
-  const boardPage = readFileSync(new URL('../src/components/marketplace-acquisition/acquisition-workbench.tsx', import.meta.url), 'utf8');
+  // ST1-013F -- the Seller Card (with its "Open Detail" link) is extracted
+  // into its own component rather than living inline in the workbench.
+  const sellerCard = readFileSync(new URL('../src/components/marketplace-acquisition/seller-card.tsx', import.meta.url), 'utf8');
 
-  assert.match(boardPage, /href=\{`\/marketplace-acquisition\/\$\{record\.deal\.deal\.id\}`\}/u);
+  assert.match(sellerCard, /href=\{`\/marketplace-acquisition\/\$\{record\.deal\.deal\.id\}`\}/u);
   for (const safeField of ['listingUrl', 'marketplaceSource', 'sellerName', 'status', 'price', 'currency']) {
     assert.match(detailPage, new RegExp(safeField, 'u'));
   }

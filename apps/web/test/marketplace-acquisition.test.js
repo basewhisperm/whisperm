@@ -181,11 +181,9 @@ test("marketplace sellers page renders workbench actions and record inventory pr
   ]) {
     assert.match(source, new RegExp(label, "u"));
   }
-  assert.match(source, /record\.images\[0\]/u);
   assert.match(source, /draftInventory\?\.title \?\? record\.capture\.title/u);
   assert.match(source, /draftInventory\?\.price \?\? record\.capture\.price/u);
   assert.match(source, /marketplaceSource/u);
-  assert.match(source, /capturedAge/u);
   assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/invite/u);
   assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/convert\/render-seller/u);
   assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/convert\/render-inventory/u);
@@ -194,6 +192,19 @@ test("marketplace sellers page renders workbench actions and record inventory pr
   assert.match(source, /if \(!response\.ok\) throw new Error/u);
   assert.match(source, /await onRefresh\(\)/u);
   assert.match(source, /role="alert"/u);
+
+  // ST1-013F -- the seller card's inventory preview (image, workflow-aware
+  // presentation) is extracted into its own component and mapper rather
+  // than assembled inline here; verify the extraction, not the old inline shape.
+  const sellerCard = read("components/marketplace-acquisition/seller-card.tsx");
+  assert.match(sellerCard, /<SellerThumbnail/u);
+  assert.match(sellerCard, /sellerPresentationFromRecord/u);
+
+  const thumbnail = read("components/marketplace-acquisition/seller-thumbnail.tsx");
+  assert.match(thumbnail, /onError/u);
+
+  const metadata = read("components/marketplace-acquisition/seller-metadata.tsx");
+  assert.match(metadata, /capturedAgeLabel/u);
 });
 
 test("seller acquisition detail renders invitation UX with WhatsApp first, SMS fallback, and email optional", () => {
