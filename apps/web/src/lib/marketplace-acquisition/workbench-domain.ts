@@ -16,6 +16,7 @@ import {
   type WorkflowNextAction,
 } from "@whisperm/services/acquisition-workflow";
 import { resolveQueueState } from "@whisperm/services/acquisition-metrics";
+import { present as buildSellerPresentation, type SellerPresentation } from "@whisperm/services/seller-presentation";
 
 export type QueueBucketId = "all" | "needs_human_review" | "needs-phone" | "needs-invitation" | "invitation-failed" | "waiting-claim" | "convert-seller" | "convert-inventory" | "complete" | "completed" | "expired";
 
@@ -391,6 +392,36 @@ export function workflowNextActionFromRecord(record: SellerAcquisitionRecord): W
 
 export function workflowBlockersFromRecord(record: SellerAcquisitionRecord): readonly WorkflowBlocker[] {
   return getWorkflowBlockers(workflowSignalsFromRecord(record));
+}
+
+// ---------------------------------------------------------------------------
+// Seller Card presentation (ST1-013F) -- the only adapter that turns a
+// SellerAcquisitionRecord into a SellerPresentation. The Seller Card and its
+// subcomponents never read capture/contact/draftInventory fields directly;
+// they render whatever this returns. Workflow stage/next-action/blockers are
+// pulled straight from the ST1-013D signals above, never recomputed.
+// ---------------------------------------------------------------------------
+
+export function sellerPresentationFromRecord(record: SellerAcquisitionRecord, listingCountOverride?: number): SellerPresentation {
+  const { hasPhone: _hasPhone, ...workflow } = workflowSignalsFromRecord(record);
+  return buildSellerPresentation({
+    capture: {
+      sellerName: record.capture.sellerName,
+      title: record.capture.title,
+      price: record.capture.price,
+      currency: record.capture.currency,
+      marketplaceSourceId: record.capture.marketplaceSourceId,
+      capturedAt: record.capture.capturedAt,
+      createdAt: record.capture.createdAt,
+      metadata: record.capture.metadata,
+    },
+    contact: record.contact,
+    draftInventory: record.draftInventory,
+    images: record.images,
+    listingCount: listingCountOverride ?? listingCount(record),
+    phoneRequired: record.missingRequirements.includes("PHONE_REQUIRED"),
+    workflow,
+  });
 }
 
 export function errorMessageFromPayload(payload: unknown): string | null {

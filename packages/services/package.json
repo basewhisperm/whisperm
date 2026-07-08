@@ -39,6 +39,11 @@
       "types": "./dist/acquisition-metrics.d.ts",
       "import": "./dist/acquisition-metrics.js",
       "default": "./dist/acquisition-metrics.js"
+    },
+    "./seller-presentation": {
+      "types": "./dist/seller-presentation.d.ts",
+      "import": "./dist/seller-presentation.js",
+      "default": "./dist/seller-presentation.js"
     }
   }
 }

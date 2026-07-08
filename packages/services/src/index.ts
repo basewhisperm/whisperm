@@ -2374,6 +2374,16 @@ export type {
   QueueMetrics,
 } from "./acquisition-metrics.js";
 
+export { present as sellerPresentation } from "./seller-presentation.js";
+export type {
+  SellerPresentation,
+  SellerPresentationInput,
+  SellerPresentationCapture,
+  SellerPresentationContact,
+  SellerPresentationDraftInventory,
+  SellerThumbnailPresentation,
+} from "./seller-presentation.js";
+
 export { AcquisitionCommandCenterService } from "./acquisition-command-center.js";
 export type {
   AcquisitionActionSeverity,
