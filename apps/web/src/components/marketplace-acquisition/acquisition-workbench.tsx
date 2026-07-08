@@ -68,7 +68,11 @@ import {
   source,
   title,
   location,
+  workflowStageFromRecord,
+  workflowNextActionFromRecord,
+  workflowBlockersFromRecord,
 } from "@/lib/marketplace-acquisition/workbench-domain";
+import { WorkflowProgress } from "@/components/marketplace-acquisition/workflow-progress";
 
 
 
@@ -1086,6 +1090,8 @@ function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle
   readonly onSelect: () => void;
 }) {
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
+  const workflowStage = workflowStageFromRecord(record);
+  const workflowNextAction = workflowNextActionFromRecord(record);
   return (
     <article
       className={`w-full min-w-0 max-w-full rounded-2xl bg-background p-4 text-left transition hover:opacity-90 sm:p-5 ${selected ? "ring-2 ring-pulse" : ""}`}
@@ -1118,11 +1124,11 @@ function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle
         </div>
       </button>
 
-      <div className="mt-3 flex min-w-0 flex-wrap gap-2">
-        <Badge tone={blocked ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}>
-          {blocked ? "BLOCKED" : "PHONE READY"}
-        </Badge>
-        <Badge>{queueBuckets.find((bucket) => bucket.matches(record))?.label ?? "All Sellers"}</Badge>
+      <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
+        <Badge tone={blocked ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}>{workflowStage.replaceAll("_", " ")}</Badge>
+        <span className="text-muted-foreground">Next: <span className="font-semibold text-foreground">{workflowNextAction.label}</span></span>
+      </div>
+      <div className="mt-2 flex min-w-0 flex-wrap gap-2">
         <Badge>{capturedAge(record)}</Badge>
       </div>
       {record.deal?.deal.id ? (
@@ -1132,7 +1138,7 @@ function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle
           href={`/marketplace-acquisition/${record.deal.deal.id}`}
           style={{ border: "0.5px solid var(--color-border)" }}
         >
-          Open detail
+          View Seller Detail
         </Link>
       ) : null}
     </article>
@@ -1173,6 +1179,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
 
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
   const enabled = isActionEnabled(record);
+  const canonicalNextActionLabel = workflowNextActionFromRecord(record).label;
   const sellerRecords = rollupRecords.length > 0 ? rollupRecords : [record];
   const sellerListingTitles = [...new Set(sellerRecords.map(title))].slice(0, 8);
   const sellerListingCount = sellerRecords.reduce((count, item) => count + listingCount(item), 0);
@@ -1234,6 +1241,13 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
         </p>
       </div>
 
+      <WorkflowProgress
+        blockers={workflowBlockersFromRecord(record)}
+        compact
+        nextAction={workflowNextActionFromRecord(record)}
+        stage={workflowStageFromRecord(record)}
+      />
+
       <WorkbenchSection title="Seller portfolio">
         <div className="grid gap-2 text-sm text-muted-foreground">
           <p><strong className="text-foreground">Listings:</strong> {sellerListingCount}</p>
@@ -1262,10 +1276,9 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
           </div>
         </WorkbenchSection>
 
-        <WorkbenchSection title="Next action">
-          <p className="text-base font-semibold text-foreground">{nextActionLabels[record.nextAction]}</p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">{nextActionReason(record)}</p>
-          {blocked ? <p className="mt-2 text-sm font-semibold text-red-700">PHONE_REQUIRED blocks invitation.</p> : null}
+        <WorkbenchSection title="Why">
+          <p className="text-sm leading-6 text-muted-foreground">{nextActionReason(record)}</p>
+          {blocked ? <p className="mt-2 text-sm font-semibold text-red-700">Missing phone number blocks invitation.</p> : null}
         </WorkbenchSection>
 
         <WorkbenchSection title="Invitation status">
@@ -1341,7 +1354,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
         }}
         type="button"
       >
-        {busy ? "Working…" : nextActionLabels[record.nextAction]}
+        {busy ? "Working…" : canonicalNextActionLabel}
       </button>
 
       {actionError ? <p className="text-xs font-semibold text-red-700" role="alert">{actionError}</p> : null}

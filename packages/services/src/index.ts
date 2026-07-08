@@ -2326,6 +2326,33 @@ export type { DiscoveryExecutionWorkerDependencies } from './marketplace-acquisi
 export { campaignTargetingConfigSchema, validateCampaignTargeting, mergeCampaignTargetingMetadata, formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "./campaign-targeting.js";
 export type { CampaignTargetingConfig, CampaignTargetingReadiness } from "./campaign-targeting.js";
 
+export {
+  ACQUISITION_WORKFLOW_STAGES,
+  ACQUISITION_WORKFLOW_PROGRESS_NODES,
+  ALLOWED_ACQUISITION_CTA_LABELS,
+  resolveAcquisitionWorkflowStage,
+  getNextWorkflowAction,
+  getWorkflowBlockers,
+  resolveCampaignWorkflowStage,
+  getNextCampaignWorkflowAction,
+  getCampaignWorkflowStageLabel,
+  getCampaignWorkflowBlockers,
+} from "./acquisition-workflow.js";
+export type {
+  AcquisitionWorkflowStage,
+  AcquisitionWorkflowCaptureStatus,
+  AcquisitionWorkflowInvitationStatus,
+  AcquisitionWorkflowSignals,
+  AcquisitionWorkflowProgressNode,
+  WorkflowActionPriority,
+  WorkflowBlockerSeverity,
+  WorkflowNextAction,
+  WorkflowBlocker,
+  CampaignWorkflowStage,
+  CampaignWorkflowSignals,
+  AllowedAcquisitionCtaLabel,
+} from "./acquisition-workflow.js";
+
 export { AcquisitionCommandCenterService } from "./acquisition-command-center.js";
 export type {
   AcquisitionActionSeverity,

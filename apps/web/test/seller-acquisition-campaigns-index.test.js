@@ -39,7 +39,20 @@ test("campaigns index renders targeting, runtime, and members as distinct truthf
   assert.match(page, />Runtime</u);
   assert.match(page, />Members</u);
   assert.match(page, /Ready to run discovery/u);
-  assert.match(page, /Configure targeting/u);
+  // ST1-013D: the CTA label is rendered from the canonical workflow resolver
+  // (nextAction.label), not a hardcoded string -- see the workflow-resolver test below.
+  assert.match(page, /\{nextAction\.label\}/u);
+});
+
+// ST1-013D: campaign cards derive current stage/next action from the canonical acquisition
+// workflow resolver instead of ad hoc inline CTA strings, so "Open"/"Run discovery again" style
+// wording can no longer drift from the rest of the acquisition experience.
+test("campaigns index derives current stage and next action from the canonical workflow resolver", () => {
+  assert.match(page, /import \{\s*getCampaignWorkflowBlockers,\s*getCampaignWorkflowStageLabel,\s*getNextCampaignWorkflowAction,\s*resolveCampaignWorkflowStage,\s*\} from "@whisperm\/services\/acquisition-workflow";/u);
+  assert.match(page, /resolveCampaignWorkflowStage\(\{ targetingReady: readiness\.status === "READY", memberCount \}\)/u);
+  assert.match(page, /getNextCampaignWorkflowAction\(workflowStage\)/u);
+  assert.match(page, /data-testid="campaign-workflow-stage"/u);
+  assert.match(page, /data-testid="campaign-workflow-next-action"/u);
 });
 
 // Review finding: the "Run discovery"/"Run discovery again" CTAs pointed at the workbench, which
@@ -47,6 +60,6 @@ test("campaigns index renders targeting, runtime, and members as distinct truthf
 // the campaign's /discovery route. Both discovery CTAs must link there, not to the workbench.
 test("run discovery CTAs link to the campaign discovery route, not the workbench", () => {
   assert.match(page, /const discoveryHref = `\/marketplace-acquisition\/campaigns\/\$\{campaign\.id\}\/discovery`;/u);
-  assert.match(page, /href=\{discoveryHref\}>\s*Run discovery\s*<\/Link>/u);
-  assert.match(page, /href=\{discoveryHref\}>\s*Run discovery again\s*<\/Link>/u);
+  assert.match(page, /href=\{discoveryHref\}>\s*Run Discovery\s*<\/Link>/u);
+  assert.match(page, /const nextActionHref = workflowStage === "READY_FOR_DISCOVERY" \? discoveryHref : workbenchHref;/u);
 });
