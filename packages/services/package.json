@@ -34,6 +34,11 @@
       "types": "./dist/acquisition-workflow.d.ts",
       "import": "./dist/acquisition-workflow.js",
       "default": "./dist/acquisition-workflow.js"
+    },
+    "./acquisition-metrics": {
+      "types": "./dist/acquisition-metrics.d.ts",
+      "import": "./dist/acquisition-metrics.js",
+      "default": "./dist/acquisition-metrics.js"
     }
   }
 }

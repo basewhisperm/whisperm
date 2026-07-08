@@ -11,6 +11,7 @@ import {
   IconSend,
   IconUsers,
 } from "@tabler/icons-react";
+import type { AcquisitionMetrics } from "@whisperm/services/acquisition-metrics";
 
 interface DashboardData {
   activeContacts: number;
@@ -78,6 +79,37 @@ async function getSellerAcquisitionCampaigns(): Promise<readonly SellerAcquisiti
   }
 }
 
+const EMPTY_ACQUISITION_METRICS: AcquisitionMetrics = {
+  totalCaptured: 0,
+  needsReview: 0,
+  phoneReady: 0,
+  invitationReady: 0,
+  invitationPending: 0,
+  waitingClaim: 0,
+  claimed: 0,
+  readyConversion: 0,
+  converted: 0,
+  blocked: 0,
+  totalCampaignMembers: 0,
+};
+
+// ST1-013E: this is the same AcquisitionMetricsService response Workbench,
+// Campaigns, and Command Center read -- the Dashboard renders these numbers
+// directly, it never filters or reduces `records` itself.
+async function getAcquisitionMetrics(): Promise<AcquisitionMetrics> {
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/marketplace-acquisition/metrics`, {
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) throw new Error("Failed to fetch acquisition metrics");
+    const payload = await res.json() as { data?: { metrics?: AcquisitionMetrics } };
+    return payload.data?.metrics ?? EMPTY_ACQUISITION_METRICS;
+  } catch {
+    return EMPTY_ACQUISITION_METRICS;
+  }
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -87,10 +119,11 @@ function formatCurrency(value: number) {
 }
 
 export default async function DashboardPage() {
-  const [dashboard, records, campaigns] = await Promise.all([
+  const [dashboard, records, campaigns, acquisitionMetrics] = await Promise.all([
     getDashboardData(),
     getAcquisitionRecords(),
     getSellerAcquisitionCampaigns(),
+    getAcquisitionMetrics(),
   ]);
 
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === "ACTIVE").length;
@@ -98,21 +131,15 @@ export default async function DashboardPage() {
   const campaignGoalTotal = campaigns.reduce((sum, campaign) => sum + (campaign.goalSellerCount ?? 0), 0);
   const campaignAssignedTotal = campaigns.reduce((sum, campaign) => sum + (campaign.memberCount ?? 0), 0);
 
-  const sellersCaptured = records.length || dashboard.activeContacts;
-  const readyToInvite = records.filter((record) => record.nextAction === "SEND_INVITATION").length;
-  const claimsPending = records.filter((record) => record.nextAction === "WAIT_FOR_CLAIM").length;
-  const conversionsReady = records.filter((record) =>
-    ["CONVERT_SELLER", "CONVERT_INVENTORY", "COMPLETE_ACQUISITION"].includes(record.nextAction),
-  ).length;
-  const blocked = records.filter((record) => record.missingRequirements.includes("PHONE_REQUIRED")).length;
-  const completed = records.filter((record) => record.healthStatus === "COMPLETED").length;
+  const sellersCaptured = acquisitionMetrics.totalCaptured || dashboard.activeContacts;
+  const needsReview = acquisitionMetrics.needsReview;
 
-  const metrics = [
+  const cards = [
     { label: "Active Campaigns", value: String(activeCampaigns), detail: `${totalCampaigns} total acquisition campaign${totalCampaigns === 1 ? "" : "s"}`, icon: IconRocket },
     { label: "Sellers Captured", value: String(sellersCaptured), detail: "Captured marketplace seller records", icon: IconUsers },
-    { label: "Ready to Invite", value: String(readyToInvite), detail: "WhatsApp-first outreach queue", icon: IconSend },
-    { label: "Claims Pending", value: String(claimsPending), detail: "Waiting for seller claim", icon: IconClock },
-    { label: "Conversions", value: String(completed || conversionsReady), detail: "Ready or completed conversion flow", icon: IconCircleCheck },
+    { label: "Ready to Invite", value: String(acquisitionMetrics.invitationReady), detail: "WhatsApp-first outreach queue", icon: IconSend },
+    { label: "Claims Pending", value: String(acquisitionMetrics.waitingClaim), detail: "Waiting for seller claim", icon: IconClock },
+    { label: "Conversions", value: String(acquisitionMetrics.converted || acquisitionMetrics.readyConversion), detail: "Ready or completed conversion flow", icon: IconCircleCheck },
     { label: "Revenue Pipeline", value: formatCurrency(dashboard.pipelineValue), detail: "CRM pipeline tied to acquisition", icon: IconCurrencyDollar },
   ];
 
@@ -148,21 +175,21 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      {blocked > 0 ? (
-        <div className="flex items-start gap-3 rounded-2xl border-hairline bg-muted p-4">
+      {needsReview > 0 ? (
+        <div data-testid="dashboard-needs-review-callout" className="flex items-start gap-3 rounded-2xl border-hairline bg-muted p-4">
           <IconAlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--color-health-red)]" stroke={1.8} />
           <div>
-            <p className="text-sm font-medium text-foreground">{blocked} seller{blocked === 1 ? "" : "s"} need phone review</p>
+            <p className="text-sm font-medium text-foreground">{needsReview} seller{needsReview === 1 ? "" : "s"} need review</p>
             <p className="mt-0.5 text-xs text-muted-foreground">Use the Acquisition Workbench to reveal phone numbers, clean bad captures, and retry outreach.</p>
           </div>
         </div>
       ) : null}
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-6">
-        {metrics.map((card) => {
+        {cards.map((card) => {
           const Icon = card.icon;
           return (
-            <div key={card.label} className="rounded-2xl border-hairline bg-secondary p-5">
+            <div key={card.label} data-testid={`dashboard-card-${card.label.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/(^-|-$)/gu, "")}`} className="rounded-2xl border-hairline bg-secondary p-5">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{card.label}</p>
                 <Icon className="size-4 text-muted-foreground" stroke={1.8} />

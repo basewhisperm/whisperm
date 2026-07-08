@@ -15,6 +15,7 @@ import {
   type WorkflowBlocker,
   type WorkflowNextAction,
 } from "@whisperm/services/acquisition-workflow";
+import { resolveQueueState } from "@whisperm/services/acquisition-metrics";
 
 export type QueueBucketId = "all" | "needs_human_review" | "needs-phone" | "needs-invitation" | "invitation-failed" | "waiting-claim" | "convert-seller" | "convert-inventory" | "complete" | "completed" | "expired";
 
@@ -32,13 +33,13 @@ export interface SellerRollup {
 
 export const queueBuckets: readonly QueueBucket[] = [
   {
+    // ST1-013E: this must be the exact same predicate as the "Needs Review"
+    // stat tile and the Dashboard's needsReview count -- all three read
+    // resolveQueueState() so this label can never disagree with the rest of
+    // the app about how many sellers need review.
     id: "needs_human_review",
     label: "Needs Human Review",
-    matches: (r) =>
-      confidence(r) === "LOW" ||
-      !hasPhone(r) ||
-      qualityIssues(r).length >= 2 ||
-      r.healthStatus === "BLOCKED",
+    matches: (r) => resolveQueueState(r).state === "REVIEW",
   },
   { id: "needs-phone",       label: "Needs Phone Reveal",                 matches: (r) => r.nextAction === "REVEAL_PHONE" },
   { id: "needs-invitation",  label: "Needs Invitation",             matches: (r) => r.nextAction === "SEND_INVITATION" },

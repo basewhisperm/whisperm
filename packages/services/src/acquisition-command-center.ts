@@ -18,6 +18,11 @@ import { PersistenceError } from "@whisperm/repositories";
 import type { TenantScoped } from "@whisperm/types";
 
 import type { GrowthRecommendation } from "./marketplace-acquisition/growth-loop-worker.js";
+import {
+  CAMPAIGN_MEMBER_CLAIMED_STATUSES,
+  CAMPAIGN_MEMBER_INVITED_STATUSES,
+  CAMPAIGN_MEMBER_QUALIFIED_STATUSES,
+} from "./acquisition-metrics.js";
 
 const MAX_MEMBERS = 1000;
 const MAX_OPPORTUNITIES = 500;
@@ -137,9 +142,9 @@ export interface GetCommandCenterSnapshotInput {
   readonly campaignId?: string | undefined;
 }
 
-const qualifiedStatuses = new Set(["QUALIFIED", "INVITED", "CLAIMED", "CONVERTED", "COMPLETED"]);
-const invitedStatuses = new Set(["INVITED", "CLAIMED", "CONVERTED", "COMPLETED"]);
-const claimedStatuses = new Set(["CLAIMED", "CONVERTED", "COMPLETED"]);
+const qualifiedStatuses = CAMPAIGN_MEMBER_QUALIFIED_STATUSES;
+const invitedStatuses = CAMPAIGN_MEMBER_INVITED_STATUSES;
+const claimedStatuses = CAMPAIGN_MEMBER_CLAIMED_STATUSES;
 
 const severityRank: Readonly<Record<AcquisitionActionSeverity, number>> = { ACTIONABLE: 0, WARNING: 1, INFO: 2 };
 

@@ -51,6 +51,14 @@ interface CommandCenterWarning {
   readonly message: string;
 }
 
+interface CommandCenterAcquisitionMetrics {
+  readonly needsReview: number;
+  readonly phoneReady: number;
+  readonly invitationReady: number;
+  readonly waitingClaim: number;
+  readonly converted: number;
+}
+
 interface CommandCenterSnapshot {
   readonly campaignId: string;
   readonly campaignName: string;
@@ -64,6 +72,8 @@ interface CommandCenterSnapshot {
   readonly readinessWarnings: readonly CommandCenterWarning[];
   readonly growthRecommendations: readonly unknown[];
   readonly generatedAt: string;
+  /** ST1-013E: read from AcquisitionMetricsService, identical to Dashboard/Workbench/Campaigns. */
+  readonly acquisitionMetrics?: CommandCenterAcquisitionMetrics | undefined;
 }
 
 const asSnapshot = (payload: unknown): CommandCenterSnapshot | null => {
@@ -207,6 +217,19 @@ export function AcquisitionCommandCenter({ campaignId }: { readonly campaignId?:
           ))}
         </div>
       </div>
+
+      {snapshot.acquisitionMetrics !== undefined ? (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Acquisition metrics</p>
+          <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs sm:grid-cols-5" aria-label="Acquisition metrics">
+            <div data-testid="metric-needs-review" className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{snapshot.acquisitionMetrics.needsReview}</p><p className="text-muted-foreground">Needs Review</p></div>
+            <div data-testid="metric-phone-ready" className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{snapshot.acquisitionMetrics.phoneReady}</p><p className="text-muted-foreground">Phone Ready</p></div>
+            <div data-testid="metric-invitation-ready" className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{snapshot.acquisitionMetrics.invitationReady}</p><p className="text-muted-foreground">Invitation Ready</p></div>
+            <div data-testid="metric-waiting-claim" className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{snapshot.acquisitionMetrics.waitingClaim}</p><p className="text-muted-foreground">Waiting Claim</p></div>
+            <div data-testid="metric-converted" className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{snapshot.acquisitionMetrics.converted}</p><p className="text-muted-foreground">Converted</p></div>
+          </div>
+        </div>
+      ) : null}
 
       {snapshot.readinessWarnings.length > 0 ? (
         <div>

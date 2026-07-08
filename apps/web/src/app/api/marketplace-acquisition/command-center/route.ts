@@ -8,7 +8,7 @@ import {
   PrismaCampaignRuntimeExecutionRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { AcquisitionCommandCenterService } from "@whisperm/services";
+import { AcquisitionCommandCenterService, AcquisitionMetricsService, createWhispeRMServices, SellerAcquisitionCampaignService } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 
@@ -28,6 +28,17 @@ const commandCenterService = () => {
   });
 };
 
+// ST1-013E: Command Center must consume the same acquisition metrics as
+// Dashboard/Workbench/Campaigns -- never a separate counter.
+const metricsService = () => {
+  const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
+  const services = createWhispeRMServices(repositories);
+  return new AcquisitionMetricsService({
+    sellerAcquisitionRecords: services.sellerAcquisitionRecords,
+    sellerAcquisitionCampaigns: new SellerAcquisitionCampaignService(repositories.sellerAcquisitionCampaigns),
+  });
+};
+
 export async function GET(request: NextRequest) {
   const tenant = await getTenantForCurrentUser();
   if (!tenant) return errorResponse("Unauthorized", 401);
@@ -39,7 +50,22 @@ export async function GET(request: NextRequest) {
 
   try {
     const snapshot = await commandCenterService().getSnapshot({ tenantId: tenant.id }, { campaignId });
-    return NextResponse.json({ ok: true, data: snapshot });
+    const metrics = snapshot.campaignId.length > 0
+      ? await metricsService().getCampaignMetrics({ tenantId: tenant.id }, snapshot.campaignId)
+      : await metricsService().getGlobalMetrics({ tenantId: tenant.id });
+    return NextResponse.json({
+      ok: true,
+      data: {
+        ...snapshot,
+        acquisitionMetrics: {
+          needsReview: metrics.needsReview,
+          phoneReady: metrics.phoneReady,
+          invitationReady: metrics.invitationReady,
+          waitingClaim: metrics.waitingClaim,
+          converted: metrics.converted,
+        },
+      },
+    });
   } catch (error) {
     const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { readonly status: unknown }).status) : 500;
     const message = error instanceof Error ? error.message : "Failed to load acquisition command center.";

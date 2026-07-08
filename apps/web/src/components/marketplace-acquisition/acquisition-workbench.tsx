@@ -29,6 +29,7 @@ import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { IconArrowRight, IconBookmark } from "@tabler/icons-react";
 import { formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "@whisperm/services/campaign-targeting";
+import { isEligibleForInvitation, resolveQueueState } from "@whisperm/services/acquisition-metrics";
 
 import {
   type CaptureConfidence,
@@ -151,14 +152,49 @@ const latestDiscoveryState = (executions: readonly { readonly status: string; re
   };
 };
 
+interface CampaignMetricsState {
+  readonly totalCampaignMembers: number;
+  readonly needsReview: number;
+  readonly phoneReady: number;
+  readonly invitationReady: number;
+  readonly invitationPending: number;
+  readonly waitingClaim: number;
+  readonly claimed: number;
+  readonly readyConversion: number;
+  readonly converted: number;
+  readonly blocked: number;
+}
+
 interface CampaignSummaryState {
   readonly id: string;
   readonly name: string;
   readonly status: string;
   readonly metadata: unknown;
   readonly memberCount?: number | undefined;
+  readonly metrics?: CampaignMetricsState | undefined;
 }
 
+function campaignMetricsFromPayload(value: unknown): CampaignMetricsState | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const numeric = (key: string) => typeof record[key] === "number" ? record[key] as number : 0;
+  return {
+    totalCampaignMembers: numeric("totalCampaignMembers"),
+    needsReview: numeric("needsReview"),
+    phoneReady: numeric("phoneReady"),
+    invitationReady: numeric("invitationReady"),
+    invitationPending: numeric("invitationPending"),
+    waitingClaim: numeric("waitingClaim"),
+    claimed: numeric("claimed"),
+    readyConversion: numeric("readyConversion"),
+    converted: numeric("converted"),
+    blocked: numeric("blocked"),
+  };
+}
+
+// ST1-013E: the campaign summary always comes from AcquisitionMetricsService
+// (via GET /campaigns/[campaignId], which reads campaign.metrics) -- this
+// component never counts campaign members or sellers itself.
 async function fetchCampaignSummary(campaignId: string): Promise<CampaignSummaryState | null> {
   const response = await fetch(`/api/marketplace-acquisition/campaigns/${encodeURIComponent(campaignId)}`);
   const payload = await response.json().catch(() => ({}));
@@ -173,6 +209,7 @@ async function fetchCampaignSummary(campaignId: string): Promise<CampaignSummary
     status: record.status,
     metadata: record.metadata,
     memberCount: typeof record.memberCount === "number" ? record.memberCount : undefined,
+    metrics: campaignMetricsFromPayload(record.metrics),
   };
 }
 
@@ -542,9 +579,7 @@ export function AcquisitionWorkbench({
   const ungroupedVisibleRollups = queueFilter === "all"
     ? filteredRollups.filter((rollup) => !queueBuckets.some((bucket) => rollup.records.some(bucket.matches)))
     : [];
-  const bulkEligibleRecords = filteredRecords.filter((record) =>
-    ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction) && hasPhone(record)
-  );
+  const bulkEligibleRecords = filteredRecords.filter(isEligibleForInvitation);
   const selectedBulkRecords = bulkEligibleRecords.filter((record) => selectedBulkIds.includes(record.capture.id));
   const allEligibleSelected = bulkEligibleRecords.length > 0 && selectedBulkRecords.length === bulkEligibleRecords.length;
   const stages = [...new Set(records.map((r) => r.currentStage).filter(Boolean))];
@@ -559,11 +594,15 @@ export function AcquisitionWorkbench({
   }, 0);
   const attributedRevenueCurrency = attributedSnapshots.find((snapshot) => snapshot.revenueCurrency !== undefined)?.revenueCurrency ?? "USD";
 
+  // ST1-013E: every count below reads resolveQueueState() -- the same
+  // classifier the Dashboard, Campaign summary, and "Needs Human Review"
+  // queue bucket use -- so this row can never disagree with the rest of the
+  // app about how many sellers are in each state.
   const commandCenterStats = [
     { label: "Total sellers", value: filteredRollups.length },
-    { label: "Needs Review", value: filteredRecords.filter((record) => confidence(record) === "LOW" || qualityIssues(record).length >= 2).length },
-    { label: "Needs Invitation", value: filteredRecords.filter((record) => record.nextAction === "SEND_INVITATION" && hasPhone(record)).length },
-    { label: "Waiting Claim", value: filteredRecords.filter((record) => record.nextAction === "WAIT_FOR_CLAIM").length },
+    { label: "Needs Review", value: filteredRecords.filter((record) => resolveQueueState(record).state === "REVIEW").length },
+    { label: "Needs Invitation", value: filteredRecords.filter(isEligibleForInvitation).length },
+    { label: "Waiting Claim", value: filteredRecords.filter((record) => resolveQueueState(record).state === "WAITING_CLAIM").length },
     { label: "Ready Conversion", value: filteredRecords.filter((record) => ["CONVERT_SELLER", "CONVERT_INVENTORY", "COMPLETE_ACQUISITION"].includes(record.nextAction)).length },
     { label: "Completed", value: filteredRecords.filter((record) => record.healthStatus === "COMPLETED").length },
     { label: "Won Deals", value: wonDealsCount },
@@ -578,7 +617,7 @@ export function AcquisitionWorkbench({
 
   const toggleBulkRollup = useCallback((recordsToToggle: readonly SellerAcquisitionRecord[]) => {
     const eligibleIds = recordsToToggle
-      .filter((record) => ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction) && hasPhone(record))
+      .filter(isEligibleForInvitation)
       .map((record) => record.capture.id);
 
     if (eligibleIds.length === 0) return;
@@ -674,6 +713,20 @@ export function AcquisitionWorkbench({
         );
       })() : null}
 
+      {mode === "campaign" && campaignSummary?.metrics !== undefined ? (
+        <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Campaign summary">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Campaign Summary</p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-3 lg:grid-cols-6">
+            <div className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{campaignSummary.metrics.totalCampaignMembers}</p><p className="text-muted-foreground">Members</p></div>
+            <div className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{campaignSummary.metrics.invitationReady}</p><p className="text-muted-foreground">Ready</p></div>
+            <div className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{campaignSummary.metrics.needsReview}</p><p className="text-muted-foreground">Review</p></div>
+            <div className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{campaignSummary.metrics.waitingClaim}</p><p className="text-muted-foreground">Waiting Claim</p></div>
+            <div className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{campaignSummary.metrics.converted}</p><p className="text-muted-foreground">Converted</p></div>
+            <div className="rounded-xl bg-secondary p-3"><p className="text-lg font-semibold text-foreground">{campaignSummary.metrics.blocked}</p><p className="text-muted-foreground">Blocked</p></div>
+          </div>
+        </section>
+      ) : null}
+
       {mode === "campaign" && discoveryRuntime !== null ? (
         <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Discovery execution state">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -730,7 +783,7 @@ export function AcquisitionWorkbench({
 
       <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6" aria-label="Acquisition workbench summary">
         {commandCenterStats.map((stat) => (
-          <div key={stat.label} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+          <div key={stat.label} data-testid={`stat-${slugify(stat.label)}`} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
             <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
           </div>
@@ -762,7 +815,7 @@ export function AcquisitionWorkbench({
         {queueBuckets.map((bucket) => {
           const count = records.filter(bucket.matches).length;
           return (
-            <button key={bucket.id} className={`rounded-2xl bg-background p-4 text-left transition hover:opacity-90 ${queueFilter === bucket.id ? "ring-2 ring-pulse" : ""}`} onClick={() => setQueueFilter(bucket.id)} style={{ border: "0.5px solid var(--color-border)" }} type="button">
+            <button key={bucket.id} data-testid={`queue-bucket-${bucket.id}`} className={`rounded-2xl bg-background p-4 text-left transition hover:opacity-90 ${queueFilter === bucket.id ? "ring-2 ring-pulse" : ""}`} onClick={() => setQueueFilter(bucket.id)} style={{ border: "0.5px solid var(--color-border)" }} type="button">
               <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">{bucket.label}</p>
               <p className="mt-2 text-2xl font-semibold text-foreground">{count}</p>
               <p className="mt-1 text-xs text-muted-foreground">Oldest pending when available</p>
@@ -948,6 +1001,10 @@ function revenueAttribution(record: SellerAcquisitionRecord): RevenueAttribution
   const value = snapshot as Partial<RevenueAttributionSnapshot>;
   if (typeof value.attributionStatus !== "string" || typeof value.attributionCompleteness !== "string") return null;
   return value as RevenueAttributionSnapshot;
+}
+
+function slugify(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/(^-|-$)/gu, "");
 }
 
 function formatCurrencyAmount(amount: number, currency: string): string {
