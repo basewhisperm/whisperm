@@ -98,6 +98,21 @@ test("campaign workbench renders canonical campaign targeting truth independent 
   assert.match(component, /aria-label="Campaign targeting"/u);
 });
 
+// ST1-013C follow-up: @whisperm/services' barrel (index.ts) transitively pulls in
+// @whisperm/repositories (Prisma), @whisperm/provider-adapters (resend/node:crypto), and other
+// server-only code. Importing the bare package specifier from a "use client" component drags all
+// of that into the browser bundle and breaks `next build` (confirmed locally: "Module build failed:
+// UnhandledSchemeError... node:crypto" / "Module not found: Can't resolve '@react-email/render'").
+// The campaign-targeting helpers must be imported from the dependency-light subpath export instead.
+test("client components import campaign targeting helpers from the dependency-light subpath, not the full services barrel", () => {
+  assert.match(component, /from "@whisperm\/services\/campaign-targeting"/u);
+  assert.doesNotMatch(component, /from "@whisperm\/services"/u);
+
+  const campaignsIndexPage = readFileSync("src/app/(app)/marketplace-acquisition/campaigns/page.tsx", "utf8");
+  assert.match(campaignsIndexPage, /from "@whisperm\/services\/campaign-targeting"/u);
+  assert.doesNotMatch(campaignsIndexPage, /from "@whisperm\/services"/u);
+});
+
 test("workbench renders seller relationship memory from API projection", () => {
   assert.match(component, /Seller relationship memory/u);
   assert.match(component, /sellerRelationshipTimelineItems/u);

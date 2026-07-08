@@ -28,7 +28,7 @@ test("campaigns index supports V1 campaign operations", () => {
 // packages/services helpers, not ad hoc inline JSX -- otherwise the card and the workbench can
 // (and did) disagree about whether a campaign's targeting is configured.
 test("campaigns index derives targeting truth from the canonical shared helpers", () => {
-  assert.match(page, /import \{ formatCampaignTargetingSummary, getCampaignTargetingReadiness \} from "@whisperm\/services";/u);
+  assert.match(page, /import \{ formatCampaignTargetingSummary, getCampaignTargetingReadiness \} from "@whisperm\/services\/campaign-targeting";/u);
   assert.match(page, /formatCampaignTargetingSummary\(campaign\.metadata\)/u);
   assert.match(page, /getCampaignTargetingReadiness\(campaign\.metadata\)/u);
   assert.doesNotMatch(page, /\?\? "Not configured"/u);

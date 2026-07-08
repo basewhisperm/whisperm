@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IconArchive, IconEdit, IconPlus, IconRefresh, IconRocket } from "@tabler/icons-react";
-import { formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "@whisperm/services";
+import { formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "@whisperm/services/campaign-targeting";
 
 type CampaignStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED" | "ARCHIVED";
 

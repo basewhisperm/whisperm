@@ -28,7 +28,7 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { IconArrowRight, IconBookmark } from "@tabler/icons-react";
-import { formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "@whisperm/services";
+import { formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "@whisperm/services/campaign-targeting";
 
 import {
   type CaptureConfidence,
