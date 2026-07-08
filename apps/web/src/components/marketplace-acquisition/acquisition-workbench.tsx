@@ -1,30 +1,5 @@
 "use client";
 
-// WhatsApp will be attempted first
-// + Capture Seller
-// Seller dossier
-// Seller command center summary
-// Marketplace Sellers
-// marketplaceSource
-// draftInventory?.title ?? record.capture.title
-// catch { return `${currency} ${numericPrice}`;
-// No Action
-// Captured ${captured}
-// try { return new Intl.NumberFormat
-// Complete Acquisition
-// Convert Inventory
-// Convert Seller
-// Ready To Complete
-// Ready For Inventory Conversion
-// Ready For Seller Conversion
-// Waiting for Seller Claim
-// record.draftInventory?.currency || record.capture.currency || "USD"
-// Retry Invitation
-// Waiting For Claim
-// rawPrice.includes("[object")
-// Send WhatsApp-first Invite
-// Needs Phone Reveal
-
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { IconArrowRight, IconBookmark } from "@tabler/icons-react";
@@ -595,7 +570,7 @@ export function AcquisitionWorkbench({
   const attributedRevenueCurrency = attributedSnapshots.find((snapshot) => snapshot.revenueCurrency !== undefined)?.revenueCurrency ?? "USD";
 
   // ST1-013E: every count below reads resolveQueueState() -- the same
-  // classifier the Dashboard, Campaign summary, and "Needs Human Review"
+  // classifier the Dashboard, Campaign summary, and "Needs Review"
   // queue bucket use -- so this row can never disagree with the rest of the
   // app about how many sellers are in each state.
   const commandCenterStats = [
@@ -703,7 +678,7 @@ export function AcquisitionWorkbench({
             </Link>
           ) : null}
           <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse" href={mode === "campaign" && campaignId ? `/marketplace-acquisition/capture?campaignId=${campaignId}` : "/marketplace-acquisition/capture"} style={{ background: "var(--color-whisper)" }}>
-            Capture seller
+            Capture Seller
             <IconArrowRight aria-hidden="true" className="size-4" stroke={1.8} />
           </Link>
         </div>
@@ -843,7 +818,7 @@ export function AcquisitionWorkbench({
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
               <input aria-label="Search marketplace sellers" className="h-10 w-full min-w-0 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse" placeholder="Search sellers, phone, title, or marketplace" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
               <button className="h-10 w-full rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground disabled:opacity-50 md:w-auto" disabled={loading} onClick={() => void refreshRecords()} type="button">Refresh</button>
-              <Link className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white md:w-auto" href={mode === "campaign" && campaignId ? `/marketplace-acquisition/capture?campaignId=${campaignId}` : "/marketplace-acquisition/capture"}>Capture seller</Link>
+              <Link className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white md:w-auto" href={mode === "campaign" && campaignId ? `/marketplace-acquisition/capture?campaignId=${campaignId}` : "/marketplace-acquisition/capture"}>Capture Seller</Link>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <Filter label="Queue"       value={queueFilter}       onChange={(value) => setQueueFilter(value as QueueBucketId)} options={["all", ...queueBuckets.map((b) => b.id)]} />
@@ -890,8 +865,8 @@ export function AcquisitionWorkbench({
           ) : filteredRecords.length === 0 ? (
             <section className="flex flex-col items-center justify-center rounded-2xl bg-background px-6 py-16 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
               <IconBookmark aria-hidden="true" className="size-8 text-muted-foreground" stroke={1.5} />
-              <h2 className="mt-4 text-sm font-semibold text-foreground">No sellers match this workbench view</h2>
-              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Clear filters or capture a new seller to keep the acquisition queue moving.</p>
+              <h2 className="mt-4 text-sm font-semibold text-foreground">No sellers match this view</h2>
+              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Sellers move through review, invitation, claim, and conversion here — clear filters or capture a new seller to keep the queue moving.</p>
             </section>
           ) : (
             <div className="min-w-0 space-y-4">

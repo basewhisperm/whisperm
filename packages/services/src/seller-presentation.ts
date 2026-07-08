@@ -201,7 +201,7 @@ const STAGE_LABELS: Readonly<Record<AcquisitionWorkflowStage, string>> = {
   INVITATION_SENT: "Invitation Sent",
   WAITING_CLAIM: "Waiting Claim",
   CLAIMED: "Claimed",
-  READY_CONVERSION: "Ready For Conversion",
+  READY_CONVERSION: "Ready to Convert",
   CONVERTED: "Converted",
 };
 

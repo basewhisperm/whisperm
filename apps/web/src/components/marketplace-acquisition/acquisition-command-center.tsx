@@ -179,11 +179,11 @@ export function AcquisitionCommandCenter({ campaignId }: { readonly campaignId?:
         </div>
         {hasCampaign ? (
           <Link className="inline-flex h-10 items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white" href={`/marketplace-acquisition/campaigns/${encodeURIComponent(snapshot.campaignId)}/workbench`}>
-            Open campaign workbench
+            Open Workbench
           </Link>
         ) : (
           <Link className="inline-flex h-10 items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white" href="/marketplace-acquisition/campaigns">
-            Create a campaign
+            Create Campaign
           </Link>
         )}
       </div>

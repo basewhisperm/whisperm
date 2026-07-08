@@ -10,6 +10,7 @@ import {
   getNextCampaignWorkflowAction,
   resolveCampaignWorkflowStage,
 } from "@whisperm/services/acquisition-workflow";
+import { ACQUISITION_COPY } from "@/lib/marketplace-acquisition/acquisition-language";
 
 type CampaignStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED" | "ARCHIVED";
 
@@ -255,9 +256,9 @@ export default function SellerAcquisitionCampaignsPage() {
       <section className="flex flex-col gap-4 rounded-2xl bg-background p-5 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Seller Acquisition</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Campaigns</h1>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{ACQUISITION_COPY.pages.campaigns}</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Create and manage seller acquisition campaigns before running campaign-scoped workbench operations.
+            Create campaigns, configure targeting, and review sellers as they move through invitation, claim, and conversion.
           </p>
         </div>
         <button
@@ -266,7 +267,7 @@ export default function SellerAcquisitionCampaignsPage() {
           type="button"
         >
           <IconPlus aria-hidden="true" className="size-4" stroke={1.8} />
-          New Campaign
+          {ACQUISITION_COPY.actions.createCampaign}
         </button>
       </section>
 
@@ -315,10 +316,10 @@ export default function SellerAcquisitionCampaignsPage() {
       ) : filteredCampaigns.length === 0 ? (
         <section className="flex flex-col items-center justify-center rounded-2xl bg-background px-6 py-16 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
           <IconRocket aria-hidden="true" className="size-10 text-muted-foreground" stroke={1.5} />
-          <h2 className="mt-4 text-base font-semibold text-foreground">No acquisition campaigns yet.</h2>
-          <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Create your first campaign to organize seller capture, invitation, claims, and conversion work.</p>
+          <h2 className="mt-4 text-base font-semibold text-foreground">No campaigns yet.</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Create a campaign to configure targeting and run discovery — every captured seller must belong to a campaign.</p>
           <button className="mt-5 rounded-xl bg-whisper px-4 py-2 text-sm font-semibold text-white" onClick={openCreate} type="button">
-            Create your first campaign
+            {ACQUISITION_COPY.actions.createCampaign}
           </button>
         </section>
       ) : (
@@ -425,7 +426,7 @@ export default function SellerAcquisitionCampaignsPage() {
       {modalMode ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-midnight/60 p-4">
           <section aria-modal="true" className="w-full max-w-lg rounded-2xl bg-background p-5 shadow-xl" role="dialog">
-            <h2 className="text-lg font-semibold text-foreground">{modalMode === "create" ? "New Campaign" : "Edit Campaign"}</h2>
+            <h2 className="text-lg font-semibold text-foreground">{modalMode === "create" ? ACQUISITION_COPY.actions.createCampaign : "Edit Campaign"}</h2>
             <div className="mt-4 space-y-3">
               <Field label="Campaign Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
               <Field label="Description" value={form.description} onChange={(value) => setForm({ ...form, description: value })} />

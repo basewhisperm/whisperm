@@ -39,29 +39,29 @@ export const queueBuckets: readonly QueueBucket[] = [
     // resolveQueueState() so this label can never disagree with the rest of
     // the app about how many sellers need review.
     id: "needs_human_review",
-    label: "Needs Human Review",
+    label: "Needs Review",
     matches: (r) => resolveQueueState(r).state === "REVIEW",
   },
   { id: "needs-phone",       label: "Needs Phone Reveal",                 matches: (r) => r.nextAction === "REVEAL_PHONE" },
   { id: "needs-invitation",  label: "Needs Invitation",             matches: (r) => r.nextAction === "SEND_INVITATION" },
   { id: "invitation-failed", label: "Invitation Failed",               matches: (r) => r.nextAction === "RETRY_INVITATION" },
-  { id: "waiting-claim",     label: "Waiting For Claim",               matches: (r) => r.nextAction === "WAIT_FOR_CLAIM" },
-  { id: "convert-seller",    label: "Ready For Seller Conversion",              matches: (r) => r.nextAction === "CONVERT_SELLER" },
-  { id: "convert-inventory", label: "Ready For Inventory Conversion",           matches: (r) => r.nextAction === "CONVERT_INVENTORY" },
-  { id: "complete",          label: "Ready To Complete",                    matches: (r) => r.nextAction === "COMPLETE_ACQUISITION" },
+  { id: "waiting-claim",     label: "Waiting Claim",               matches: (r) => r.nextAction === "WAIT_FOR_CLAIM" },
+  { id: "convert-seller",    label: "Ready to Convert Seller",              matches: (r) => r.nextAction === "CONVERT_SELLER" },
+  { id: "convert-inventory", label: "Ready to Convert Inventory",           matches: (r) => r.nextAction === "CONVERT_INVENTORY" },
+  { id: "complete",          label: "Ready to Complete Acquisition",                    matches: (r) => r.nextAction === "COMPLETE_ACQUISITION" },
   { id: "completed",         label: "Completed",                    matches: (r) => r.healthStatus === "COMPLETED" },
   { id: "expired",           label: "Expired",                      matches: (r) => r.healthStatus === "EXPIRED" },
 ];
 
 export const nextActionLabels: Record<SellerAcquisitionNextAction, string> = {
   REVEAL_PHONE:         "Reveal Phone",
-  SEND_INVITATION:      "Send WhatsApp-first Invite",
+  SEND_INVITATION:      "Send Invitation",
   RETRY_INVITATION:     "Retry Invitation",
-  WAIT_FOR_CLAIM:       "Waiting for Seller Claim",
+  WAIT_FOR_CLAIM:       "Waiting for Claim",
   CONVERT_SELLER:       "Convert Seller",
   CONVERT_INVENTORY:    "Convert Inventory",
   COMPLETE_ACQUISITION: "Complete Acquisition",
-  NONE:                 "No Action",
+  NONE:                 "No Action Needed",
 };
 
 export function metadataText(record: SellerAcquisitionRecord, key: string): string | null {
