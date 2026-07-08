@@ -29,6 +29,11 @@
       "types": "./dist/campaign-targeting.d.ts",
       "import": "./dist/campaign-targeting.js",
       "default": "./dist/campaign-targeting.js"
+    },
+    "./acquisition-workflow": {
+      "types": "./dist/acquisition-workflow.d.ts",
+      "import": "./dist/acquisition-workflow.js",
+      "default": "./dist/acquisition-workflow.js"
     }
   }
 }

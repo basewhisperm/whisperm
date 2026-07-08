@@ -30,12 +30,14 @@ test("marketplace sellers page uses SellerAcquisitionRecord command center", () 
     assert.match(source, new RegExp(label, "u"));
   }
   assert.match(source, /Mobile required/u);
-  assert.match(source, /PHONE_REQUIRED blocks invitation/u);
+  assert.match(source, /Missing phone number blocks invitation/u);
   assert.match(source, /WhatsApp will be attempted first/u);
   assert.match(source, /SMS is fallback/u);
   assert.match(source, /Email is optional for non-cellphone-first markets/u);
-  assert.match(source, /PHONE READY/u);
-  assert.match(source, /queueBuckets\.find\(\(bucket\) => bucket\.matches\(record\)\)/u);
+  // ST1-013D: seller cards derive their stage/next-action badge from the canonical
+  // acquisition workflow resolver instead of an ad hoc queue-bucket lookup.
+  assert.match(source, /workflowStageFromRecord\(record\)/u);
+  assert.match(source, /workflowNextActionFromRecord\(record\)/u);
   assert.match(source, /Captured \$\{captured\}/u);
   assert.match(source, /Seller dossier/u);
   assert.match(source, /Seller command center summary/u);

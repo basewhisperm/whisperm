@@ -4,11 +4,30 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { IconClock, IconNote } from "@tabler/icons-react";
 import { SellerAcquisitionInvitePanel } from "@/components/seller-acquisition/invite-panel";
+import { WorkflowProgress } from "@/components/marketplace-acquisition/workflow-progress";
 import { PrismaDealsRepository, PrismaMarketplaceCaptureRepository, PrismaPipelineRepository, type ActivityRecord, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
+import {
+  getWorkflowBlockers,
+  getNextWorkflowAction,
+  resolveAcquisitionWorkflowStage,
+  type AcquisitionWorkflowCaptureStatus,
+  type AcquisitionWorkflowInvitationStatus,
+} from "@whisperm/services/acquisition-workflow";
 
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+
+const KNOWN_CAPTURE_STATUSES = new Set(["CAPTURED", "INVITED", "CLAIM_STARTED", "CLAIMED", "CONVERTED", "EXPIRED"]);
+const KNOWN_INVITATION_STATUSES = new Set(["PENDING", "SENT", "FAILED", "OPENED", "EXPIRED"]);
+
+function knownCaptureStatus(value: string | undefined): AcquisitionWorkflowCaptureStatus | undefined {
+  return value !== undefined && KNOWN_CAPTURE_STATUSES.has(value) ? value as AcquisitionWorkflowCaptureStatus : undefined;
+}
+
+function knownInvitationStatus(value: string | undefined): AcquisitionWorkflowInvitationStatus | undefined {
+  return value !== undefined && KNOWN_INVITATION_STATUSES.has(value) ? value as AcquisitionWorkflowInvitationStatus : undefined;
+}
 
 const marketplacePipelineKey = MARKETPLACE_ACQUISITION_PIPELINE_KEY;
 
@@ -203,6 +222,8 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
       marketplaceSource: { select: { key: true, name: true } },
       sellerInvitations: { orderBy: { createdAt: "desc" } },
       draftInventories: { orderBy: { updatedAt: "desc" } },
+      ownershipAttestations: { take: 1 },
+      renderConversions: { where: { status: "SUCCESS" } },
     },
     orderBy: { capturedAt: "desc" },
   });
@@ -212,6 +233,21 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
   const draftImages = draft === null ? [] : stringArray(draft.images);
   const captureImages = stringArray(captureSafeFields.imageUrls).concat(stringArray(captureSafeFields.images));
   const images = [...new Set([...draftImages, ...captureImages])];
+
+  const hasPhoneSignal = contactPhone(detail.contact, captureSafeFields) !== "Not provided";
+  const latestInvitation = capture?.sellerInvitations[0] ?? null;
+  const workflowSignals = {
+    captureStatus: knownCaptureStatus(capture?.status),
+    hasDraftInventory: draft !== null,
+    hasPhone: hasPhoneSignal,
+    invitationStatus: knownInvitationStatus(latestInvitation?.status),
+    hasOwnershipAttestation: (capture?.ownershipAttestations.length ?? 0) > 0,
+    hasSellerConversion: (capture?.renderConversions ?? []).some((conversion) => (conversion.conversionKind ?? "SELLER") === "SELLER"),
+    hasInventoryConversion: (capture?.renderConversions ?? []).some((conversion) => conversion.conversionKind === "INVENTORY"),
+  };
+  const workflowStage = resolveAcquisitionWorkflowStage(workflowSignals);
+  const workflowNextAction = getNextWorkflowAction(workflowStage);
+  const workflowBlockers = getWorkflowBlockers(workflowSignals);
 
   return (
     <div className="space-y-5">
@@ -235,6 +271,13 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
           </div>
         </div>
       </div>
+
+      <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Workflow cockpit">
+        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Workflow cockpit</p>
+        <div className="mt-3">
+          <WorkflowProgress blockers={workflowBlockers} nextAction={workflowNextAction} stage={workflowStage} />
+        </div>
+      </section>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" aria-label="Deal summary">
         <DetailRow label="Stage">{stage?.name ?? "Unknown stage"}</DetailRow>

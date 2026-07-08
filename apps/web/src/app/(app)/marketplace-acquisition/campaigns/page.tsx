@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IconArchive, IconEdit, IconPlus, IconRefresh, IconRocket } from "@tabler/icons-react";
 import { formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "@whisperm/services/campaign-targeting";
+import {
+  getCampaignWorkflowBlockers,
+  getCampaignWorkflowStageLabel,
+  getNextCampaignWorkflowAction,
+  resolveCampaignWorkflowStage,
+} from "@whisperm/services/acquisition-workflow";
 
 type CampaignStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED" | "ARCHIVED";
 
@@ -343,6 +349,10 @@ export default function SellerAcquisitionCampaignsPage() {
                 const memberCount = campaign.memberCount ?? 0;
                 const workbenchHref = `/marketplace-acquisition/campaigns/${campaign.id}/workbench`;
                 const discoveryHref = `/marketplace-acquisition/campaigns/${campaign.id}/discovery`;
+                const workflowStage = resolveCampaignWorkflowStage({ targetingReady: readiness.status === "READY", memberCount });
+                const nextAction = getNextCampaignWorkflowAction(workflowStage);
+                const blockers = getCampaignWorkflowBlockers({ targetingReady: readiness.status === "READY", memberCount });
+                const nextActionHref = workflowStage === "READY_FOR_DISCOVERY" ? discoveryHref : workbenchHref;
 
                 return (
                   <>
@@ -359,37 +369,39 @@ export default function SellerAcquisitionCampaignsPage() {
                         <p className="font-semibold text-foreground">Members</p>
                         <p>{memberCount} captured seller{memberCount === 1 ? "" : "s"}</p>
                       </div>
+                      <div className="rounded-xl bg-secondary p-3" data-testid="campaign-workflow-stage">
+                        <p className="font-semibold text-foreground">Current Stage</p>
+                        <p>{getCampaignWorkflowStageLabel(workflowStage)}</p>
+                      </div>
+                      <div className="rounded-xl bg-secondary p-3" data-testid="campaign-workflow-next-action">
+                        <p className="font-semibold text-foreground">Next Action</p>
+                        <p>{nextAction.label}</p>
+                      </div>
                     </div>
 
+                    {blockers.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {blockers.map((blocker) => (
+                          <span key={blocker.reason} className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">{blocker.reason}</span>
+                        ))}
+                      </div>
+                    ) : null}
+
                     <div className="mt-5 flex flex-wrap gap-2">
-                      {readiness.status === "NOT_CONFIGURED" ? (
-                        <>
-                          <button className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" onClick={() => openEdit(campaign)} type="button">
-                            Configure targeting
-                          </button>
-                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={workbenchHref}>
-                            Open campaign
-                          </Link>
-                        </>
-                      ) : memberCount > 0 ? (
-                        <>
-                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={workbenchHref}>
-                            Review sellers
-                          </Link>
-                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={discoveryHref}>
-                            Run discovery again
-                          </Link>
-                        </>
+                      {workflowStage === "CONFIGURE_TARGETING" ? (
+                        <button className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" onClick={() => openEdit(campaign)} type="button">
+                          {nextAction.label}
+                        </button>
                       ) : (
-                        <>
-                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={discoveryHref}>
-                            Run discovery
-                          </Link>
-                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={workbenchHref}>
-                            Open workbench
-                          </Link>
-                        </>
+                        <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={nextActionHref}>
+                          {nextAction.label}
+                        </Link>
                       )}
+                      {workflowStage === "SELLERS_CAPTURED" ? (
+                        <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={discoveryHref}>
+                          Run Discovery
+                        </Link>
+                      ) : null}
                     </div>
                   </>
                 );

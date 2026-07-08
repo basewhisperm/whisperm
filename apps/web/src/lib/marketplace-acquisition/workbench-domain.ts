@@ -4,6 +4,17 @@ import {
   type SellerAcquisitionNextAction,
   type SellerAcquisitionRecord,
 } from "@/lib/marketplace-acquisition/records-store";
+import {
+  resolveAcquisitionWorkflowStage,
+  getNextWorkflowAction,
+  getWorkflowBlockers,
+  type AcquisitionWorkflowCaptureStatus,
+  type AcquisitionWorkflowInvitationStatus,
+  type AcquisitionWorkflowSignals,
+  type AcquisitionWorkflowStage,
+  type WorkflowBlocker,
+  type WorkflowNextAction,
+} from "@whisperm/services/acquisition-workflow";
 
 export type QueueBucketId = "all" | "needs_human_review" | "needs-phone" | "needs-invitation" | "invitation-failed" | "waiting-claim" | "convert-seller" | "convert-inventory" | "complete" | "completed" | "expired";
 
@@ -338,6 +349,47 @@ export function badgeTone(value: string): string {
 export function isActionEnabled(record: SellerAcquisitionRecord): boolean {
   return ["SEND_INVITATION", "RETRY_INVITATION", "CONVERT_SELLER", "CONVERT_INVENTORY", "COMPLETE_ACQUISITION"]
     .includes(record.nextAction) && hasPhone(record);
+}
+
+// ---------------------------------------------------------------------------
+// Canonical acquisition workflow (ST1-013D) -- every screen derives its
+// current stage, next action, and blockers from the same resolver in
+// @whisperm/services/acquisition-workflow. This adapter is the only place
+// that translates a SellerAcquisitionRecord into the normalized signal shape
+// the resolver expects.
+// ---------------------------------------------------------------------------
+
+const KNOWN_CAPTURE_STATUSES: ReadonlySet<string> = new Set(["CAPTURED", "INVITED", "CLAIM_STARTED", "CLAIMED", "CONVERTED", "EXPIRED"]);
+const KNOWN_INVITATION_STATUSES: ReadonlySet<string> = new Set(["PENDING", "SENT", "FAILED", "OPENED", "EXPIRED"]);
+
+const knownCaptureStatus = (value: string | undefined): AcquisitionWorkflowCaptureStatus | undefined =>
+  value !== undefined && KNOWN_CAPTURE_STATUSES.has(value) ? value as AcquisitionWorkflowCaptureStatus : undefined;
+
+const knownInvitationStatus = (value: string | undefined): AcquisitionWorkflowInvitationStatus | undefined =>
+  value !== undefined && KNOWN_INVITATION_STATUSES.has(value) ? value as AcquisitionWorkflowInvitationStatus : undefined;
+
+export function workflowSignalsFromRecord(record: SellerAcquisitionRecord): AcquisitionWorkflowSignals {
+  return {
+    captureStatus: knownCaptureStatus(record.capture.status),
+    hasDraftInventory: record.draftInventory !== null,
+    hasPhone: hasPhone(record),
+    invitationStatus: knownInvitationStatus(record.latestInvitation?.status),
+    hasOwnershipAttestation: record.ownershipAttestation !== null,
+    hasSellerConversion: record.sellerConversion !== null,
+    hasInventoryConversion: record.inventoryConversion !== null,
+  };
+}
+
+export function workflowStageFromRecord(record: SellerAcquisitionRecord): AcquisitionWorkflowStage {
+  return resolveAcquisitionWorkflowStage(workflowSignalsFromRecord(record));
+}
+
+export function workflowNextActionFromRecord(record: SellerAcquisitionRecord): WorkflowNextAction {
+  return getNextWorkflowAction(workflowStageFromRecord(record));
+}
+
+export function workflowBlockersFromRecord(record: SellerAcquisitionRecord): readonly WorkflowBlocker[] {
+  return getWorkflowBlockers(workflowSignalsFromRecord(record));
 }
 
 export function errorMessageFromPayload(payload: unknown): string | null {
