@@ -6,12 +6,11 @@ import test from "node:test";
 const root = new URL("..", import.meta.url).pathname;
 const read = (path) => readFileSync(join(root, "src", path), "utf8");
 
-test("dashboard fetches real seller acquisition campaigns", () => {
+test("dashboard sources real seller acquisition campaigns from the shared dashboard data helper", () => {
   const page = read("app/(app)/dashboard/page.tsx");
 
-  assert.match(page, /getSellerAcquisitionCampaigns/u);
-  assert.match(page, /\/api\/marketplace-acquisition\/campaigns/u);
-  assert.match(page, /payload\.data\?\.campaigns \?\? \[\]/u);
+  assert.match(page, /getDashboardDataForCurrentTenant/u);
+  assert.match(page, /const \{ activeContacts, pipelineValue, activities, acquisitionMetrics, acquisitionRecords, campaigns \} = result\.data;/u);
 });
 
 test("dashboard removes stale campaign placeholder copy", () => {

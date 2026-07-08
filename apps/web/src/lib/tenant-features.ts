@@ -24,16 +24,50 @@ export async function getTenantFeatures(tenantId: string): Promise<readonly stri
   }
 }
 
+export type TenantFeatureResult =
+  | { readonly ok: true; readonly enabled: boolean }
+  | { readonly ok: false; readonly code: "TENANT_REQUIRED" | "LOOKUP_FAILED"; readonly message: string };
+
+/**
+ * Richer feature-flag check that lets callers distinguish "explicitly
+ * disabled" from "we couldn't tell" (missing tenant vs. a failed lookup),
+ * instead of collapsing every non-enabled outcome into the same boolean.
+ * Still fails closed: `getTenantFeatureState(...).enabled` is only ever
+ * `true` when the flag was actually read as enabled.
+ */
+export async function getTenantFeatureState(
+  tenantId: string | null | undefined,
+  featureKey: string,
+): Promise<TenantFeatureResult> {
+  if (!tenantId) {
+    return { ok: false, code: "TENANT_REQUIRED", message: "No workspace was provided for this feature check." };
+  }
+
+  try {
+    const feature = await prisma.tenantFeature.findUnique({
+      where: { tenantId_featureKey: { tenantId, featureKey } },
+      select: { enabled: true },
+    });
+
+    return { ok: true, enabled: feature?.enabled === true };
+  } catch (error) {
+    console.error("tenant_feature_state_lookup_failed", {
+      tenantId,
+      featureKey,
+      error: error instanceof Error ? error.message : "Unknown tenant feature lookup error",
+    });
+
+    return { ok: false, code: "LOOKUP_FAILED", message: "Feature flag lookup failed." };
+  }
+}
+
+/** Legacy boolean wrapper. Fails closed on any non-`true` outcome, including a failed lookup. */
 export async function isTenantFeatureEnabled(
   tenantId: string,
   featureKey: string,
 ): Promise<boolean> {
-  const feature = await prisma.tenantFeature.findUnique({
-    where: { tenantId_featureKey: { tenantId, featureKey } },
-    select: { enabled: true },
-  });
-
-  return feature?.enabled === true;
+  const result = await getTenantFeatureState(tenantId, featureKey);
+  return result.ok && result.enabled;
 }
 
 export async function requireTenantFeature(
