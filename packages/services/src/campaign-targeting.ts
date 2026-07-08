@@ -61,3 +61,50 @@ export const mergeCampaignTargetingMetadata = (metadata: unknown, targeting: Cam
   }
   return { ...existing, targeting };
 };
+
+export interface CampaignTargetingReadiness {
+  readonly status: "READY" | "NOT_CONFIGURED";
+  readonly missing: readonly string[];
+  readonly summary: string;
+}
+
+const parseTargetingForDisplay = (metadata: unknown): CampaignTargetingConfig | undefined => {
+  const raw = targetingFromCampaignMetadata(metadata);
+  if (raw === undefined || raw === null) return undefined;
+  const parsed = campaignTargetingConfigSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+};
+
+const marketplaceOf = (targeting: CampaignTargetingConfig | undefined): string | undefined =>
+  targeting?.marketplaceSourceKey ?? targeting?.marketplaceSourceId;
+
+const hasTargetingCriteria = (targeting: CampaignTargetingConfig | undefined): boolean =>
+  targeting !== undefined && (targeting.keyword !== undefined || targeting.category !== undefined || targeting.location !== undefined);
+
+export const formatCampaignTargetingSummary = (metadata: unknown): string => {
+  const targeting = parseTargetingForDisplay(metadata);
+  const parts: string[] = [];
+  const marketplace = marketplaceOf(targeting);
+
+  if (marketplace !== undefined) parts.push(marketplace);
+  if (targeting?.keyword !== undefined) parts.push(`Keywords: ${targeting.keyword}`);
+  if (targeting?.category !== undefined) parts.push(`Category: ${targeting.category}`);
+  if (targeting?.location !== undefined) parts.push(`Location: ${targeting.location}`);
+  if (parts.length > 0 && targeting?.executionLimit !== undefined) parts.push(`Limit: ${targeting.executionLimit}`);
+
+  return parts.length > 0 ? parts.join(" · ") : "Not configured";
+};
+
+export const getCampaignTargetingReadiness = (metadata: unknown): CampaignTargetingReadiness => {
+  const targeting = parseTargetingForDisplay(metadata);
+  const missing: string[] = [];
+
+  if (marketplaceOf(targeting) === undefined) missing.push("marketplace");
+  if (!hasTargetingCriteria(targeting)) missing.push("targeting criteria");
+
+  if (missing.length > 0) {
+    return { status: "NOT_CONFIGURED", missing, summary: `Missing ${missing.join(" and ")}` };
+  }
+
+  return { status: "READY", missing: [], summary: formatCampaignTargetingSummary(metadata) };
+};

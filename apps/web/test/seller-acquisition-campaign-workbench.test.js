@@ -87,6 +87,17 @@ test("campaign workbench visualizes autonomous discovery runtime state without e
   assert.doesNotMatch(component, /runDiscovery\(/u);
 });
 
+// ST1-013C: the workbench must show the campaign's own saved targeting (fetched from the
+// canonical campaign record) rather than only the last discovery execution's metrics snapshot --
+// otherwise a campaign with valid targeting that has never run discovery yet shows stale/absent
+// targeting state that contradicts the campaigns list card.
+test("campaign workbench renders canonical campaign targeting truth independent of discovery execution history", () => {
+  assert.match(component, /fetchCampaignSummary/u);
+  assert.match(component, /getCampaignTargetingReadiness\(campaignSummary\.metadata\)/u);
+  assert.match(component, /formatCampaignTargetingSummary\(campaignSummary\.metadata\)/u);
+  assert.match(component, /aria-label="Campaign targeting"/u);
+});
+
 test("workbench renders seller relationship memory from API projection", () => {
   assert.match(component, /Seller relationship memory/u);
   assert.match(component, /sellerRelationshipTimelineItems/u);

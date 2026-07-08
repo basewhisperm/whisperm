@@ -2323,8 +2323,8 @@ export { evaluateCaptureQuality } from "./seller-acquisition/capture-quality.js"
 export { DiscoveryExecutionWorker, normalizeProviderResultForDiscovery } from './marketplace-acquisition/discovery-execution-worker.js';
 export type { DiscoveryExecutionWorkerDependencies } from './marketplace-acquisition/discovery-execution-worker.js';
 
-export { campaignTargetingConfigSchema, validateCampaignTargeting, mergeCampaignTargetingMetadata } from "./campaign-targeting.js";
-export type { CampaignTargetingConfig } from "./campaign-targeting.js";
+export { campaignTargetingConfigSchema, validateCampaignTargeting, mergeCampaignTargetingMetadata, formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "./campaign-targeting.js";
+export type { CampaignTargetingConfig, CampaignTargetingReadiness } from "./campaign-targeting.js";
 
 export { AcquisitionCommandCenterService } from "./acquisition-command-center.js";
 export type {

@@ -23,3 +23,21 @@ test("campaigns index supports V1 campaign operations", () => {
   assert.match(page, /POST/u);
   assert.match(page, /\/api\/marketplace-acquisition\/campaigns/u);
 });
+
+// ST1-013C: the campaign card's targeting/readiness truth must come from the shared
+// packages/services helpers, not ad hoc inline JSX -- otherwise the card and the workbench can
+// (and did) disagree about whether a campaign's targeting is configured.
+test("campaigns index derives targeting truth from the canonical shared helpers", () => {
+  assert.match(page, /import \{ formatCampaignTargetingSummary, getCampaignTargetingReadiness \} from "@whisperm\/services";/u);
+  assert.match(page, /formatCampaignTargetingSummary\(campaign\.metadata\)/u);
+  assert.match(page, /getCampaignTargetingReadiness\(campaign\.metadata\)/u);
+  assert.doesNotMatch(page, /\?\? "Not configured"/u);
+});
+
+test("campaigns index renders targeting, runtime, and members as distinct truthful sections", () => {
+  assert.match(page, />Targeting</u);
+  assert.match(page, />Runtime</u);
+  assert.match(page, />Members</u);
+  assert.match(page, /Ready to run discovery/u);
+  assert.match(page, /Configure targeting/u);
+});
