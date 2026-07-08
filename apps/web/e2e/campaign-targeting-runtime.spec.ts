@@ -18,7 +18,7 @@ test.describe("Campaign targeting runtime truth", () => {
 
     const campaignName = `ST1-013C Demo Campaign ${Date.now()}`;
 
-    await page.getByRole("button", { name: /new campaign/i }).click();
+    await page.getByRole("button", { name: /create campaign/i }).click();
     await page.getByLabel(/campaign name/i).fill(campaignName);
     await page.getByLabel(/marketplace/i).fill("Jiji Ghana");
     await page.getByLabel(/keyword/i).fill("Toyota, Honda");
@@ -60,7 +60,7 @@ test.describe("Campaign targeting runtime truth", () => {
 
     const campaignName = `ST1-013C Empty Campaign ${Date.now()}`;
 
-    await page.getByRole("button", { name: /new campaign/i }).click();
+    await page.getByRole("button", { name: /create campaign/i }).click();
     await page.getByLabel(/campaign name/i).fill(campaignName);
     await page.getByRole("button", { name: /save campaign/i }).click();
 

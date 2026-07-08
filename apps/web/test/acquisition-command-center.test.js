@@ -182,7 +182,7 @@ test('component renders next best actions', () => {
 test('component handles the empty (no campaign) state without crashing', () => {
   assert.match(component, /hasCampaign/u);
   assert.match(component, /No campaign yet/u);
-  assert.match(component, /Create a campaign/u);
+  assert.match(component, /Create Campaign/u);
 });
 
 test('component handles API failure with a visible error state', () => {

@@ -9,7 +9,7 @@ interface CampaignLayoutProps {
 function CampaignTabs({ campaignId }: { readonly campaignId: string }) {
   const base = `/marketplace-acquisition/campaigns/${campaignId}`;
   const tabs = [
-    { label: "Workbench", href: `${base}/workbench` },
+    { label: "Campaign Workbench", href: `${base}/workbench` },
     { label: "Discovery", href: `${base}/discovery` },
   ];
 

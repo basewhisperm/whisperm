@@ -85,7 +85,9 @@ test('decimal-like schema preprocessor accepts decimal instances without generic
 });
 
 test('marketplace acquisition price rendering handles corrupted prices and malformed currencies', () => {
-  const source = readRepo('apps/web/src/components/marketplace-acquisition/acquisition-workbench.tsx');
+  // ST1-013G: the price() implementation this regex targets lives in workbench-domain.ts,
+  // which acquisition-workbench.tsx imports rather than reimplementing inline.
+  const source = readRepo('apps/web/src/lib/marketplace-acquisition/workbench-domain.ts');
   assert.match(source, /rawPrice\.includes\("\[object"\)/u);
   assert.match(source, /record\.draftInventory\?\.currency \|\| record\.capture\.currency \|\| "USD"/u);
   assert.match(source, /try \{\s*return new Intl\.NumberFormat/su);

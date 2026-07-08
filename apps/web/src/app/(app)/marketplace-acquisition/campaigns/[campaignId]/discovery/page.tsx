@@ -202,7 +202,7 @@ function SellerCard({
             type="button"
           >
             <IconSend className="size-3.5" />
-            Send Invite
+            Send Invitation
           </button>
         </div>
       ) : null}

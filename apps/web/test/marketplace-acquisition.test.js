@@ -19,28 +19,31 @@ test("marketplace sellers page uses SellerAcquisitionRecord command center", () 
   assert.doesNotMatch(source, /fetch\("\/api\/deals\?pipelineDefaultKey=marketplace_acquisition"\)/u);
   assert.match(source, /Acquisition Workbench/u);
   assert.doesNotMatch(source, /<h1[^>]*>Seller Capture<\/h1>/u);
+  // ST1-013G: canonical queue-bucket labels live in workbench-domain.ts, not this file.
+  const workbenchDomain = read("lib/marketplace-acquisition/workbench-domain.ts");
   for (const label of [
     "Needs Phone Reveal",
     "Needs Invitation",
-    "Waiting For Claim",
-    "Ready For Seller Conversion",
-    "Ready For Inventory Conversion",
-    "Ready To Complete",
+    "Waiting Claim",
+    "Ready to Convert Seller",
+    "Ready to Convert Inventory",
+    "Ready to Complete Acquisition",
   ]) {
-    assert.match(source, new RegExp(label, "u"));
+    assert.match(workbenchDomain, new RegExp(label, "u"));
   }
   assert.match(source, /Mobile required/u);
   assert.match(source, /Missing phone number blocks invitation/u);
-  assert.match(source, /WhatsApp will be attempted first/u);
+  const capturePage = read("app/(app)/marketplace-acquisition/capture/page.tsx");
+  assert.match(capturePage, /WhatsApp will be attempted first/u);
   assert.match(source, /SMS is fallback/u);
   assert.match(source, /Email is optional for non-cellphone-first markets/u);
   // ST1-013D: seller cards derive their stage/next-action badge from the canonical
   // acquisition workflow resolver instead of an ad hoc queue-bucket lookup.
   assert.match(source, /workflowStageFromRecord\(record\)/u);
   assert.match(source, /workflowNextActionFromRecord\(record\)/u);
-  assert.match(source, /Captured \$\{captured\}/u);
-  assert.match(source, /Seller dossier/u);
-  assert.match(source, /Seller command center summary/u);
+  assert.match(workbenchDomain, /Captured \$\{captured\}/u);
+  assert.match(source, /Workbench dossier/u);
+  assert.match(source, /Acquisition workbench summary/u);
   assert.match(source, /Total sellers/u);
   assert.match(source, /Phone-ready/u);
   assert.match(source, /Seller portfolio/u);
@@ -170,18 +173,20 @@ test("marketplace sellers page filters records client-side", () => {
 test("marketplace sellers page renders workbench actions and record inventory preview", () => {
   const source = read("components/marketplace-acquisition/acquisition-workbench.tsx");
 
+  // ST1-013G: canonical next-action labels live in workbench-domain.ts, not this file.
+  const workbenchDomain = read("lib/marketplace-acquisition/workbench-domain.ts");
   for (const label of [
-    "Send WhatsApp-first Invite",
+    "Send Invitation",
     "Retry Invitation",
-    "Waiting for Seller Claim",
+    "Waiting for Claim",
     "Convert Seller",
     "Convert Inventory",
     "Complete Acquisition",
-    "No Action",
+    "No Action Needed",
   ]) {
-    assert.match(source, new RegExp(label, "u"));
+    assert.match(workbenchDomain, new RegExp(label, "u"));
   }
-  assert.match(source, /draftInventory\?\.title \?\? record\.capture\.title/u);
+  assert.match(workbenchDomain, /draftInventory\?\.title \?\? record\.capture\.title/u);
   assert.match(source, /draftInventory\?\.price \?\? record\.capture\.price/u);
   assert.match(source, /marketplaceSource/u);
   assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/invite/u);

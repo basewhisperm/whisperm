@@ -153,7 +153,7 @@ export interface MarketplaceAcquisitionRecordsStore {
 
 async function fetchMarketplaceAcquisitionRecords(url: string): Promise<MarketplaceAcquisitionRecordsResponse> {
   const response = await fetch(url);
-  if (!response.ok) throw new Error("Unable to load marketplace seller acquisition records");
+  if (!response.ok) throw new Error("Unable to load captured sellers");
   const payload = await response.json() as { readonly data?: Partial<MarketplaceAcquisitionRecordsResponse> };
   return { records: payload.data?.records ?? [] };
 }

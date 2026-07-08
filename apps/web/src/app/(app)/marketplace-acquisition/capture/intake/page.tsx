@@ -172,7 +172,7 @@ function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCap
       ) : null}
 
       <button data-testid="intake-submit" className="rounded-full bg-whisper px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={state.status === "submitting" || selectedCampaignId.trim().length === 0} onClick={submit} type="button">
-        {state.status === "submitting" ? "Saving capture…" : "Submit capture"}
+        {state.status === "submitting" ? "Capturing seller…" : "Capture Seller"}
       </button>
 
       {state.status === "success" && <CaptureResult data={state.data} />}
@@ -295,7 +295,7 @@ function GridPageDiscoveryForm({ payload, campaignId: initialCampaignId }: GridP
         <div className='rounded-2xl bg-secondary p-4 space-y-2' style={{ border: '0.5px solid hsl(var(--border))' }}>
           <p className='text-sm font-semibold text-foreground'>Discovery run complete</p>
           <p className='text-sm text-muted-foreground'>{result.queued} sellers found · {result.qualified} qualified · {result.rejected} rejected</p>
-          <p className='text-xs text-muted-foreground'>Go to the campaign Discovery tab to review and promote qualified sellers.</p>
+          <p className='text-xs text-muted-foreground'>Open the campaign Discovery tab to review and promote qualified sellers.</p>
         </div>
       ) : (
         <button
@@ -319,7 +319,7 @@ export default function MarketplaceCaptureIntakePage({ searchParams }: { readonl
       <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Marketplace acquisition</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Capture intake</h1>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">Review and correct the seller snapshot before creating the acquisition record.</p>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">Review and correct the seller snapshot before capturing this seller.</p>
       </section>
 
       {result.payload ? (result.payload.looksLikeGridPage ? <GridPageDiscoveryForm payload={result.payload} {...(searchParams.campaignId !== undefined ? { campaignId: searchParams.campaignId } : {})} /> : <CaptureForm payload={result.payload} {...(searchParams.campaignId !== undefined ? { campaignId: searchParams.campaignId } : {})} />) : (
