@@ -60,7 +60,7 @@ test("seller acquisition navigation is add-on gated and keeps core CRM links", (
   assert.match(sidebar, /marketplaceSellers\.title/u);
   assert.match(appLayout, /getTenantFeatures\(tenant\.id\)/u);
   assert.match(appLayout, /<AppShell enabledFeatures=\{enabledFeatures\}>/u);
-  assert.match(appShell, /<Sidebar enabledFeatures=\{enabledFeatures \?\? \[\]\} \/>/u);
+  assert.match(appShell, /<Sidebar[\s\S]*?enabledFeatures=\{enabledFeatures \?\? \[\]\}[\s\S]*?\/>/u);
 
   for (const coreLabel of ["dashboard.title", "contacts.title", "deals.title", "reports.title", "settings.title"]) {
     assert.match(sidebar, new RegExp(coreLabel, "u"));
