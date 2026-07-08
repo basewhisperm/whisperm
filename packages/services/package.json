@@ -24,6 +24,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./campaign-targeting": {
+      "types": "./dist/campaign-targeting.d.ts",
+      "import": "./dist/campaign-targeting.js",
+      "default": "./dist/campaign-targeting.js"
     }
   }
 }

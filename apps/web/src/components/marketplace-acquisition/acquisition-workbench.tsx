@@ -28,6 +28,7 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { IconArrowRight, IconBookmark } from "@tabler/icons-react";
+import { formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "@whisperm/services/campaign-targeting";
 
 import {
   type CaptureConfidence,
@@ -145,6 +146,31 @@ const latestDiscoveryState = (executions: readonly { readonly status: string; re
     targetingFailureReason: typeof metrics.targetingFailureReason === "string" ? metrics.targetingFailureReason : undefined,
   };
 };
+
+interface CampaignSummaryState {
+  readonly id: string;
+  readonly name: string;
+  readonly status: string;
+  readonly metadata: unknown;
+  readonly memberCount?: number | undefined;
+}
+
+async function fetchCampaignSummary(campaignId: string): Promise<CampaignSummaryState | null> {
+  const response = await fetch(`/api/marketplace-acquisition/campaigns/${encodeURIComponent(campaignId)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Campaign could not be loaded.");
+  const campaign = (payload as { readonly data?: { readonly campaign?: unknown } }).data?.campaign;
+  if (typeof campaign !== "object" || campaign === null) return null;
+  const record = campaign as Record<string, unknown>;
+  if (typeof record.id !== "string" || typeof record.name !== "string" || typeof record.status !== "string") return null;
+  return {
+    id: record.id,
+    name: record.name,
+    status: record.status,
+    metadata: record.metadata,
+    memberCount: typeof record.memberCount === "number" ? record.memberCount : undefined,
+  };
+}
 
 async function fetchDiscoveryRuntimeState(campaignId: string): Promise<DiscoveryRuntimeState | null> {
   const response = await fetch(`/api/marketplace-acquisition/campaigns/${encodeURIComponent(campaignId)}/runtime/executions?limit=5`);
@@ -428,6 +454,7 @@ export function AcquisitionWorkbench({
   const [actionError, setActionError] = useState<string | null>(null);
   const [discoveryRuntime, setDiscoveryRuntime] = useState<DiscoveryRuntimeState | null>(null);
   const [growthLoop, setGrowthLoop] = useState<GrowthLoopState | null>(null);
+  const [campaignSummary, setCampaignSummary] = useState<CampaignSummaryState | null>(null);
 
   const scopedRecordsPath = useMemo(() => {
     if (campaignId === undefined || campaignId.trim().length === 0) return recordsPath;
@@ -459,6 +486,15 @@ export function AcquisitionWorkbench({
       });
     return () => { cancelled = true; };
   }, [scopedRecordsPath]);
+
+  useEffect(() => {
+    if (mode !== "campaign" || campaignId === undefined) return;
+    let cancelled = false;
+    fetchCampaignSummary(campaignId)
+      .then((summary) => { if (!cancelled) setCampaignSummary(summary); })
+      .catch(() => { if (!cancelled) setCampaignSummary(null); });
+    return () => { cancelled = true; };
+  }, [campaignId, mode]);
 
   useEffect(() => {
     if (mode !== "campaign" || campaignId === undefined) return;
@@ -599,7 +635,7 @@ export function AcquisitionWorkbench({
     <div className="w-full max-w-full min-w-0 space-y-6 overflow-x-hidden" data-testid="acquisition-workbench">
       <section className="flex flex-col gap-4 rounded-2xl bg-background p-5 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">{mode === "campaign" ? `Seller Acquisition · ${campaignName ?? "Campaign"}` : "Seller Acquisition"}</p>
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">{mode === "campaign" ? `Seller Acquisition · ${campaignSummary?.name ?? campaignName ?? "Campaign"}` : "Seller Acquisition"}</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{pageTitle}</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
           <p className="mt-3 max-w-3xl text-xs leading-5 text-muted-foreground">{contextNote}</p>
@@ -617,6 +653,23 @@ export function AcquisitionWorkbench({
         </div>
       </section>
 
+      {mode === "campaign" && campaignSummary !== null ? (() => {
+        const readiness = getCampaignTargetingReadiness(campaignSummary.metadata);
+        return (
+          <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Campaign targeting">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Targeting</p>
+                <h2 className="mt-1 text-sm font-semibold text-foreground">{formatCampaignTargetingSummary(campaignSummary.metadata)}</h2>
+              </div>
+              <Badge tone={readiness.status === "READY" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
+                {readiness.status === "READY" ? "Ready to run discovery" : readiness.summary}
+              </Badge>
+            </div>
+          </section>
+        );
+      })() : null}
+
       {mode === "campaign" && discoveryRuntime !== null ? (
         <section className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Discovery execution state">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -632,7 +685,7 @@ export function AcquisitionWorkbench({
             </div>
           </div>
           <div className="mt-3 rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
-            <p className="font-semibold text-foreground">Targeting {discoveryRuntime.targetingStatus ?? "not recorded"}</p>
+            <p className="font-semibold text-foreground">Last execution targeting snapshot {discoveryRuntime.targetingStatus ?? "not recorded"}</p>
             <p>{discoveryRuntime.targetingSnapshot ? [discoveryRuntime.targetingSnapshot.marketplaceSourceKey ?? discoveryRuntime.targetingSnapshot.marketplaceSourceId, discoveryRuntime.targetingSnapshot.keyword, discoveryRuntime.targetingSnapshot.category, discoveryRuntime.targetingSnapshot.location].filter(Boolean).join(" · ") : "No targeting snapshot recorded."}</p>
             <p>Execution limit: {typeof discoveryRuntime.targetingSnapshot?.executionLimit === "number" || typeof discoveryRuntime.targetingSnapshot?.executionLimit === "string" ? discoveryRuntime.targetingSnapshot.executionLimit : "—"}</p>
           </div>

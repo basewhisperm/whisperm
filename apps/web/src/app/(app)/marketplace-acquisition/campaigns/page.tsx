@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IconArchive, IconEdit, IconPlus, IconRefresh, IconRocket } from "@tabler/icons-react";
+import { formatCampaignTargetingSummary, getCampaignTargetingReadiness } from "@whisperm/services/campaign-targeting";
 
 type CampaignStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED" | "ARCHIVED";
 
@@ -64,7 +65,7 @@ const EMPTY_FORM: CampaignFormState = {
   scheduleCadence: "DAILY",
   scheduleTimezone: "UTC",
   nextRunAt: "",
-  marketplaceSourceKey: "JIJI",
+  marketplaceSourceKey: "",
   category: "",
   location: "",
   keyword: "",
@@ -113,7 +114,7 @@ function formPayload(form: CampaignFormState) {
     scheduleTimezone: form.scheduleEnabled ? form.scheduleTimezone.trim() || "UTC" : null,
     nextRunAt: form.scheduleEnabled ? form.nextRunAt || null : null,
     targeting: {
-      marketplaceSourceKey: form.marketplaceSourceKey.trim(),
+      marketplaceSourceKey: form.marketplaceSourceKey.trim() || undefined,
       category: form.category.trim() || undefined,
       location: form.location.trim() || undefined,
       keyword: form.keyword.trim() || undefined,
@@ -191,7 +192,7 @@ export default function SellerAcquisitionCampaignsPage() {
       scheduleCadence: campaign.scheduleCadence ?? "DAILY",
       scheduleTimezone: campaign.scheduleTimezone ?? "UTC",
       nextRunAt: campaign.nextRunAt ?? "",
-      marketplaceSourceKey: campaign.metadata?.targeting?.marketplaceSourceKey ?? campaign.metadata?.targeting?.marketplaceSourceId ?? "JIJI",
+      marketplaceSourceKey: campaign.metadata?.targeting?.marketplaceSourceKey ?? campaign.metadata?.targeting?.marketplaceSourceId ?? "",
       category: campaign.metadata?.targeting?.category ?? "",
       location: campaign.metadata?.targeting?.location ?? "",
       keyword: campaign.metadata?.targeting?.keyword ?? "",
@@ -336,16 +337,65 @@ export default function SellerAcquisitionCampaignsPage() {
                 <div><dt className="text-muted-foreground">Next Run</dt><dd className="font-medium text-foreground">{formatDateTime(campaign.nextRunAt)}</dd></div>
                 <div><dt className="text-muted-foreground">Last Run</dt><dd className="font-medium text-foreground">{formatDateTime(campaign.lastRunAt)}</dd></div>
               </dl>
-              <div className="mt-4 rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
-                <p className="font-semibold text-foreground">Targeting: {campaign.metadata?.targeting?.marketplaceSourceKey ?? campaign.metadata?.targeting?.marketplaceSourceId ?? "Not configured"}</p>
-                <p>{[campaign.metadata?.targeting?.keyword, campaign.metadata?.targeting?.category, campaign.metadata?.targeting?.location].filter(Boolean).join(" · ") || "Add keyword, category, or location before runtime discovery."}</p>
-                <p>Limit: {campaign.metadata?.targeting?.executionLimit ?? "—"}</p>
-              </div>
+              {(() => {
+                const targetingSummary = formatCampaignTargetingSummary(campaign.metadata);
+                const readiness = getCampaignTargetingReadiness(campaign.metadata);
+                const memberCount = campaign.memberCount ?? 0;
+                const workbenchHref = `/marketplace-acquisition/campaigns/${campaign.id}/workbench`;
+                const discoveryHref = `/marketplace-acquisition/campaigns/${campaign.id}/discovery`;
 
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={`/marketplace-acquisition/campaigns/${campaign.id}/workbench`}>
-                  Open
-                </Link>
+                return (
+                  <>
+                    <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+                      <div className="rounded-xl bg-secondary p-3">
+                        <p className="font-semibold text-foreground">Targeting</p>
+                        <p>{targetingSummary}</p>
+                      </div>
+                      <div className="rounded-xl bg-secondary p-3">
+                        <p className="font-semibold text-foreground">Runtime</p>
+                        <p>{readiness.status === "READY" ? "Ready to run discovery" : readiness.summary}</p>
+                      </div>
+                      <div className="rounded-xl bg-secondary p-3">
+                        <p className="font-semibold text-foreground">Members</p>
+                        <p>{memberCount} captured seller{memberCount === 1 ? "" : "s"}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {readiness.status === "NOT_CONFIGURED" ? (
+                        <>
+                          <button className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" onClick={() => openEdit(campaign)} type="button">
+                            Configure targeting
+                          </button>
+                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={workbenchHref}>
+                            Open campaign
+                          </Link>
+                        </>
+                      ) : memberCount > 0 ? (
+                        <>
+                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={workbenchHref}>
+                            Review sellers
+                          </Link>
+                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={discoveryHref}>
+                            Run discovery again
+                          </Link>
+                        </>
+                      ) : (
+                        <>
+                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={discoveryHref}>
+                            Run discovery
+                          </Link>
+                          <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" href={workbenchHref}>
+                            Open workbench
+                          </Link>
+                        </>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+
+              <div className="mt-2 flex flex-wrap gap-2">
                 <button className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-secondary px-3 text-sm font-semibold text-foreground" onClick={() => openEdit(campaign)} type="button">
                   <IconEdit aria-hidden="true" className="size-4" stroke={1.8} />
                   Edit
@@ -385,7 +435,7 @@ export default function SellerAcquisitionCampaignsPage() {
               <Field label="Next Run (ISO)" value={form.nextRunAt} onChange={(value) => setForm({ ...form, nextRunAt: value })} />
               <div className="rounded-xl bg-secondary/60 p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Discovery targeting</p>
-                <Field label="Marketplace/source" value={form.marketplaceSourceKey} onChange={(value) => setForm({ ...form, marketplaceSourceKey: value })} />
+                <Field label="Marketplace/source" placeholder="e.g. JIJI" value={form.marketplaceSourceKey} onChange={(value) => setForm({ ...form, marketplaceSourceKey: value })} />
                 <Field label="Keyword/search phrase" value={form.keyword} onChange={(value) => setForm({ ...form, keyword: value })} />
                 <Field label="Category" value={form.category} onChange={(value) => setForm({ ...form, category: value })} />
                 <Field label="Location/region" value={form.location} onChange={(value) => setForm({ ...form, location: value })} />
@@ -412,7 +462,7 @@ export default function SellerAcquisitionCampaignsPage() {
   );
 }
 
-function Field({ label, value, onChange, inputMode }: { readonly label: string; readonly value: string; readonly onChange: (value: string) => void; readonly inputMode?: "numeric" }) {
+function Field({ label, value, onChange, inputMode, placeholder }: { readonly label: string; readonly value: string; readonly onChange: (value: string) => void; readonly inputMode?: "numeric"; readonly placeholder?: string }) {
   return (
     <label className="block text-sm font-medium text-muted-foreground">
       {label}
@@ -420,6 +470,7 @@ function Field({ label, value, onChange, inputMode }: { readonly label: string; 
         className="mt-1 h-10 w-full rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
         inputMode={inputMode}
         onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
         value={value}
       />
     </label>

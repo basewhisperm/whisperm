@@ -23,3 +23,30 @@ test("campaigns index supports V1 campaign operations", () => {
   assert.match(page, /POST/u);
   assert.match(page, /\/api\/marketplace-acquisition\/campaigns/u);
 });
+
+// ST1-013C: the campaign card's targeting/readiness truth must come from the shared
+// packages/services helpers, not ad hoc inline JSX -- otherwise the card and the workbench can
+// (and did) disagree about whether a campaign's targeting is configured.
+test("campaigns index derives targeting truth from the canonical shared helpers", () => {
+  assert.match(page, /import \{ formatCampaignTargetingSummary, getCampaignTargetingReadiness \} from "@whisperm\/services\/campaign-targeting";/u);
+  assert.match(page, /formatCampaignTargetingSummary\(campaign\.metadata\)/u);
+  assert.match(page, /getCampaignTargetingReadiness\(campaign\.metadata\)/u);
+  assert.doesNotMatch(page, /\?\? "Not configured"/u);
+});
+
+test("campaigns index renders targeting, runtime, and members as distinct truthful sections", () => {
+  assert.match(page, />Targeting</u);
+  assert.match(page, />Runtime</u);
+  assert.match(page, />Members</u);
+  assert.match(page, /Ready to run discovery/u);
+  assert.match(page, /Configure targeting/u);
+});
+
+// Review finding: the "Run discovery"/"Run discovery again" CTAs pointed at the workbench, which
+// only reads runtime state -- the actual discovery trigger (POST .../discovery/runs) lives under
+// the campaign's /discovery route. Both discovery CTAs must link there, not to the workbench.
+test("run discovery CTAs link to the campaign discovery route, not the workbench", () => {
+  assert.match(page, /const discoveryHref = `\/marketplace-acquisition\/campaigns\/\$\{campaign\.id\}\/discovery`;/u);
+  assert.match(page, /href=\{discoveryHref\}>\s*Run discovery\s*<\/Link>/u);
+  assert.match(page, /href=\{discoveryHref\}>\s*Run discovery again\s*<\/Link>/u);
+});

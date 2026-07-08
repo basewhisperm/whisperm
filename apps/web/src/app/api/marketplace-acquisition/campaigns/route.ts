@@ -56,12 +56,16 @@ export async function GET(request: NextRequest) {
 
   const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
   const cursor = request.nextUrl.searchParams.get("cursor") ?? undefined;
-  const page = await campaignService().list(
+  const service = campaignService();
+  const page = await service.list(
     { tenantId: tenant.id },
     { ...(limit === undefined ? {} : { limit }), ...(cursor === undefined ? {} : { cursor }) },
   );
+  const campaigns = await Promise.all(
+    page.items.map(async (campaign) => ({ ...campaign, memberCount: await service.countMembers({ tenantId: tenant.id }, campaign.id) })),
+  );
 
-  return NextResponse.json({ ok: true, data: { campaigns: page.items, nextCursor: page.nextCursor } });
+  return NextResponse.json({ ok: true, data: { campaigns, nextCursor: page.nextCursor } });
 }
 
 export async function POST(request: NextRequest) {
@@ -84,5 +88,5 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid campaign request.", 400);
 
   const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
-  return NextResponse.json({ ok: true, data: { campaign } }, { status: 201 });
+  return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
 }
