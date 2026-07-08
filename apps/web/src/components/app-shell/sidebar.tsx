@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton, useUser } from "@clerk/nextjs";
@@ -11,13 +10,11 @@ import {
   IconCircleCheck,
   IconInbox,
   IconLayoutDashboard,
-  IconMenu2,
   IconReportAnalytics,
   IconRocket,
   IconSend,
   IconSettings,
   IconUsers,
-  IconX,
 } from "@tabler/icons-react";
 import { WorkspaceSelector } from "@/components/ui/workspace-selector";
 import { t, type TranslationKey } from "@/lib/i18n";
@@ -176,41 +173,36 @@ function SidebarProfile() {
   );
 }
 
-export function Sidebar({ enabledFeatures }: { readonly enabledFeatures: readonly string[] }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-
+export function Sidebar({
+  enabledFeatures,
+  mobileOpen,
+  onMobileOpenChange,
+}: {
+  readonly enabledFeatures: readonly string[];
+  readonly mobileOpen: boolean;
+  readonly onMobileOpenChange: (open: boolean) => void;
+}) {
   return (
     <>
-      <button
-        aria-controls="mobile-primary-navigation"
-        aria-expanded={mobileOpen}
-        aria-label={mobileOpen ? t("navigation.mobile.close") : t("navigation.mobile.open")}
-        className="fixed left-4 top-4 z-50 inline-flex size-11 items-center justify-center rounded-full bg-midnight text-ivory shadow-lg transition hover:bg-midnight/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pulse focus-visible:ring-offset-2 focus-visible:ring-offset-background md:hidden"
-        onClick={() => setMobileOpen((open) => !open)}
-        type="button"
-      >
-        {mobileOpen ? <IconX aria-hidden="true" className="size-5" /> : <IconMenu2 aria-hidden="true" className="size-5" />}
-      </button>
-
       {mobileOpen ? (
         <div className="fixed inset-0 z-40 md:hidden">
           <button
             aria-label={t("navigation.mobile.overlayClose")}
             className="absolute inset-0 bg-midnight/60"
-            onClick={() => setMobileOpen(false)}
+            onClick={() => onMobileOpenChange(false)}
             type="button"
           />
           <aside
             className="relative flex h-dvh w-[min(88vw,340px)] flex-col border-r-hairline bg-midnight text-ivory shadow-xl"
             id="mobile-primary-navigation"
           >
-            <div className="border-b-hairline px-5 py-5 pl-16">
+            <div className="border-b-hairline px-5 py-5">
               <p className="text-lg font-semibold tracking-tight">{t("app.name")}</p>
             </div>
             <div className="px-4 py-4">
               <WorkspaceSelector />
             </div>
-            <NavigationSectionList enabledFeatures={enabledFeatures} onNavigate={() => setMobileOpen(false)} />
+            <NavigationSectionList enabledFeatures={enabledFeatures} onNavigate={() => onMobileOpenChange(false)} />
             <SidebarProfile />
           </aside>
         </div>
