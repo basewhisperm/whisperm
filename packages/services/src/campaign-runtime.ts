@@ -26,6 +26,11 @@ import {
   type GrowthSignalSnapshot,
 } from "./marketplace-acquisition/growth-loop-worker.js";
 import { validateCampaignTargeting, targetingFromCampaignMetadata, mergeCampaignTargetingMetadata, campaignTargetingConfigSchema } from "./campaign-targeting.js";
+import {
+  CAMPAIGN_MEMBER_CLAIMED_STATUSES,
+  CAMPAIGN_MEMBER_INVITED_STATUSES,
+  CAMPAIGN_MEMBER_QUALIFIED_STATUSES,
+} from "./acquisition-metrics.js";
 
 export interface StartCampaignExecutionInput {
   readonly campaignId: string;
@@ -1050,13 +1055,10 @@ export class CampaignRuntimeService {
     const currency = campaign.currency ?? wonDeals[0]?.currency ?? deals[0]?.currency ?? "USD";
 
     const totalMembers = members.length;
-    const qualifiedStatuses = new Set(["QUALIFIED", "INVITED", "CLAIMED", "CONVERTED", "COMPLETED"]);
-    const invitedStatuses = new Set(["INVITED", "CLAIMED", "CONVERTED", "COMPLETED"]);
-    const claimedStatuses = new Set(["CLAIMED", "CONVERTED", "COMPLETED"]);
     const convertedStatuses = new Set(["CONVERTED", "COMPLETED"]);
-    const qualifiedCount = members.filter((member) => qualifiedStatuses.has(member.status)).length;
-    const invitedCount = members.filter((member) => invitedStatuses.has(member.status)).length;
-    const claimedCount = members.filter((member) => claimedStatuses.has(member.status)).length;
+    const qualifiedCount = members.filter((member) => CAMPAIGN_MEMBER_QUALIFIED_STATUSES.has(member.status)).length;
+    const invitedCount = members.filter((member) => CAMPAIGN_MEMBER_INVITED_STATUSES.has(member.status)).length;
+    const claimedCount = members.filter((member) => CAMPAIGN_MEMBER_CLAIMED_STATUSES.has(member.status)).length;
     const convertedCount = members.filter((member) => convertedStatuses.has(member.status)).length;
 
     const conversionRate = totalMembers > 0 ? round4(convertedCount / totalMembers) : null;

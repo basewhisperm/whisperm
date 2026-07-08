@@ -2353,6 +2353,27 @@ export type {
   AllowedAcquisitionCtaLabel,
 } from "./acquisition-workflow.js";
 
+export {
+  AcquisitionMetricsService,
+  resolveQueueState,
+  calculateAcquisitionMetrics,
+  isEligibleForInvitation,
+  withMetricsProvenance,
+  CAMPAIGN_MEMBER_QUALIFIED_STATUSES,
+  CAMPAIGN_MEMBER_INVITED_STATUSES,
+  CAMPAIGN_MEMBER_CLAIMED_STATUSES,
+} from "./acquisition-metrics.js";
+export type {
+  AcquisitionMetricsDependencies,
+  QueueStateInput,
+  QueueState,
+  QueueStateSummary,
+  AcquisitionMetrics,
+  CampaignMetrics,
+  DashboardMetrics,
+  QueueMetrics,
+} from "./acquisition-metrics.js";
+
 export { AcquisitionCommandCenterService } from "./acquisition-command-center.js";
 export type {
   AcquisitionActionSeverity,

@@ -78,11 +78,21 @@ const setState = ({ campaigns = [campaign()], members = [], executions = [], dea
       async list(context) { return { items: campaigns.filter((row) => row.tenantId === context.tenantId) }; },
       async findById(context, id) { return campaigns.find((row) => row.tenantId === context.tenantId && row.id === id) ?? null; },
       async listMembers(context, campaignId) { return { items: members.filter((row) => row.tenantId === context.tenantId && row.campaignId === campaignId) }; },
+      // ST1-013E: AcquisitionMetricsService reads member counts through this, never `.length`.
+      async countMembers(context, campaignId) { return members.filter((row) => row.tenantId === context.tenantId && row.campaignId === campaignId).length; },
     },
     executions: { async listByCampaignId(context, campaignId) { return { items: executions.filter((row) => row.tenantId === context.tenantId && row.campaignId === campaignId) }; } },
     deals: { async findById(workspaceId, dealId) { return deals.find((row) => row.tenantId === workspaceId && row.id === dealId) ?? null; } },
     marketplaceClaimTokens: { async listClaimTokensByMarketplaceCaptureId(_context, captureId) { return claimTokens[captureId] ?? []; } },
     businessGrowthOpportunities: { async findByCampaignId() { return { items: [] }; } },
+    // ST1-013E: AcquisitionMetricsService (via SellerAcquisitionRecordService) reads captures
+    // through these -- deliberately no captures exist in this fixture, so it always resolves an
+    // empty record set without needing every other repository SellerAcquisitionRecordService
+    // could theoretically touch.
+    marketplaceCaptures: {
+      async list() { return { items: [] }; },
+      async findById() { return null; },
+    },
   };
 };
 

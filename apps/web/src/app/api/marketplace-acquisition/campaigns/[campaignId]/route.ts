@@ -4,8 +4,8 @@ import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
-import { SellerAcquisitionCampaignService, campaignTargetingConfigSchema, mergeCampaignTargetingMetadata } from "@whisperm/services";
+import { createPrismaRepositories, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { AcquisitionMetricsService, SellerAcquisitionCampaignService, campaignTargetingConfigSchema, createWhispeRMServices, mergeCampaignTargetingMetadata } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
@@ -43,6 +43,18 @@ const campaignService = () =>
     new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient),
   );
 
+// ST1-013E: metrics for a single campaign always come from
+// AcquisitionMetricsService -- the campaign card, campaign workbench, and
+// command center all read `campaign.metrics`, never `campaign.members.length`.
+const metricsService = () => {
+  const repositories = createPrismaRepositories(prisma as unknown as PrismaPersistenceClient);
+  const services = createWhispeRMServices(repositories);
+  return new AcquisitionMetricsService({
+    sellerAcquisitionRecords: services.sellerAcquisitionRecords,
+    sellerAcquisitionCampaigns: new SellerAcquisitionCampaignService(repositories.sellerAcquisitionCampaigns),
+  });
+};
+
 export async function GET(_request: NextRequest, context: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
   if (!tenantContext) return errorResponse("Unauthorized", 401);
@@ -54,9 +66,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   const service = campaignService();
   const campaign = await service.findById({ tenantId: tenant.id }, context.params.campaignId);
   if (campaign === null) return errorResponse("Seller acquisition campaign not found.", 404);
-  const memberCount = await service.countMembers({ tenantId: tenant.id }, campaign.id);
+  const metrics = await metricsService().getCampaignMetrics({ tenantId: tenant.id }, campaign.id);
 
-  return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount } } });
+  return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: metrics.totalCampaignMembers, metrics } } });
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
