@@ -596,7 +596,7 @@ export function AcquisitionWorkbench({
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-full min-w-0 space-y-6 overflow-x-hidden" data-testid="acquisition-workbench">
       <section className="flex flex-col gap-4 rounded-2xl bg-background p-5 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">{mode === "campaign" ? `Seller Acquisition · ${campaignName ?? "Campaign"}` : "Seller Acquisition"}</p>
@@ -714,29 +714,37 @@ export function AcquisitionWorkbench({
         })}
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
-        <div className="space-y-4">
-          <div className="grid gap-2 rounded-2xl bg-background p-4 md:grid-cols-5" style={{ border: "0.5px solid var(--color-border)" }}>
-            <input aria-label="Search marketplace sellers" className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse md:col-span-3" placeholder="Search by seller, contact, phone, title, marketplace, or capture id" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
-                  <button className="h-10 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground disabled:opacity-50" disabled={loading} onClick={() => void refreshRecords()} type="button">Refresh</button>
-                  <Link className="inline-flex h-10 items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white" href={mode === "campaign" && campaignId ? `/marketplace-acquisition/capture?campaignId=${campaignId}` : "/marketplace-acquisition/capture"}>Capture</Link>
-            <Filter label="Queue"       value={queueFilter}       onChange={(value) => setQueueFilter(value as QueueBucketId)} options={["all", ...queueBuckets.map((b) => b.id)]} />
-            <Filter label="Health"      value={healthFilter}      onChange={setHealthFilter}      options={["all", "READY", "ACTION_REQUIRED", "BLOCKED", "COMPLETED", "EXPIRED"]} />
-            <Filter label="Next Action" value={nextActionFilter}  onChange={setNextActionFilter}  options={["all", ...Object.keys(nextActionLabels)]} />
-            <Filter label="Confidence"  value={confidenceFilter}  onChange={setConfidenceFilter}  options={["all", "HIGH", "MEDIUM", "LOW"]} />
-            <Filter label="Stage"       value={stageFilter}       onChange={setStageFilter}       options={["all", ...stages]} />
+      <section className="grid w-full min-w-0 max-w-full gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+        <div className="min-w-0 space-y-4">
+          <div className="w-full min-w-0 max-w-full rounded-2xl bg-background p-4" data-testid="workbench-filter-panel" style={{ border: "0.5px solid var(--color-border)" }}>
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <input aria-label="Search marketplace sellers" className="h-10 w-full min-w-0 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse" placeholder="Search sellers, phone, title, or marketplace" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
+              <button className="h-10 w-full rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground disabled:opacity-50 md:w-auto" disabled={loading} onClick={() => void refreshRecords()} type="button">Refresh</button>
+              <Link className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white md:w-auto" href={mode === "campaign" && campaignId ? `/marketplace-acquisition/capture?campaignId=${campaignId}` : "/marketplace-acquisition/capture"}>Capture seller</Link>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <Filter label="Queue"       value={queueFilter}       onChange={(value) => setQueueFilter(value as QueueBucketId)} options={["all", ...queueBuckets.map((b) => b.id)]} />
+              <Filter label="Health"      value={healthFilter}      onChange={setHealthFilter}      options={["all", "READY", "ACTION_REQUIRED", "BLOCKED", "COMPLETED", "EXPIRED"]} />
+              <Filter label="Next Action" value={nextActionFilter}  onChange={setNextActionFilter}  options={["all", ...Object.keys(nextActionLabels)]} />
+              <Filter label="Confidence"  value={confidenceFilter}  onChange={setConfidenceFilter}  options={["all", "HIGH", "MEDIUM", "LOW"]} />
+              <Filter label="Stage"       value={stageFilter}       onChange={setStageFilter}       options={["all", ...stages]} />
+            </div>
           </div>
 
-          <div className="flex flex-col gap-3 rounded-2xl bg-background p-4 sm:flex-row sm:items-center sm:justify-between" style={{ border: "0.5px solid var(--color-border)" }}>
-            <div>
-              <p className="text-sm font-semibold text-foreground">Bulk invitation queue</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {selectedBulkRecords.length} selected · {bulkEligibleRecords.length} eligible in current view · WhatsApp will be attempted first, SMS is fallback
-              </p>
+          <div className="w-full min-w-0 max-w-full rounded-2xl bg-background p-4 sm:p-6" data-testid="bulk-invitation-queue" style={{ border: "0.5px solid var(--color-border)" }}>
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">Bulk invitation queue</h2>
+              <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:flex sm:flex-wrap sm:items-center sm:gap-x-2">
+                <span>{selectedBulkRecords.length} selected</span>
+                <span className="hidden sm:inline">·</span>
+                <span>{bulkEligibleRecords.length} eligible in current view</span>
+                <span className="hidden sm:inline">·</span>
+                <span>WhatsApp first, SMS fallback</span>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
               <button
-                className="h-10 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground disabled:opacity-50"
+                className="h-10 w-full rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground disabled:opacity-50 sm:w-auto"
                 disabled={bulkEligibleRecords.length === 0 || bulkBusy}
                 onClick={toggleAllEligible}
                 type="button"
@@ -744,7 +752,7 @@ export function AcquisitionWorkbench({
                 {allEligibleSelected ? "Clear eligible" : "Select eligible"}
               </button>
               <button
-                className="h-10 rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:opacity-50"
+                className="h-10 w-full rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
                 disabled={selectedBulkRecords.length === 0 || bulkBusy}
                 onClick={runBulkInvites}
                 type="button"
@@ -763,17 +771,17 @@ export function AcquisitionWorkbench({
               <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Clear filters or capture a new seller to keep the acquisition queue moving.</p>
             </section>
           ) : (
-            <div className="space-y-4">
+            <div className="min-w-0 space-y-4">
               {visibleQueueGroups.map(({ bucket, rollups }) => (
-                <section key={bucket.id} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+                <section key={bucket.id} className="w-full min-w-0 max-w-full rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{bucket.label}</p>
                       <h2 className="mt-1 text-sm font-semibold text-foreground">{rollups.length} seller{rollups.length === 1 ? "" : "s"}</h2>
                     </div>
                     <Badge>{rollups.filter((rollup) => rollup.records.some(hasPhone)).length} phone-ready</Badge>
                   </div>
-                  <div className="grid gap-3 xl:grid-cols-2">
+                  <div className="grid min-w-0 gap-3 xl:grid-cols-2">
                     {rollups.map((rollup) => (
                       <SellerRollupCard
                         key={rollup.key}
@@ -790,12 +798,12 @@ export function AcquisitionWorkbench({
               ))}
 
               {ungroupedVisibleRollups.length > 0 ? (
-                <section className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+                <section className="w-full min-w-0 max-w-full rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
                   <div className="mb-3">
                     <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Other sellers</p>
                     <h2 className="mt-1 text-sm font-semibold text-foreground">{ungroupedVisibleRollups.length} seller{ungroupedVisibleRollups.length === 1 ? "" : "s"}</h2>
                   </div>
-                  <div className="grid gap-3 xl:grid-cols-2">
+                  <div className="grid min-w-0 gap-3 xl:grid-cols-2">
                     {ungroupedVisibleRollups.map((rollup) => (
                       <SellerRollupCard
                         key={rollup.key}
@@ -856,7 +864,7 @@ function Filter({ label, value, options, onChange }: {
 
 function Badge({ children, tone }: { readonly children: ReactNode; readonly tone?: string | undefined }) {
   return (
-    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone ?? "bg-secondary text-muted-foreground"}`}>
+    <span className={`max-w-full break-words rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone ?? "bg-secondary text-muted-foreground"}`}>
       {children}
     </span>
   );
@@ -969,7 +977,7 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
   const childTitles = rollupListingTitles(rollup);
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 max-w-full space-y-2">
       <RecordCard
         record={primary}
         selected={selected}
@@ -979,8 +987,8 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
         onSelect={onSelect}
       />
       {rollup.records.length > 1 || childTitles.length > 1 ? (
-        <div className="rounded-2xl bg-secondary px-4 py-3 text-xs text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>
-          <p className="font-semibold text-foreground">{rollupListingCount(rollup)} listings · {rollupPriceSummary(rollup)}</p>
+        <div className="min-w-0 max-w-full rounded-2xl bg-secondary px-4 py-3 text-xs text-muted-foreground" style={{ border: "0.5px solid var(--color-border)" }}>
+          <p className="break-words font-semibold text-foreground">{rollupListingCount(rollup)} listings · {rollupPriceSummary(rollup)}</p>
           <ul className="mt-2 list-disc space-y-1 pl-4">
             {childTitles.map((item) => (
               <li key={item} className="truncate">{item}</li>
@@ -989,6 +997,30 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
         </div>
       ) : null}
     </div>
+  );
+}
+
+function InventoryThumbnail({ src, alt }: { readonly src?: string | null | undefined; readonly alt: string }) {
+  const [failed, setFailed] = useState(false);
+  const normalizedSrc = typeof src === "string" ? src.trim() : "";
+  const isUsableSrc = !failed && /^https?:\/\//i.test(normalizedSrc);
+
+  if (!isUsableSrc) {
+    return (
+      <div className="flex aspect-[4/3] w-full shrink-0 items-center justify-center rounded-xl bg-secondary px-2 text-center text-[11px] font-medium text-muted-foreground sm:w-24">
+        Captured inventory
+      </div>
+    );
+  }
+
+  return (
+    <img
+      alt={alt}
+      className="aspect-[4/3] w-full shrink-0 rounded-xl object-cover sm:w-24"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      src={normalizedSrc}
+    />
   );
 }
 
@@ -1003,10 +1035,11 @@ function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
   return (
     <article
-      className={`rounded-2xl bg-background p-4 text-left transition hover:opacity-90 ${selected ? "ring-2 ring-pulse" : ""}`}
+      className={`w-full min-w-0 max-w-full rounded-2xl bg-background p-4 text-left transition hover:opacity-90 sm:p-5 ${selected ? "ring-2 ring-pulse" : ""}`}
+      data-testid="seller-card"
       style={{ border: "0.5px solid var(--color-border)" }}
     >
-      <div className="flex gap-3">
+      <div className="flex min-w-0 items-start gap-3">
         <input
           aria-label={`Select ${sellerName(record)} for bulk invite`}
           checked={bulkSelected}
@@ -1015,23 +1048,24 @@ function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle
           onChange={onBulkToggle}
           type="checkbox"
         />
-        <button
-          className="flex min-w-0 flex-1 gap-3 text-left"
-          onClick={onSelect}
-          type="button"
-        >
-          <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-secondary text-xs text-muted-foreground">
-            {record.images[0] ? <img alt="Captured inventory" className="size-full object-cover" src={record.images[0]} /> : "No image"}
-          </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-semibold text-foreground">{sellerName(record)}</h3>
-            <p className="mt-1 text-xs text-muted-foreground">{hasPhone(record) ? phone(record) : "Mobile required"} · {source(record)}{location(record) ? ` · ${location(record)}` : ""}</p>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{listingCount(record)} listing{listingCount(record) === 1 ? "" : "s"} · {title(record)}</p>
-            <p className="mt-1 text-xs font-medium text-foreground">{price(record)}</p>
-          </div>
+        <button className="min-w-0 flex-1 text-left" onClick={onSelect} type="button">
+          <h3 className="break-words text-base font-semibold leading-snug text-foreground sm:text-lg">{sellerName(record)}</h3>
+          <p className="mt-1 min-w-0 break-words text-xs text-muted-foreground">
+            {hasPhone(record) ? phone(record) : "Mobile required"} · {source(record)}{location(record) ? ` · ${location(record)}` : ""}
+          </p>
         </button>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
+
+      <button className="mt-3 grid w-full min-w-0 gap-3 text-left sm:grid-cols-[6rem_minmax(0,1fr)]" onClick={onSelect} type="button">
+        <InventoryThumbnail alt={`${sellerName(record)} captured inventory`} src={record.images[0]} />
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">{listingCount(record)} listing{listingCount(record) === 1 ? "" : "s"}</p>
+          <p className="line-clamp-2 break-words text-xs text-foreground">{title(record)}</p>
+          <p className="mt-1 text-xs font-medium text-foreground">{price(record)}</p>
+        </div>
+      </button>
+
+      <div className="mt-3 flex min-w-0 flex-wrap gap-2">
         <Badge tone={blocked ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}>
           {blocked ? "BLOCKED" : "PHONE READY"}
         </Badge>
@@ -1039,7 +1073,12 @@ function RecordCard({ record, selected, bulkSelected, bulkEligible, onBulkToggle
         <Badge>{capturedAge(record)}</Badge>
       </div>
       {record.deal?.deal.id ? (
-        <Link className="mt-3 inline-block text-xs font-semibold text-whisper" href={`/marketplace-acquisition/${record.deal.deal.id}`}>
+        <Link
+          className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-2xl px-4 text-sm font-semibold text-whisper sm:w-auto"
+          data-testid="seller-card-open-detail"
+          href={`/marketplace-acquisition/${record.deal.deal.id}`}
+          style={{ border: "0.5px solid var(--color-border)" }}
+        >
           Open detail
         </Link>
       ) : null}
