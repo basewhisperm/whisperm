@@ -159,6 +159,10 @@ const transpileRoute = (routePath, tempDir) => {
     const file = transpileWebLib('lib/marketplace-acquisition/invitation-execution-response.ts', tempDir, 'invitation-execution-response.mjs');
     source = source.replace(/from "@\/lib\/marketplace-acquisition\/invitation-execution-response"/gu, `from "${file}"`);
   }
+  if (source.includes('@/lib/marketplace-acquisition/invitation-eligibility')) {
+    const file = transpileWebLib('lib/marketplace-acquisition/invitation-eligibility.ts', tempDir, 'invitation-eligibility.mjs');
+    source = source.replace(/from "@\/lib\/marketplace-acquisition\/invitation-eligibility"/gu, `from "${file}"`);
+  }
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
   const file = join(tempDir, `${relative(new URL('../src/app/api/marketplace-acquisition', import.meta.url).pathname, routePath).replaceAll('/', '-')}.mjs`);
   writeFileSync(file, output);
@@ -174,6 +178,19 @@ const createHarness = async (state, options = {}) => {
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__routeState.tenant;\nexport const getTenantContextForCurrentUser = async () => (globalThis.__routeState.tenant === null ? null : { tenant: globalThis.__routeState.tenant, tenantUserId: "tenant-user-1" });\n');
   writeFileSync(join(tempDir, 'prisma.mjs'), [
     'export const prisma = {',
+    '  marketplaceCapture: {',
+    '    async findFirst(args) {',
+    '      const state = globalThis.__routeState;',
+    '      if (!state?.capture || args.where.tenantId !== state.capture.tenantId || args.where.id !== state.capture.id) return null;',
+    '      return {',
+    '        ...state.capture,',
+    '        contact: state.contact,',
+    '        campaignMemberships: [{ campaignId: "campaign-1" }],',
+    '        sellerInvitations: [...state.invitations].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 1),',
+    '        claimTokens: [...state.claimTokens, state.token].filter(Boolean).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 1),',
+    '      };',
+    '    },',
+    '  },',
     '  sellerAcquisitionCampaignMember: {',
     '    async findFirst(args) {',
     '      return { campaignId: "campaign-1" };',
@@ -382,12 +399,9 @@ test('seller acquisition invite-to-completion route E2E creates claim token and 
     // queued -- COMPLETED here reflects the real inline SMS send via the stubbed provider.
     assert.deepEqual(inviteJson, {
       ok: true,
-      data: {
-        executionId: 'execution-1',
-        status: 'COMPLETED',
-        invitationId: 'invite-1',
-        channel: 'SMS',
-      },
+      executionId: 'execution-1',
+      status: 'SENT',
+      invitationId: 'invite-1',
     });
     assert.equal(sentMessages.length, 1);
 

@@ -17,12 +17,13 @@ import { SellerThumbnail } from "@/components/marketplace-acquisition/seller-thu
 // out; every display decision (fallback copy, formatting, workflow stage)
 // comes from `sellerPresentationFromRecord`, never from raw record fields
 // read inline here.
-export function SellerCard({ record, listingCountOverride, selected, bulkSelected, bulkEligible, onBulkToggle, onSelect, onPrimaryAction }: {
+export function SellerCard({ record, listingCountOverride, selected, bulkSelected, bulkEligible, primaryActionEnabled, onBulkToggle, onSelect, onPrimaryAction }: {
   readonly record: SellerAcquisitionRecord;
   readonly listingCountOverride?: number | undefined;
   readonly selected: boolean;
   readonly bulkSelected: boolean;
   readonly bulkEligible: boolean;
+  readonly primaryActionEnabled?: boolean | undefined;
   readonly onBulkToggle: () => void;
   readonly onSelect: () => void;
   readonly onPrimaryAction: () => Promise<void>;
@@ -36,7 +37,7 @@ export function SellerCard({ record, listingCountOverride, selected, bulkSelecte
     () => sellerPresentationFromRecord(record, listingCountOverride),
     [record, listingCountOverride],
   );
-  const enabled = isActionEnabled(record);
+  const enabled = primaryActionEnabled ?? isActionEnabled(record);
 
   const runPrimaryAction = async () => {
     setBusy(true);
