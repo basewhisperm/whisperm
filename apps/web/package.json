@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma migrate deploy --schema=../../prisma/schema.prisma && pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build && next build",
+    "build": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build && next build",
     "lint": "next lint",
     "typecheck": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build && prisma generate --schema=../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.js",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "migrate:deploy": "prisma migrate deploy --schema=../../prisma/schema.prisma"
   },
   "dependencies": {
     "@clerk/nextjs": "5",
