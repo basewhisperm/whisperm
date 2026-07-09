@@ -168,6 +168,7 @@ import {
 } from "@whisperm/types";
 import { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
 import type { RevenueAttributionResult, RevenueAttributionTriggerPort } from "./revenue-attribution.js";
+import { validateClaimBaseUrl, buildClaimUrl, ProviderDeliveryError } from "@whisperm/provider-adapters";
 export { generateRawClaimToken, hashClaimToken } from "./claim-token-hash.js";
 export { MarketplaceDiscoveryService, DiscoveryPromotionError } from './marketplace-acquisition/discovery-service.js';
 export type { DiscoveryServiceContext, DiscoveryServiceDependencies, DiscoveryRunResult, ManualSeedEntry, StartDiscoveryRunInput, DiscoveryCampaignRepository, PromoteDiscoveredSellerResult, DiscoveryPromotionErrorCode, CanonicalMarketplaceCapturePort, CanonicalMarketplaceCaptureContext, CanonicalMarketplaceCaptureInput, CanonicalMarketplaceCaptureResult, CanonicalMarketplaceCaptureQualificationStatus, CanonicalMarketplaceCaptureCrmConversionStatus } from './marketplace-acquisition/discovery-service.js';
@@ -1479,6 +1480,28 @@ const redactProviderFailure = (message: string): string =>
     .replace(/api[_-]?key["'=:\s]+[^\s"',}]+/giu, "apiKey=[REDACTED]")
     .slice(0, 300);
 
+interface ProviderFailureDiagnostic {
+  readonly message: string;
+  readonly provider?: string | undefined;
+  readonly status?: number | undefined;
+  readonly code?: string | undefined;
+  readonly category?: string | undefined;
+  readonly requestId?: string | undefined;
+  readonly retryable?: boolean | undefined;
+}
+
+/**
+ * ST1-013J: `ProviderDeliveryError` (raised by messaging adapters) already carries only
+ * safe fields -- this just surfaces them as diagnosable invitation metadata/audit detail
+ * instead of collapsing every provider failure into an opaque generic message.
+ */
+const providerFailureDiagnostic = (error: unknown): ProviderFailureDiagnostic => {
+  if (error instanceof ProviderDeliveryError) {
+    return { message: redactProviderFailure(error.toSafeMessage()), provider: error.provider, status: error.status, code: error.safeCode, category: error.safeCategory, requestId: error.requestId, retryable: error.retryable };
+  }
+  return { message: redactProviderFailure(error instanceof Error ? error.message : "Invitation provider failed") };
+};
+
 const canDeliverInvitation = (channel: SellerInvitationChannel, contact: { readonly phone?: string; readonly email?: string }, notifications: SellerInvitationProviderPorts | undefined): boolean =>
   hasDeliveryProvider(channel, notifications) ||
   (channel === "WHATSAPP" && contact.phone !== undefined && notifications?.fallbackToSmsWhenWhatsappMissing !== false && notifications?.sms !== undefined);
@@ -1514,20 +1537,42 @@ export class SellerInvitationService {
     if (capture === null) throw new ServiceError({ code: "SERVICE_NOT_FOUND", message: "Marketplace capture not found", status: 404, correlation: context.correlation });
     const linkedContact = capture.contactId === undefined || capture.contactId === null ? null : await this.deps.contacts.findById(scope, capture.contactId);
     const contact = contactFromCapture(capture, linkedContact);
-    if (capture.contactId === undefined || capture.contactId === null || contact.phone === undefined) {
+    if (contact.phone === undefined && contact.email === undefined) {
       throw new ServiceError({
         code: "SERVICE_INVALID_STATE_TRANSITION",
-        message: "Seller phone is required before creating a Seller Acquisition invitation.",
+        message: "Seller has no reachable contact channel (phone or email) before creating a Seller Acquisition invitation.",
         status: 422,
         correlation: context.correlation,
-        details: { missingRequirements: ["PHONE_REQUIRED"] },
+        details: { missingRequirements: ["CONTACT_CHANNEL_REQUIRED"] },
       });
     }
     const notifications = this.deps.notifications;
     const initialChannel = resolveInviteChannel(contact, data.preferredChannel, notifications?.whatsappEnabled !== false);
+
+    // ST1-013J: prove the provider path is actually usable before any claim token or invitation
+    // record is created -- previously this function was defined but never called, so a
+    // misconfigured provider was only discovered deep inside sendOrFallback after state had
+    // already been written.
+    assertInvitationProviderConfigured(initialChannel, contact, notifications, context.correlation);
+
+    // ST1-013J: SELLER_INVITATION_BASE_URL has no implicit default -- an unset/malformed/
+    // placeholder value fails the preflight instead of silently generating a claim link on the
+    // production domain (or an unusable one) in preview/local/demo environments.
+    const claimBaseUrlValidation = validateClaimBaseUrl(notifications?.inviteBaseUrl);
+    if (!claimBaseUrlValidation.ok) {
+      throw new ServiceError({
+        code: "SERVICE_PROVIDER_UNAVAILABLE",
+        message: `Seller invitation claim link base URL is invalid: ${claimBaseUrlValidation.reason}.`,
+        status: 503,
+        retryable: false,
+        correlation: context.correlation,
+        details: { code: "INVALID_CLAIM_BASE_URL" },
+      });
+    }
+    const claimBaseUrl = claimBaseUrlValidation.url;
+
     const now = notifications?.now?.() ?? new Date();
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    const base = notifications?.inviteBaseUrl ?? "https://app.whisperm.ai/claim";
 
     return runWrite(this.deps, context, async (repositories) => {
       if (repositories.marketplaceClaimTokens === undefined || repositories.sellerInvitations === undefined) {
@@ -1543,7 +1588,7 @@ export class SellerInvitationService {
         status: "PENDING",
         metadata: { initialChannel }
       });
-      const inviteUrl = `${base.replace(/\/$/, "")}/${rawToken}`;
+      const inviteUrl = buildClaimUrl(claimBaseUrl, rawToken);
 
       const invitation = await repositories.sellerInvitations.create(scope, {
         tenantId: context.tenantId,
@@ -1593,9 +1638,9 @@ export class SellerInvitationService {
         if (channel === "SMS") { if (notifications?.sms === undefined) return null; await notifications.sms.send({ to: record.recipient, body }); }
         if (channel === "EMAIL") { if (notifications?.email === undefined) return null; await notifications.email.send({ to: record.recipient, subject: "Seller Acquisition invitation", html: `<p>${body}</p>` }); }
       } catch (error) {
-        const failureMessage = error instanceof Error ? error.message : "Invitation provider failed";
+        const diagnostic = providerFailureDiagnostic(error);
         lastProviderFailureChannel = channel;
-        lastProviderFailureMessage = failureMessage;
+        lastProviderFailureMessage = diagnostic.message;
 
         await this.deps.sellerInvitations!.update(scope, record.id, {
           status: "PENDING",
@@ -1603,7 +1648,13 @@ export class SellerInvitationService {
             ...(record.metadata ?? {}),
             providerOutcome: "PROVIDER_FAILED",
             providerFailureChannel: channel,
-            providerFailureMessage: redactProviderFailure(failureMessage),
+            providerFailureMessage: diagnostic.message,
+            ...(diagnostic.provider === undefined ? {} : { providerFailureProvider: diagnostic.provider }),
+            ...(diagnostic.status === undefined ? {} : { providerFailureStatus: diagnostic.status }),
+            ...(diagnostic.code === undefined ? {} : { providerFailureCode: diagnostic.code }),
+            ...(diagnostic.category === undefined ? {} : { providerFailureCategory: diagnostic.category }),
+            ...(diagnostic.requestId === undefined ? {} : { providerFailureRequestId: diagnostic.requestId }),
+            ...(diagnostic.retryable === undefined ? {} : { providerFailureRetryable: diagnostic.retryable }),
           },
         });
 
@@ -1614,7 +1665,8 @@ export class SellerInvitationService {
           metadata: {
             captureId: record.marketplaceCaptureId,
             channel,
-            failureMessage: redactProviderFailure(failureMessage),
+            failureMessage: diagnostic.message,
+            ...(diagnostic.code === undefined ? {} : { failureCode: diagnostic.code }),
           },
         });
 

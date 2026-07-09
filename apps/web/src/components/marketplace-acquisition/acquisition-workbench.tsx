@@ -22,6 +22,8 @@ import {
   errorMessageFromPayload,
   hasPhone,
   isActionEnabled,
+  isInvitationProviderReady,
+  type InvitationProviderAvailability,
   listingCount,
   nextActionLabels,
   nextActionReason,
@@ -377,6 +379,23 @@ async function fetchSellerAcquisitionRecords(recordsPath: string): Promise<reado
   return (payload as { readonly data?: { readonly records?: readonly SellerAcquisitionRecord[] } }).data?.records ?? [];
 }
 
+// ST1-013J: read once per Workbench mount -- provider health does not change per-seller, and this
+// must never block the records list from rendering, so failures fall back to "not ready" rather
+// than surfacing a page-level error.
+async function fetchInvitationProviderAvailability(): Promise<InvitationProviderAvailability> {
+  const checkChannel = async (channel: "WHATSAPP" | "SMS" | "EMAIL"): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/marketplace-acquisition/provider-health?channel=${channel}`);
+      const payload = await response.json().catch(() => ({}));
+      return response.ok && (payload as { readonly ok?: boolean }).ok === true;
+    } catch {
+      return false;
+    }
+  };
+  const [whatsapp, sms, email] = await Promise.all([checkChannel("WHATSAPP"), checkChannel("SMS"), checkChannel("EMAIL")]);
+  return { whatsapp, sms, email };
+}
+
 async function runPrimaryAction(record: SellerAcquisitionRecord): Promise<void> {
   const paths: Partial<Record<SellerAcquisitionNextAction, string>> = {
     SEND_INVITATION:      `/api/marketplace-acquisition/captures/${record.capture.id}/invite`,
@@ -472,6 +491,9 @@ export function AcquisitionWorkbench({
   const [discoveryRuntime, setDiscoveryRuntime] = useState<DiscoveryRuntimeState | null>(null);
   const [growthLoop, setGrowthLoop] = useState<GrowthLoopState | null>(null);
   const [campaignSummary, setCampaignSummary] = useState<CampaignSummaryState | null>(null);
+  // ST1-013J: optimistic (all-true) until the health check resolves, so the queue doesn't flash
+  // every invite action as blocked while the request is in flight.
+  const [providerAvailability, setProviderAvailability] = useState<InvitationProviderAvailability>({ whatsapp: true, sms: true, email: true });
 
   const scopedRecordsPath = useMemo(() => {
     if (campaignId === undefined || campaignId.trim().length === 0) return recordsPath;
@@ -503,6 +525,14 @@ export function AcquisitionWorkbench({
       });
     return () => { cancelled = true; };
   }, [scopedRecordsPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchInvitationProviderAvailability().then((availability) => {
+      if (!cancelled) setProviderAvailability(availability);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (mode !== "campaign" || campaignId === undefined) return;
@@ -556,7 +586,30 @@ export function AcquisitionWorkbench({
     ? filteredRollups.filter((rollup) => !queueBuckets.some((bucket) => rollup.records.some(bucket.matches)))
     : [];
   const invitationActionsSupported = mode === "campaign";
-  const bulkEligibleRecords = invitationActionsSupported ? filteredRecords.filter(isEligibleForInvitation) : [];
+  // ST1-013J: a seller can be workflow-eligible for invitation while the provider WhispeRM would
+  // use to deliver to them is unavailable -- exclude those from the bulk-eligible count so "N
+  // eligible" (and the bulk-invite selection built from it) never overstates what can actually be
+  // sent right now.
+  const bulkEligibleRecords = useMemo(
+    () => invitationActionsSupported
+      ? filteredRecords.filter((record) => isEligibleForInvitation(record) && isInvitationProviderReady(record, providerAvailability))
+      : [],
+    [invitationActionsSupported, filteredRecords, providerAvailability],
+  );
+
+  const isInvitationAction = (record: SellerAcquisitionRecord): boolean => ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction);
+  // ST1-013J: distinguishes "seller ineligible" (not this workbench's job to explain further --
+  // existing copy already covers missing campaign assignment) from "provider unavailable", which
+  // needs its own explicit, operator-safe message rather than a silently disabled button.
+  const invitationBlockedReason = (record: SellerAcquisitionRecord): string | undefined =>
+    isInvitationAction(record) && invitationActionsSupported && !isInvitationProviderReady(record, providerAvailability)
+      ? "Invitation provider is not configured."
+      : undefined;
+  const invitationCardEnabled = (record: SellerAcquisitionRecord): boolean | undefined => {
+    if (!isInvitationAction(record)) return undefined;
+    if (!invitationActionsSupported || !isInvitationProviderReady(record, providerAvailability)) return false;
+    return undefined;
+  };
   const selectedBulkRecords = bulkEligibleRecords.filter((record) => selectedBulkIds.includes(record.capture.id));
   const allEligibleSelected = bulkEligibleRecords.length > 0 && selectedBulkRecords.length === bulkEligibleRecords.length;
   const stages = [...new Set(records.map((r) => r.currentStage).filter(Boolean))];
@@ -889,7 +942,8 @@ export function AcquisitionWorkbench({
                         selectedBulkIds={selectedBulkIds}
                         bulkEligibleRecords={bulkEligibleRecords}
                         onBulkToggle={() => toggleBulkRollup(rollup.records)}
-                        primaryActionEnabled={invitationActionsSupported || !["SEND_INVITATION", "RETRY_INVITATION"].includes(rollup.primary.nextAction) ? undefined : false}
+                        blockedReason={invitationBlockedReason(rollup.primary)}
+                        primaryActionEnabled={invitationCardEnabled(rollup.primary)}
                         onPrimaryAction={runCardPrimaryAction}
                         onSelect={() => setSelectedCaptureId(rollup.primary.capture.id)}
                       />
@@ -913,7 +967,8 @@ export function AcquisitionWorkbench({
                         selectedBulkIds={selectedBulkIds}
                         bulkEligibleRecords={bulkEligibleRecords}
                         onBulkToggle={() => toggleBulkRollup(rollup.records)}
-                        primaryActionEnabled={invitationActionsSupported || !["SEND_INVITATION", "RETRY_INVITATION"].includes(rollup.primary.nextAction) ? undefined : false}
+                        blockedReason={invitationBlockedReason(rollup.primary)}
+                        primaryActionEnabled={invitationCardEnabled(rollup.primary)}
                         onPrimaryAction={runCardPrimaryAction}
                         onSelect={() => setSelectedCaptureId(rollup.primary.capture.id)}
                       />
@@ -931,6 +986,7 @@ export function AcquisitionWorkbench({
           onActionError={setActionError}
           onRefresh={refreshRecords}
           invitationActionsSupported={invitationActionsSupported}
+          providerAvailability={providerAvailability}
           onRecordPatched={patchRecord}
         />
       </section>
@@ -1067,12 +1123,13 @@ function CheckLine({ label, passed, detail }: { readonly label: string; readonly
   );
 }
 
-function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkEligibleRecords, primaryActionEnabled, onBulkToggle, onPrimaryAction, onSelect }: {
+function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkEligibleRecords, primaryActionEnabled, blockedReason, onBulkToggle, onPrimaryAction, onSelect }: {
   readonly rollup: SellerRollup;
   readonly selectedCaptureId: string | null;
   readonly selectedBulkIds: readonly string[];
   readonly bulkEligibleRecords: readonly SellerAcquisitionRecord[];
   readonly primaryActionEnabled?: boolean | undefined;
+  readonly blockedReason?: string | undefined;
   readonly onBulkToggle: () => void;
   readonly onPrimaryAction: (record: SellerAcquisitionRecord) => Promise<void>;
   readonly onSelect: () => void;
@@ -1089,6 +1146,7 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
   return (
     <div className="w-full min-w-0 max-w-full space-y-2">
       <SellerCard
+        blockedReason={blockedReason}
         bulkEligible={bulkEligible}
         bulkSelected={bulkSelected}
         primaryActionEnabled={primaryActionEnabled}
@@ -1113,11 +1171,12 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
   );
 }
 
-function Workbench({ record, rollupRecords, actionError, invitationActionsSupported, onActionError, onRefresh, onRecordPatched }: {
+function Workbench({ record, rollupRecords, actionError, invitationActionsSupported, providerAvailability, onActionError, onRefresh, onRecordPatched }: {
   readonly record: SellerAcquisitionRecord | null;
   readonly rollupRecords: readonly SellerAcquisitionRecord[];
   readonly actionError: string | null;
   readonly invitationActionsSupported: boolean;
+  readonly providerAvailability: InvitationProviderAvailability;
   readonly onActionError: (message: string | null) => void;
   readonly onRefresh: () => Promise<void>;
   readonly onRecordPatched: (updated: SellerAcquisitionRecord) => void;
@@ -1147,7 +1206,9 @@ function Workbench({ record, rollupRecords, actionError, invitationActionsSuppor
   }
 
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
-  const enabled = (!invitationActionsSupported && ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction)) ? false : isActionEnabled(record);
+  const isInvitationAction = ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction);
+  const invitationProviderReady = isInvitationProviderReady(record, providerAvailability);
+  const enabled = isInvitationAction && (!invitationActionsSupported || !invitationProviderReady) ? false : isActionEnabled(record);
   const canonicalNextActionLabel = workflowNextActionFromRecord(record).label;
   const sellerRecords = rollupRecords.length > 0 ? rollupRecords : [record];
   const sellerListingTitles = [...new Set(sellerRecords.map(title))].slice(0, 8);
@@ -1248,7 +1309,8 @@ function Workbench({ record, rollupRecords, actionError, invitationActionsSuppor
         <WorkbenchSection title="Why">
           <p className="text-sm leading-6 text-muted-foreground">{nextActionReason(record)}</p>
           {blocked ? <p className="mt-2 text-sm font-semibold text-red-700">Missing phone number blocks invitation.</p> : null}
-          {!invitationActionsSupported && ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction) ? <p className="mt-2 text-sm font-semibold text-amber-700">Assign this seller to a campaign before sending an invitation.</p> : null}
+          {!invitationActionsSupported && isInvitationAction ? <p className="mt-2 text-sm font-semibold text-amber-700">Assign this seller to a campaign before sending an invitation.</p> : null}
+          {invitationActionsSupported && isInvitationAction && !invitationProviderReady ? <p className="mt-2 text-sm font-semibold text-amber-700">Invitation provider is not configured. Missing provider environment variables.</p> : null}
         </WorkbenchSection>
 
         <WorkbenchSection title="Invitation status">

@@ -17,6 +17,7 @@ export type ProviderLifecycleState = (typeof providerLifecycleStateValues)[numbe
 
 export const providerInitializationFailureCategoryValues = [
   "MISSING_CONFIGURATION",
+  "TEMPLATE_CONFIGURATION_INVALID",
   "AUTHENTICATION_FAILURE",
   "NETWORK_FAILURE",
   "UNKNOWN",
@@ -58,6 +59,9 @@ const noopMessagingProviderLogger: MessagingProviderStructuredLogger = {
 
 const classifyInitializationFailure = (error: unknown): ProviderInitializationFailure => {
   const message = error instanceof Error ? error.message : "Provider initialization failed for an unknown reason";
+  if (/template configuration is invalid/iu.test(message)) {
+    return { category: "TEMPLATE_CONFIGURATION_INVALID", message };
+  }
   if (/required|missing/iu.test(message)) {
     return { category: "MISSING_CONFIGURATION", message };
   }

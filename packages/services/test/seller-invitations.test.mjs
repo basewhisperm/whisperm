@@ -45,27 +45,71 @@ test("phone + WhatsApp enabled chooses WHATSAPP", async () => { const store = cr
 test("phone without WhatsApp provider falls back to SMS if SMS is available", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567" } }), { sms: p.sms }); assert.equal(r.result.channel, "SMS"); assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FALLBACK_USED"), true); });
 test("preferredChannel WHATSAPP falls back to SMS when WhatsApp provider is missing", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567" } }), { sms: p.sms }, { preferredChannel: "WHATSAPP" }); assert.equal(r.result.channel, "SMS"); assert.equal(r.result.status, "SENT"); assert.equal(r.store.audits.some((a) => a.action === "INVITATION_FALLBACK_USED"), true); });
 test("phone only chooses SMS when WhatsApp is disabled", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567" } }), { whatsappEnabled: false, sms: p.sms }); assert.equal(r.result.channel, "SMS"); });
-test("email only is blocked because Seller Acquisition invitation requires phone-qualified contact", async () => { await assert.rejects(run(baseCapture({ contactId: "contact-1", metadata: { sellerEmail: "seller@example.com" } }), {}, {}), (e) => e instanceof ServiceError && e.code === "SERVICE_INVALID_STATE_TRANSITION" && e.details.missingRequirements.includes("PHONE_REQUIRED")); });
+test("email only with no phone succeeds when an email provider is configured (phone is not required for email fallback)", async () => {
+  const store = createStore();
+  const p = providers(store);
+  const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerEmail: "seller@example.com" } }), { email: p.email }, {});
+  assert.equal(r.result.channel, "EMAIL");
+  assert.equal(r.result.status, "SENT");
+});
+test("email only with no phone and no email provider configured fails with a clean provider preflight error, not a phone requirement", async () => {
+  await assert.rejects(
+    run(baseCapture({ contactId: "contact-1", metadata: { sellerEmail: "seller@example.com" } }), {}, {}),
+    (e) => e instanceof ServiceError && e.code === "SERVICE_PROVIDER_UNAVAILABLE",
+  );
+});
+test("no phone and no email fails with a missing-contact-channel error", async () => {
+  await assert.rejects(
+    run(baseCapture({ contactId: "contact-1", metadata: {} }), {}, {}),
+    (e) => e instanceof ServiceError && e.code === "SERVICE_INVALID_STATE_TRANSITION" && e.details.missingRequirements.includes("CONTACT_CHANNEL_REQUIRED"),
+  );
+});
 test("phone + email chooses cellphone channel first", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { whatsappEnabled: false, sms: p.sms, email: p.email }); assert.equal(r.result.channel, "SMS"); });
 test("missing phone fails before invitation or claim token creation", async () => { const store = createStore(); const capture = baseCapture({ contactId: null }); store.captures.set(`${capture.tenantId}:${capture.id}`, capture); const service = new SellerInvitationService(deps(store, {})); await assert.rejects(service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id }), (e) => e instanceof ServiceError && e.code === "SERVICE_INVALID_STATE_TRANSITION"); assert.equal(store.invitations.length, 0); assert.equal(store.claimTokens.length, 0); });
-test("missing delivery providers persists failed invitation and claim token for operator visibility", async () => {
+test("no provider configured for the resolved channel fails preflight cleanly before any claim token or invitation is created", async () => {
   const store = createStore();
   const capture = baseCapture({ metadata: { sellerPhone: "+233501234567" } });
   store.captures.set(`${capture.tenantId}:${capture.id}`, capture);
   const service = new SellerInvitationService(deps(store, {}));
 
-  const result = await service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id });
-
-  assert.equal(result.status, "PENDING");
-  assert.equal(result.channel, "WHATSAPP");
-  assert.equal(store.claimTokens.length, 1);
-  assert.equal(store.invitations.length, 1);
-  assert.equal(store.invitations[0].status, "PENDING");
-  assert.equal(store.audits.some((audit) => audit.action === "INVITATION_MANUAL_DELIVERY_REQUIRED"), true);
+  await assert.rejects(
+    service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id }),
+    (e) => e instanceof ServiceError && e.code === "SERVICE_PROVIDER_UNAVAILABLE",
+  );
+  assert.equal(store.claimTokens.length, 0);
+  assert.equal(store.invitations.length, 0);
 });
 test("preferredChannel EMAIL works when phone-qualified contact also has email", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email }, { preferredChannel: "EMAIL" }); assert.equal(r.result.channel, "EMAIL"); });
 test("preferredChannel WHATSAPP fails when phone missing", async () => { await assert.rejects(run(baseCapture({ metadata: { sellerEmail: "seller@example.com" } }), {}, { preferredChannel: "WHATSAPP" }), (e) => e instanceof ServiceError && e.message.includes("Seller phone")); });
 test("invitation moves capture from Captured to Invited only after successful send", async () => { const store = createStore(); const p = providers(store); const r = await run(baseCapture({ contactId: "contact-1", metadata: { sellerPhone: "+233501234567", sellerEmail: "seller@example.com" } }), { email: p.email }, { preferredChannel: "EMAIL" }); assert.equal(r.store.captures.get("tenant-a:capture-1").status, "INVITED"); assert.equal(r.store.stageUpdates[0].stageId, "stage-invited"); });
+test("invalid claim base url fails preflight cleanly before any claim token or invitation is created", async () => {
+  const store = createStore();
+  const p = providers(store);
+  const capture = baseCapture({ metadata: { sellerPhone: "+233501234567" } });
+  store.captures.set(`${capture.tenantId}:${capture.id}`, capture);
+  const service = new SellerInvitationService(deps(store, { ...p, inviteBaseUrl: "not-a-url" }));
+
+  await assert.rejects(
+    service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id }),
+    (e) => e instanceof ServiceError && e.code === "SERVICE_PROVIDER_UNAVAILABLE" && e.details.code === "INVALID_CLAIM_BASE_URL",
+  );
+  assert.equal(store.claimTokens.length, 0);
+  assert.equal(store.invitations.length, 0);
+});
+test("missing claim base url fails preflight cleanly with no implicit production default", async () => {
+  const store = createStore();
+  const p = providers(store);
+  const capture = baseCapture({ metadata: { sellerPhone: "+233501234567" } });
+  store.captures.set(`${capture.tenantId}:${capture.id}`, capture);
+  const service = new SellerInvitationService(deps(store, { ...p, inviteBaseUrl: "" }));
+
+  await assert.rejects(
+    service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: capture.id }),
+    (e) => e instanceof ServiceError && e.code === "SERVICE_PROVIDER_UNAVAILABLE" && e.details.code === "INVALID_CLAIM_BASE_URL",
+  );
+  assert.equal(store.claimTokens.length, 0);
+  assert.equal(store.invitations.length, 0);
+});
 test("tenant isolation preserved", async () => { const store = createStore(); store.captures.set("tenant-b:capture-1", baseCapture({ tenantId: "tenant-b" })); const service = new SellerInvitationService(deps(store, {})); await assert.rejects(service.createSellerInvitation(context, { tenantId: "tenant-a", captureId: "capture-1" }), (e) => e instanceof ServiceError && e.code === "SERVICE_NOT_FOUND"); });
 
 test("successful invitation creates a resolvable claim token and /claim invite URL", async () => {

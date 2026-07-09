@@ -734,3 +734,19 @@ export type { RenderSellerConnector, RenderSellerPayload, CreateRenderSellerInpu
 
 export * from "./discovery.js";
 export * from "./registry.js";
+export { ProviderDeliveryError } from "./provider-delivery-error.js";
+export type { ProviderDeliveryErrorInput, ProviderDeliverySafeDiagnostic } from "./provider-delivery-error.js";
+export {
+  checkInvitationProviderHealth,
+  validateClaimBaseUrl,
+  buildClaimUrl,
+} from "./invitation-provider-health.js";
+export type {
+  InvitationProviderHealth,
+  InvitationProviderHealthFailureCode,
+  InvitationProviderChannel,
+  InvitationProviderId,
+  SellerInvitationChannelName,
+  CheckInvitationProviderHealthInput,
+  ClaimBaseUrlValidation,
+} from "./invitation-provider-health.js";

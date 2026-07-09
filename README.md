@@ -66,6 +66,58 @@ pnpm --filter @whisperm/web dev
 Visit `http://localhost:3000`, sign in with the Clerk account matching `DEMO_USER_EMAIL`, and you
 should land on a populated dashboard.
 
+## Seller invitation provider configuration (ST1-013J)
+
+WhispeRM never assumes an invitation provider is configured -- `GET
+/api/marketplace-acquisition/provider-health?channel=WHATSAPP|SMS|EMAIL` reports whether a
+channel is actually usable, and the invite/bulk-invite APIs and the Acquisition Workbench UI both
+check this before allowing an invite to be sent. A misconfigured or unset provider blocks the
+invite action cleanly (`PROVIDER_NOT_CONFIGURED`) instead of failing deep inside delivery.
+
+**Claim link base URL** -- `SELLER_INVITATION_BASE_URL` has no built-in default (an implicit
+production default would silently generate unusable claim links in preview/local/demo). It must
+be set explicitly and be an absolute `http(s)` URL with no placeholder value:
+
+```bash
+# local development
+SELLER_INVITATION_BASE_URL=http://localhost:3000/claim
+
+# Vercel preview (set per-preview-deployment, not globally)
+SELLER_INVITATION_BASE_URL=https://whisperm-git-my-branch.vercel.app/claim
+
+# production
+SELLER_INVITATION_BASE_URL=https://app.whisperm.ai/claim
+```
+
+**WhatsApp (Meta Cloud API)**:
+
+| Env var | Required | Notes |
+| --- | --- | --- |
+| `META_WHATSAPP_ACCESS_TOKEN` | yes | Meta Cloud API access token |
+| `META_WHATSAPP_PHONE_NUMBER_ID` | yes | Meta Cloud API phone number ID |
+| `WHATSAPP_TEMPLATE_NAME` | no (defaults to `seller_invitation_v1`) | Must match an approved Meta template |
+| `WHATSAPP_TEMPLATE_LANGUAGE` | no (defaults to `en`) | Must match the approved template's language |
+| `WHATSAPP_TEMPLATE_BODY_PARAM_COUNT` | no (defaults to `1`) | See limitation below |
+
+**Known limitation**: the WhatsApp adapter only supports templates with **0 or 1** body
+parameters. A template with more than one body parameter fails provider preflight
+(`INVALID_TEMPLATE_CONFIGURATION`) rather than guessing how to map invite data onto the extra
+parameters -- add explicit per-parameter mapping support before using such a template.
+
+**SMS (generic HTTP provider)**: `SELLER_INVITATION_SMS_API_URL`, `SELLER_INVITATION_SMS_API_KEY`,
+`SELLER_INVITATION_SMS_SENDER_ID` (all required together), `SELLER_INVITATION_SMS_PROVIDER`
+(optional label).
+
+**Email (Resend) fallback**: `RESEND_API_KEY` (required), `EMAIL_FROM` (optional). A seller with
+an email address but no phone number is invited by email as soon as this is configured -- email
+fallback is never blocked by a missing phone.
+
+**Other invitation env vars**: `SELLER_INVITATION_WHATSAPP_ENABLED` (default `true`),
+`SELLER_INVITATION_FALLBACK_TO_SMS` (default `true`, WhatsApp send failures fall back to SMS when
+the seller has a phone and SMS is configured).
+
+None of the above are committed to the repo with real values -- set them per environment.
+
 ## Tests / CI
 
 ```bash

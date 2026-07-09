@@ -82,6 +82,37 @@ export function hasPhone(record: SellerAcquisitionRecord): boolean {
   return phone(record) !== null && !record.missingRequirements.includes("PHONE_REQUIRED");
 }
 
+export function email(record: SellerAcquisitionRecord): string | null {
+  return record.contact?.email ?? metadataText(record, "sellerEmail") ?? metadataText(record, "email");
+}
+
+export function hasEmail(record: SellerAcquisitionRecord): boolean {
+  return email(record) !== null;
+}
+
+/** ST1-013J: per-channel provider readiness, as reported by GET /api/marketplace-acquisition/provider-health. */
+export interface InvitationProviderAvailability {
+  readonly whatsapp: boolean;
+  readonly sms: boolean;
+  readonly email: boolean;
+}
+
+const invitationActionNames: readonly SellerAcquisitionNextAction[] = ["SEND_INVITATION", "RETRY_INVITATION"];
+
+/**
+ * ST1-013J: a seller can be workflow-ready for invitation while WhispeRM still cannot deliver to
+ * them, because no provider is configured/healthy for any channel the seller has a contact value
+ * for. This must be checked separately from seller eligibility so the UI can distinguish "seller
+ * ineligible" from "provider unavailable" instead of disabling the button with no explanation.
+ */
+export function isInvitationProviderReady(record: SellerAcquisitionRecord, availability: InvitationProviderAvailability): boolean {
+  if (!invitationActionNames.includes(record.nextAction)) return true;
+  const canWhatsapp = hasPhone(record) && availability.whatsapp;
+  const canSms = hasPhone(record) && availability.sms;
+  const canEmail = hasEmail(record) && availability.email;
+  return canWhatsapp || canSms || canEmail;
+}
+
 export function title(record: SellerAcquisitionRecord): string {
   return record.draftInventory?.title ?? record.capture.title ?? "Untitled marketplace listing";
 }
