@@ -1,8 +1,9 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, type ClaimLifecycleScheduleJob, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
+import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, type ClaimInvitationChannel, type ClaimLifecycleScheduleJob, type ClaimReminderDeliveryOutcome, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
 import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { ProviderDeliveryError, buildSellerInvitationNotificationPorts, createConsoleMessagingProviderLogger, createMessagingProviderRegistryFromEnv, type MessagingProviderRegistry } from "@whisperm/provider-adapters";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
@@ -1470,8 +1471,13 @@ export const createGrowthLoopServicePort = (prisma: PrismaPersistenceClient): Gr
   };
 };
 
-export const createClaimLifecycleServicePort = (prisma: PrismaPersistenceClient): ClaimLifecycleServicePort => {
+export const createClaimLifecycleServicePort = (
+  prisma: PrismaPersistenceClient,
+  env: NodeJS.ProcessEnv = process.env,
+  registry: MessagingProviderRegistry = createMessagingProviderRegistryFromEnv({ env, logger: createConsoleMessagingProviderLogger() }),
+): ClaimLifecycleServicePort => {
   const repositories = createPrismaRepositories(prisma);
+  const notificationPorts = buildSellerInvitationNotificationPorts(registry, env);
   const service = new MarketplaceClaimLifecycleService({
     claimTokens: {
       async findById(context, invitationId): Promise<MarketplaceClaimTokenRecord | null> {
@@ -1500,19 +1506,52 @@ export const createClaimLifecycleServicePort = (prisma: PrismaPersistenceClient)
     activities: repositories.activities,
     scheduler: createClaimLifecycleScheduler(prisma.queueJob),
     notifications: {
-      // ST1-012: previously a `void input` no-op that returned a fake `{ channel }` success
-      // without sending anything. No production path currently schedules claim reminders (the
-      // golden-path invite executor in apps/web does not wire claimLifecycleScheduler, and this
-      // worker's queue is never drained -- see the InMemoryQueueRuntime warning above), so fail
-      // loudly instead of lying about delivery if this is ever reached.
-      async sendClaimReminder(input) {
-        throw new WorkerRuntimeError({
-          code: "WORKER_RUNTIME_VALIDATION_FAILED",
-          message: "Claim reminder notifications are not implemented for this worker process",
-          status: 501,
-          retryable: false,
-          correlation: input.correlation,
-        });
+      /**
+       * ST1-013K: reminders reuse the exact same MessagingProviderRegistry the Seller Invitation
+       * Engine uses for the original invite (see createSellerInvitationServicePort) -- no separate
+       * channel or provider is introduced here. The original invitation already recorded the
+       * delivered channel, recipient, and claim link on its MarketplaceSellerInvitation row
+       * (linked from the claim token via `metadata.invitationId`), so a reminder resends that
+       * exact link instead of trying to re-derive one from the raw (unstored) claim token.
+       *
+       * Previously this always threw a 501 ("not implemented"), because nothing wired a
+       * notification runtime through this port. If the provider for the channel isn't configured
+       * (routine in preview/local/demo -- see README) or the original invitation record can't be
+       * found, this now reports a clean `delivered: false` outcome instead of throwing;
+       * claim-lifecycle.ts turns that into a MARKETPLACE_CLAIM_REMINDER_SKIPPED audit event rather
+       * than a job failure. Only an actual provider delivery failure propagates as a retryable
+       * error, matching how seller invitation delivery failures are handled.
+       */
+      async sendClaimReminder(input): Promise<ClaimReminderDeliveryOutcome> {
+        const scope = { tenantId: input.tenantId };
+        const invitations = input.sellerInvitationId === undefined
+          ? []
+          : await repositories.sellerInvitations.listSellerInvitationsByMarketplaceCaptureId(scope, input.marketplaceCaptureId);
+        const invitation = invitations.find((item) => item.id === input.sellerInvitationId);
+        if (invitation === undefined) {
+          return { delivered: false, reason: "INVITATION_RECORD_NOT_FOUND" };
+        }
+        const channel = (input.preferredChannel ?? invitation.channel) as ClaimInvitationChannel;
+        const body = `${input.purpose} ${invitation.inviteUrl}`;
+        const send = channel === "WHATSAPP" ? notificationPorts.whatsapp?.send({ to: invitation.recipient, body })
+          : channel === "SMS" ? notificationPorts.sms?.send({ to: invitation.recipient, body })
+          : notificationPorts.email?.send({ to: invitation.recipient, subject: "Claim reminder", html: `<p>${body}</p>` });
+        if (send === undefined) {
+          return { delivered: false, reason: "PROVIDER_NOT_CONFIGURED" };
+        }
+        try {
+          await send;
+        } catch (error) {
+          const message = error instanceof ProviderDeliveryError ? error.toSafeMessage() : "Claim reminder delivery failed";
+          throw new WorkerRuntimeError({
+            code: "WORKER_RUNTIME_VALIDATION_FAILED",
+            message,
+            status: 502,
+            retryable: error instanceof ProviderDeliveryError ? error.retryable : true,
+            correlation: input.correlation,
+          });
+        }
+        return { delivered: true, channel };
       },
     },
   });

@@ -79,8 +79,18 @@ export interface ClaimLifecycleAuditPort {
   append(context: TenantScoped, input: { readonly tenantId: string; readonly action: string; readonly targetType: string; readonly targetId: string; readonly correlationId: string; readonly requestId?: string | undefined; readonly metadata?: Readonly<Record<string, unknown>> | undefined }): Promise<unknown>;
 }
 
+/**
+ * ST1-013K: a reminder attempt either delivers on a real channel, or it does not -- there is no
+ * third "pretend it worked" outcome. `reason` distinguishes an environment where no provider is
+ * configured for the channel (common in preview/local/demo) from a data problem (the original
+ * MarketplaceSellerInvitation this reminder would resend can no longer be found).
+ */
+export type ClaimReminderDeliveryOutcome =
+  | { readonly delivered: true; readonly channel: ClaimInvitationChannel }
+  | { readonly delivered: false; readonly reason: "PROVIDER_NOT_CONFIGURED" | "INVITATION_RECORD_NOT_FOUND" };
+
 export interface ClaimLifecycleNotificationPort {
-  sendClaimReminder(input: { readonly tenantId: string; readonly invitationId: string; readonly marketplaceCaptureId: string; readonly reminderType: ClaimReminderType; readonly purpose: string; readonly preferredChannel?: ClaimInvitationChannel | undefined; readonly correlation: PersistenceCorrelationMetadata }): Promise<{ readonly channel: ClaimInvitationChannel }>;
+  sendClaimReminder(input: { readonly tenantId: string; readonly invitationId: string; readonly sellerInvitationId?: string | undefined; readonly marketplaceCaptureId: string; readonly reminderType: ClaimReminderType; readonly purpose: string; readonly preferredChannel?: ClaimInvitationChannel | undefined; readonly correlation: PersistenceCorrelationMetadata }): Promise<ClaimReminderDeliveryOutcome>;
 }
 
 export interface ClaimLifecycleSchedulerPort { schedule(job: ClaimLifecycleScheduleJob): Promise<void>; }
@@ -118,6 +128,14 @@ const originalChannel = (token: MarketplaceClaimTokenRecord): ClaimInvitationCha
   return typeof value === "string" ? channelSchema.safeParse(value).success ? value as ClaimInvitationChannel : undefined : undefined;
 };
 
+const sellerInvitationIdOf = (token: MarketplaceClaimTokenRecord): string | undefined => {
+  const value = token.metadata?.invitationId;
+  return typeof value === "string" ? value : undefined;
+};
+
+export type ClaimReminderEligibilityReason = "ELIGIBLE" | "TOKEN_NOT_ACTIVE" | "CAPTURE_TERMINAL" | "ALREADY_SENT";
+export interface ClaimReminderEligibility { readonly eligible: boolean; readonly reason: ClaimReminderEligibilityReason; }
+
 export class MarketplaceClaimLifecycleService {
   constructor(private readonly deps: ClaimLifecycleDependencies) {}
 
@@ -144,21 +162,49 @@ export class MarketplaceClaimLifecycleService {
     return jobs;
   }
 
-  async sendClaimReminder(contextInput: ClaimLifecycleServiceContext, invitationId: string, reminderTypeInput: ClaimReminderType): Promise<{ readonly sent: boolean; readonly channel?: ClaimInvitationChannel | undefined }> {
+  /** ST1-013K: pure eligibility check, reused by sendClaimReminder and exposed for operator/UI visibility. */
+  private reminderEligibility(token: MarketplaceClaimTokenRecord, capture: MarketplaceCaptureRecord, reminderType: ClaimReminderType): ClaimReminderEligibility {
+    if (!activeTokenStatuses.has(token.status)) return { eligible: false, reason: "TOKEN_NOT_ACTIVE" };
+    if (terminalCaptureStatuses.has(capture.status)) return { eligible: false, reason: "CAPTURE_TERMINAL" };
+    const field = reminderField(reminderType);
+    if (token[field] !== undefined && token[field] !== null) return { eligible: false, reason: "ALREADY_SENT" };
+    return { eligible: true, reason: "ELIGIBLE" };
+  }
+
+  async evaluateClaimReminderEligibility(contextInput: ClaimLifecycleServiceContext, invitationId: string, reminderTypeInput: ClaimReminderType): Promise<ClaimReminderEligibility> {
     const context = contextSchema.parse(contextInput) as ClaimLifecycleServiceContext;
     const reminderType = reminderTypeSchema.parse(reminderTypeInput);
     const id = idSchema.parse(invitationId);
     const scope = tenantScope(context);
     const token = await this.requireToken(scope, id, context);
     const capture = await this.requireCapture(scope, token.marketplaceCaptureId, context);
-    if (!activeTokenStatuses.has(token.status) || terminalCaptureStatuses.has(capture.status)) return { sent: false };
+    return this.reminderEligibility(token, capture, reminderType);
+  }
+
+  async sendClaimReminder(contextInput: ClaimLifecycleServiceContext, invitationId: string, reminderTypeInput: ClaimReminderType): Promise<{ readonly sent: boolean; readonly channel?: ClaimInvitationChannel | undefined; readonly skippedReason?: string | undefined }> {
+    const context = contextSchema.parse(contextInput) as ClaimLifecycleServiceContext;
+    const reminderType = reminderTypeSchema.parse(reminderTypeInput);
+    const id = idSchema.parse(invitationId);
+    const scope = tenantScope(context);
+    const token = await this.requireToken(scope, id, context);
+    const capture = await this.requireCapture(scope, token.marketplaceCaptureId, context);
+    const eligibility = this.reminderEligibility(token, capture, reminderType);
+    if (!eligibility.eligible) {
+      await this.audit(context, "MARKETPLACE_CLAIM_REMINDER_SKIPPED", id, { marketplaceCaptureId: token.marketplaceCaptureId, reminderType, reason: eligibility.reason });
+      return { sent: false, skippedReason: eligibility.reason };
+    }
+    await this.audit(context, "MARKETPLACE_CLAIM_REMINDER_ELIGIBLE", id, { marketplaceCaptureId: token.marketplaceCaptureId, reminderType });
+    const sellerInvitationId = sellerInvitationIdOf(token);
+    const outcome = await this.deps.notifications.sendClaimReminder({ tenantId: context.tenantId, invitationId: id, ...(sellerInvitationId === undefined ? {} : { sellerInvitationId }), marketplaceCaptureId: token.marketplaceCaptureId, reminderType, purpose: reminderPurpose(reminderType), preferredChannel: originalChannel(token), correlation: context.correlation });
+    if (!outcome.delivered) {
+      await this.audit(context, "MARKETPLACE_CLAIM_REMINDER_SKIPPED", id, { marketplaceCaptureId: token.marketplaceCaptureId, reminderType, reason: outcome.reason });
+      return { sent: false, skippedReason: outcome.reason };
+    }
     const field = reminderField(reminderType);
-    if (token[field] !== undefined && token[field] !== null) return { sent: false };
-    const result = await this.deps.notifications.sendClaimReminder({ tenantId: context.tenantId, invitationId: id, marketplaceCaptureId: token.marketplaceCaptureId, reminderType, purpose: reminderPurpose(reminderType), preferredChannel: originalChannel(token), correlation: context.correlation });
     const sentAt = this.now().toISOString();
-    await this.deps.claimTokens.update(scope, id, { [field]: sentAt, metadata: { ...(token.metadata ?? {}), [`${field}Channel`]: result.channel } });
-    await this.audit(context, reminderType === "DAY_3" ? "MARKETPLACE_CLAIM_DAY3_REMINDER_SENT" : "MARKETPLACE_CLAIM_DAY6_REMINDER_SENT", id, { marketplaceCaptureId: token.marketplaceCaptureId, channel: result.channel });
-    return { sent: true, channel: result.channel };
+    await this.deps.claimTokens.update(scope, id, { [field]: sentAt, metadata: { ...(token.metadata ?? {}), [`${field}Channel`]: outcome.channel } });
+    await this.audit(context, reminderType === "DAY_3" ? "MARKETPLACE_CLAIM_DAY3_REMINDER_SENT" : "MARKETPLACE_CLAIM_DAY6_REMINDER_SENT", id, { marketplaceCaptureId: token.marketplaceCaptureId, channel: outcome.channel });
+    return { sent: true, channel: outcome.channel };
   }
 
   async expireClaimInvitation(contextInput: ClaimLifecycleServiceContext, invitationId: string): Promise<{ readonly expired: boolean }> {
@@ -210,10 +256,15 @@ export class MarketplaceClaimLifecycleService {
     if (result.recoveryAction === "SEND_REMINDER") {
       const key = `claimRecoveryReminder:${result.stalledReason}`;
       if (token.metadata?.[key] !== undefined) return { executed: false, action: result.recoveryAction, status: "ALREADY_EXECUTED" };
-      const sent = await this.deps.notifications.sendClaimReminder({ tenantId: context.tenantId, invitationId: id, marketplaceCaptureId: token.marketplaceCaptureId, reminderType: "DAY_3", purpose: `Recovery reminder: ${result.stalledReason}`, preferredChannel: originalChannel(token), correlation: context.correlation });
+      const sellerInvitationId = sellerInvitationIdOf(token);
+      const outcome = await this.deps.notifications.sendClaimReminder({ tenantId: context.tenantId, invitationId: id, ...(sellerInvitationId === undefined ? {} : { sellerInvitationId }), marketplaceCaptureId: token.marketplaceCaptureId, reminderType: "DAY_3", purpose: `Recovery reminder: ${result.stalledReason}`, preferredChannel: originalChannel(token), correlation: context.correlation });
+      if (!outcome.delivered) {
+        await this.audit(context, "MARKETPLACE_CLAIM_RECOVERY_REMINDER_SKIPPED", id, { marketplaceCaptureId: token.marketplaceCaptureId, stalledReason: result.stalledReason, reason: outcome.reason });
+        return { executed: false, action: result.recoveryAction, status: "SKIPPED" };
+      }
       const sentAt = this.now().toISOString();
-      await this.deps.claimTokens.update(scope, id, { metadata: { ...(token.metadata ?? {}), [key]: sentAt, claimIntelligence: result.status, claimIntelligenceRecoveryAction: result.recoveryAction, claimIntelligenceRecoveryActionStatus: "EXECUTED", claimIntelligenceRecoveryAttemptCount: result.recoveryAttemptCount + 1, claimIntelligenceLastRecoveryAt: sentAt, claimIntelligenceLastRecoveryChannel: sent.channel } });
-      await this.audit(context, "MARKETPLACE_CLAIM_RECOVERY_REMINDER_SENT", id, { marketplaceCaptureId: token.marketplaceCaptureId, stalledReason: result.stalledReason, channel: sent.channel });
+      await this.deps.claimTokens.update(scope, id, { metadata: { ...(token.metadata ?? {}), [key]: sentAt, claimIntelligence: result.status, claimIntelligenceRecoveryAction: result.recoveryAction, claimIntelligenceRecoveryActionStatus: "EXECUTED", claimIntelligenceRecoveryAttemptCount: result.recoveryAttemptCount + 1, claimIntelligenceLastRecoveryAt: sentAt, claimIntelligenceLastRecoveryChannel: outcome.channel } });
+      await this.audit(context, "MARKETPLACE_CLAIM_RECOVERY_REMINDER_SENT", id, { marketplaceCaptureId: token.marketplaceCaptureId, stalledReason: result.stalledReason, channel: outcome.channel });
       return { executed: true, action: result.recoveryAction, status: "EXECUTED" };
     }
     if (result.recoveryAction === "MARK_ABANDONED") {

@@ -24,7 +24,7 @@ const makeDeps = (overrides = {}) => {
       async findByMarketplaceCaptureId(scope, captureId) { return state.draft?.tenantId === scope.tenantId && state.draft.marketplaceCaptureId === captureId ? state.draft : null; },
       async update(scope, id, input) { assert.equal(scope.tenantId, state.draft.tenantId); assert.equal(id, state.draft.id); state.draft = { ...state.draft, ...input }; return state.draft; },
     },
-    notifications: { async sendClaimReminder(input) { state.notifications.push(input); return { channel: overrides.channel ?? input.preferredChannel ?? 'SMS' }; } },
+    notifications: { async sendClaimReminder(input) { state.notifications.push(input); if (overrides.notDelivered) return { delivered: false, reason: overrides.notDelivered }; return { delivered: true, channel: overrides.channel ?? input.preferredChannel ?? 'SMS' }; } },
     businessGrowthOpportunities: { async createOrUpdateFromMarketplaceCapture(scope, capture) { state.opportunities.push({ scope, capture }); return capture; } },
     scheduler: { async schedule(job) { state.scheduled.push(job); } },
     auditLogs: { async append(scope, input) { assert.equal(scope.tenantId, input.tenantId); state.audits.push(input); return input; } },
@@ -47,11 +47,11 @@ test('sending invitation schedules Day 3, Day 6, and Day 7 lifecycle jobs', asyn
 test('Day 3 and Day 6 reminders send once using cellphone-first original channel', async () => {
   const { state, service } = makeDeps();
   assert.deepEqual(await service.sendClaimReminder(context, 'token-1', 'DAY_3'), { sent: true, channel: 'WHATSAPP' });
-  assert.deepEqual(await service.sendClaimReminder(context, 'token-1', 'DAY_3'), { sent: false });
+  assert.deepEqual(await service.sendClaimReminder(context, 'token-1', 'DAY_3'), { sent: false, skippedReason: 'ALREADY_SENT' });
   assert.equal(state.notifications.length, 1);
   assert.equal(state.notifications[0].preferredChannel, 'WHATSAPP');
   assert.deepEqual(await service.sendClaimReminder(context, 'token-1', 'DAY_6'), { sent: true, channel: 'WHATSAPP' });
-  assert.deepEqual(await service.sendClaimReminder(context, 'token-1', 'DAY_6'), { sent: false });
+  assert.deepEqual(await service.sendClaimReminder(context, 'token-1', 'DAY_6'), { sent: false, skippedReason: 'ALREADY_SENT' });
   assert.equal(state.notifications.length, 2);
 });
 
@@ -59,6 +59,34 @@ test('reminder records fallback channel returned by notification runtime', async
   const { state, service } = makeDeps({ channel: 'SMS' });
   await service.sendClaimReminder(context, 'token-1', 'DAY_3');
   assert.equal(state.token.metadata.reminderDay3SentAtChannel, 'SMS');
+});
+
+test('reminder eligibility rejects inactive tokens and terminal captures without calling notifications', async () => {
+  const { state, service } = makeDeps({ token: { status: 'CLAIMED' } });
+  assert.deepEqual(await service.evaluateClaimReminderEligibility(context, 'token-1', 'DAY_3'), { eligible: false, reason: 'TOKEN_NOT_ACTIVE' });
+  assert.deepEqual(await service.sendClaimReminder(context, 'token-1', 'DAY_3'), { sent: false, skippedReason: 'TOKEN_NOT_ACTIVE' });
+  assert.equal(state.notifications.length, 0);
+  assert.equal(state.audits.some((audit) => audit.action === 'MARKETPLACE_CLAIM_REMINDER_SKIPPED' && audit.metadata.reason === 'TOKEN_NOT_ACTIVE'), true);
+
+  const converted = makeDeps({ capture: { status: 'CONVERTED' } });
+  assert.deepEqual(await converted.service.evaluateClaimReminderEligibility(context, 'token-1', 'DAY_3'), { eligible: false, reason: 'CAPTURE_TERMINAL' });
+  assert.equal(converted.state.notifications.length, 0);
+});
+
+test('eligible reminder that cannot be delivered (no provider configured) is skipped, not thrown, and reminder stays retryable', async () => {
+  const { state, service } = makeDeps({ notDelivered: 'PROVIDER_NOT_CONFIGURED' });
+  assert.deepEqual(await service.evaluateClaimReminderEligibility(context, 'token-1', 'DAY_3'), { eligible: true, reason: 'ELIGIBLE' });
+  const result = await service.sendClaimReminder(context, 'token-1', 'DAY_3');
+  assert.deepEqual(result, { sent: false, skippedReason: 'PROVIDER_NOT_CONFIGURED' });
+  // Not delivered means the token is left untouched -- reminderDay3SentAt must stay unset so a
+  // later retry (once a provider is configured) can still succeed instead of being skipped as
+  // ALREADY_SENT.
+  assert.equal(state.token.reminderDay3SentAt, undefined);
+  assert.equal(state.audits.some((audit) => audit.action === 'MARKETPLACE_CLAIM_REMINDER_ELIGIBLE'), true);
+  assert.equal(state.audits.some((audit) => audit.action === 'MARKETPLACE_CLAIM_REMINDER_SKIPPED' && audit.metadata.reason === 'PROVIDER_NOT_CONFIGURED'), true);
+  // Not delivered means not marked sent -- a later retry (once a provider is configured) can still succeed.
+  assert.deepEqual(await service.sendClaimReminder(context, 'token-1', 'DAY_3'), { sent: false, skippedReason: 'PROVIDER_NOT_CONFIGURED' });
+  assert.equal(state.notifications.length, 2);
 });
 
 test('expiration marks token, capture, and safe draft inventory expired idempotently', async () => {
@@ -102,6 +130,16 @@ test('claim intelligence stalls viewed but incomplete claims and worker recovery
   assert.equal(state.notifications.length, 1);
   assert.equal(state.notifications[0].purpose, 'Recovery reminder: VIEWED_NOT_STARTED');
   assert.equal(state.token.metadata.claimIntelligenceRecoveryAttemptCount, 1);
+});
+
+test('claim recovery reminder that cannot be delivered is reported as skipped, not a false success', async () => {
+  const openedAt = '2026-01-02T00:00:00.000Z';
+  const { state, service } = makeDeps({ now: new Date('2026-01-03T00:00:01.000Z'), token: { status: 'OPENED', metadata: { successfulChannel: 'SMS', openedAt } }, notDelivered: 'PROVIDER_NOT_CONFIGURED' });
+  assert.deepEqual(await service.executeClaimRecovery(context, 'token-1'), { executed: false, action: 'SEND_REMINDER', status: 'SKIPPED' });
+  assert.equal(state.token.metadata.claimIntelligenceRecoveryAttemptCount, undefined);
+  assert.equal(state.audits.some((audit) => audit.action === 'MARKETPLACE_CLAIM_RECOVERY_REMINDER_SKIPPED'), true);
+  // Skipped (not executed) means a subsequent evaluation can still retry -- not permanently stuck.
+  assert.deepEqual(await service.executeClaimRecovery(context, 'token-1'), { executed: false, action: 'SEND_REMINDER', status: 'SKIPPED' });
 });
 
 test('claim intelligence does not recover completed or already-converted sellers', async () => {

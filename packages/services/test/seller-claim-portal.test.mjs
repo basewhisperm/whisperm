@@ -52,6 +52,18 @@ test('valid token returns preview without raw token and moves Invited to Claim S
   assert.equal(JSON.stringify(preview).includes('raw-token'), false);
 });
 
+test('unknown or malformed token reports a safe not-found error, not an internal error', async () => {
+  const { service } = makeService();
+  await assert.rejects(
+    () => service.preview(baseContext, 'a-token-that-was-never-issued'),
+    (error) => error instanceof SellerClaimPortalError && error.code === 'SERVICE_NOT_FOUND' && error.status === 404,
+  );
+  await assert.rejects(
+    () => service.accept(baseContext, 'a-token-that-was-never-issued', { acceptedTerms: true }),
+    (error) => error instanceof SellerClaimPortalError && error.code === 'SERVICE_NOT_FOUND',
+  );
+});
+
 test('preview does not move terminal records and expired tokens are rejected safely', async () => {
   for (const status of ['CLAIMED', 'CONVERTED', 'EXPIRED']) {
     const { service, state } = makeService({ capture: { ...makeService().state.capture, status } });
