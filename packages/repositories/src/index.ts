@@ -9,6 +9,20 @@ export type {
 import { PrismaMarketplaceAcquisitionRepository, type MarketplaceAcquisitionRepository } from "./marketplace-acquisition.js";
 import { PrismaAcquisitionGovernanceRepository, type AcquisitionGovernanceRepository } from "./acquisition-governance.js";
 import { PrismaAcquisitionUsageEventRepository, type AcquisitionUsageEventRepository } from "./acquisition-usage-events.js";
+import { PrismaQueueJobRepository, type QueueJobRepository } from "./queue-job.js";
+export {
+  PrismaQueueJobRepository,
+  queueJobStateSchema,
+  queueJobRecordSchema,
+} from "./queue-job.js";
+export type {
+  QueueJobRepository,
+  QueueJobRecord,
+  QueueJobState,
+  CreateQueueJobInput,
+  ClaimQueueJobsInput,
+  RecordDeadLetterInput,
+} from "./queue-job.js";
 
 import {
   PersistenceError,
@@ -2025,6 +2039,7 @@ export interface PrismaRepositories {
   readonly businessGrowthOpportunities: import("./business-growth-opportunity.js").BusinessGrowthOpportunityRepository;
   readonly acquisitionGovernance: AcquisitionGovernanceRepository;
   readonly acquisitionUsageEvents: AcquisitionUsageEventRepository;
+  readonly queueJobs: QueueJobRepository;
 }
 
 export const createPrismaRepositories = (prisma: PrismaPersistenceClient): PrismaRepositories => {
@@ -2057,6 +2072,7 @@ export const createPrismaRepositories = (prisma: PrismaPersistenceClient): Prism
     businessGrowthOpportunities: new PrismaBusinessGrowthOpportunityRepository(prisma),
     acquisitionGovernance: new PrismaAcquisitionGovernanceRepository(prisma),
     acquisitionUsageEvents: new PrismaAcquisitionUsageEventRepository(prisma),
+    queueJobs: new PrismaQueueJobRepository(prisma),
     auditLogs
   };
 };

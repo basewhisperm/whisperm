@@ -1,8 +1,9 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, type ClaimInvitationChannel, type ClaimLifecycleScheduleJob, type ClaimReminderDeliveryOutcome, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
+import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, RuntimeJobService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, marketplaceInviteQueueName, marketplaceInviteSendJobType, marketplaceInviteSendPayloadSchema, marketplaceClaimLifecycleQueueName, marketplaceClaimReminderJobType, marketplaceClaimExpireJobType, marketplaceClaimIntelligenceJobType, claimLifecycleJobPayloadSchema, growthLoopQueueName, growthLoopJobType, growthLoopJobPayloadSchema, type ClaimInvitationChannel, type ClaimLifecycleScheduleJob, type ClaimReminderDeliveryOutcome, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
 import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { PrismaQueueRuntime, runDurableQueuePollLoop } from "./durable-queue-runtime.js";
 import { ProviderDeliveryError, buildSellerInvitationNotificationPorts, createConsoleMessagingProviderLogger, createMessagingProviderRegistryFromEnv, type MessagingProviderRegistry } from "@whisperm/provider-adapters";
 import { z } from "zod";
 import {
@@ -393,6 +394,13 @@ export type WorkerApplicationStatus = "CREATED" | "STARTING" | "READY" | "DRAINI
 export interface WorkerProcessJobInput {
   readonly job: JobContract;
   readonly lease?: JobProcessingLeaseInput | undefined;
+  /**
+   * ST1-013M: number of attempts already made before this one (0 for a job's first attempt).
+   * Durable callers (the QueueJob poll loop) pass `queueJobRow.attemptsMade - 1` here, since
+   * claiming a row already incremented attemptsMade for the attempt in progress. Defaults to 0
+   * for callers that process a job exactly once outside the durable attempt-counted lifecycle.
+   */
+  readonly attempt?: number | undefined;
 }
 
 export interface JobProcessingLeaseInput {
@@ -626,16 +634,10 @@ export const createCrmConversionHandler = (services: WorkerServices): WorkerJobH
   },
 });
 
-export const growthLoopQueueName = "marketplace.growth.loop" as const;
-export const growthLoopJobType = "marketplace.growth.loop.evaluate" as const;
-const growthLoopTriggerValues = ["MANUAL", "REVENUE_ATTRIBUTION_COMPLETED", "CAMPAIGN_EXECUTION_COMPLETED", "SCHEDULED_REVIEW"] as const;
-const growthLoopJobPayloadSchema = z.object({
-  tenantId: z.string().min(1),
-  campaignId: z.string().min(1),
-  trigger: z.enum(growthLoopTriggerValues).default("MANUAL"),
-  correlationId: z.string().min(1).optional(),
-  replaySafe: z.literal(true).optional(),
-}).strict().passthrough();
+// ST1-013M: growthLoopQueueName/growthLoopJobType/growthLoopJobPayloadSchema now live in
+// @whisperm/services (runtime-job-contracts.ts) so the enqueue side (RuntimeJobService) and this
+// consumption side validate against the exact same canonical contract instead of two copies that
+// could drift.
 
 const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -701,16 +703,7 @@ export const createRevenueAttributionHandler = (services: WorkerServices): Worke
   },
 });
 
-const claimLifecycleJobPayloadSchema = z.object({
-  tenantId: z.string().min(1),
-  invitationId: z.string().min(1),
-  campaignId: z.string().min(1).optional(),
-  executionId: z.string().min(1).optional(),
-  correlationId: z.string().min(1).optional(),
-  replaySafe: z.literal(true).optional(),
-  reminderType: z.enum(["DAY_3", "DAY_6"]).optional(),
-}).strict();
-
+// ST1-013M: claimLifecycleJobPayloadSchema now lives in @whisperm/services (runtime-job-contracts.ts).
 export const createClaimLifecycleHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.claimLifecycle === undefined) {
@@ -785,25 +778,9 @@ export const createScoreRecomputationHandler = (services: WorkerServices): Worke
 });
 
 
-const sellerInvitationJobPayloadSchema = z.object({
-  tenantId: z.string().min(1),
-  campaignId: z.string().min(1).optional(),
-  opportunityId: z.string().min(1).optional(),
-  captureId: z.string().min(1).optional(),
-  executionId: z.string().min(1).optional(),
-  invitationId: z.string().min(1).nullable().optional(),
-  preferredChannel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).optional(),
-  channel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).optional(),
-  correlationId: z.string().min(1).optional(),
-  replaySafe: z.literal(true).optional(),
-}).strict().passthrough().transform((payload, ctx) => {
-  const captureId = payload.captureId ?? payload.opportunityId;
-  if (captureId === undefined) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'captureId or opportunityId is required' });
-    return z.NEVER;
-  }
-  return { ...payload, captureId, channel: payload.preferredChannel ?? payload.channel ?? 'WHATSAPP' };
-});
+// ST1-013M: sellerInvitationJobPayloadSchema now lives in @whisperm/services
+// (runtime-job-contracts.ts) as marketplaceInviteSendPayloadSchema.
+const sellerInvitationJobPayloadSchema = marketplaceInviteSendPayloadSchema;
 
 export const createSellerInvitationHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
@@ -1247,15 +1224,15 @@ export class WorkerApplication {
       return { status: result.status, result: workerRuntimeMetadataSchema.parse(result.result) };
     } catch (error) {
       this.metrics = { ...this.metrics, runningJobs: Math.max(0, this.metrics.runningJobs - 1), failedJobs: this.metrics.failedJobs + 1 };
-      return this.handleJobFailure(job, error);
+      return this.handleJobFailure(job, error, input.attempt ?? 0);
     }
   }
 
-  private async handleJobFailure(job: JobContract, error: unknown): Promise<WorkerProcessJobResult> {
+  private async handleJobFailure(job: JobContract, error: unknown, attempt: number): Promise<WorkerProcessJobResult> {
     const runtimeError = toRuntimeError(error, job.correlation);
     const decision = computeRetryDecision({
       policy: job.retryPolicy,
-      attempt: 0,
+      attempt,
       errorCode: runtimeError.code,
       now: this.clock.now(),
       tenantId: job.tenantId,
@@ -1376,7 +1353,9 @@ export const createMarketplaceQualificationExecutionPort = (input: { readonly qu
   },
 });
 
-const claimLifecycleQueueName = "marketplace.claim.lifecycle" as const;
+// ST1-013M: use the canonical marketplaceClaimLifecycleQueueName from @whisperm/services instead
+// of a second local copy of the same string.
+const claimLifecycleQueueName = marketplaceClaimLifecycleQueueName;
 const lifecycleClaimTokenRecordSchema = z.object({
   id: z.string().min(1),
   tenantId: z.string().min(1),
@@ -1407,13 +1386,14 @@ const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
         correlation: job.correlation,
       });
     }
-    const payload = {
+    // ST1-013M: validate against the canonical contract before persisting -- see runtime-job-contracts.ts.
+    const payload = claimLifecycleJobPayloadSchema.parse({
       tenantId: job.tenantId,
       invitationId: job.invitationId,
       ...(job.reminderType === undefined ? {} : { reminderType: job.reminderType }),
       correlationId: job.correlation.correlationId,
       replaySafe: true,
-    };
+    });
     await queueJob.upsert({
       where: { tenantId_queueName_jobKey: { tenantId: job.tenantId, queueName: claimLifecycleQueueName, jobKey: job.dedupeKey } },
       create: {
@@ -1444,11 +1424,14 @@ const createGrowthLoopScheduler = (queueJob: QueueJobDelegate) => ({
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "QueueJob upsert is not available for growth loop scheduling", status: 503, retryable: true, correlation: { correlationId: job.correlationId ?? job.campaignId } });
     }
     const jobKey = `${job.tenantId}:${job.campaignId}`;
-    const payload = { tenantId: job.tenantId, campaignId: job.campaignId, trigger: job.trigger, correlationId: job.correlationId ?? jobKey, replaySafe: true };
+    // ST1-013M: validate against the canonical contract before persisting -- see
+    // runtime-job-contracts.ts. Previously this wrote state: "PENDING", which is not a valid
+    // QueueJobState (see prisma/schema.prisma) and would fail the upsert at the database.
+    const payload = growthLoopJobPayloadSchema.parse({ tenantId: job.tenantId, campaignId: job.campaignId, trigger: job.trigger, correlationId: job.correlationId ?? jobKey, replaySafe: true });
     const now = new Date();
     await queueJob.upsert({
       where: { tenantId_queueName_jobKey: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobKey } },
-      create: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobName: growthLoopJobType, jobKey, state: "PENDING", payload, maxAttempts: 3, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
+      create: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobName: growthLoopJobType, jobKey, state: "WAITING", payload, maxAttempts: 3, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
       update: { payload, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
     });
   },
@@ -1636,21 +1619,25 @@ if (isMainModule()) {
         await campaignRuntimeService.recordQualificationResult(context, input);
       },
     };
-    // ST1-003: createBootstrapOnlyWorkerDependencies wires InMemoryQueueRuntime, which registers
-    // job handlers but never polls or consumes any durable queue (no BullMQ/Redis/SQS backend is
-    // implemented anywhere in this repo). "worker started" below and a HEALTHY/READY status are
-    // therefore true statements about this process's internal bootstrap, but they do NOT mean any
-    // external queue is being drained -- processJob() only runs when something calls it directly.
-    // Every acquisition golden-path action (capture, invite, claim, CRM/deal update) already
-    // executes synchronously in apps/web and does not depend on this process. Log this loudly so
-    // an operator watching Railway logs never mistakes these lines for a working consumer.
-    logger.warn("worker bootstrap uses an in-memory, non-durable queue runtime; no external queue is polled or consumed by this process", {
+    // ST1-013M: PrismaQueueRuntime + runDurableQueuePollLoop replace the previous
+    // InMemoryQueueRuntime bootstrap, which registered job handlers but never polled or consumed
+    // any durable queue. This process now actually drains the QueueJob table for every
+    // registered queue/job type below -- see docs/runtime/runtime-surface.md for the canonical
+    // job lifecycle and why QueueJob (not BullMQ/Redis, which nothing in this repo wires up) is
+    // the chosen durable surface. Golden-path acquisition actions (capture, invite, claim,
+    // CRM/deal update) still execute synchronously in apps/web when possible (see
+    // CampaignRuntimeInvitationExecutor); this loop is what makes the *retry* and *scheduled*
+    // paths (invitation retry backoff, claim reminders, growth loop evaluation) actually run
+    // instead of only ever creating a QueueJob row nothing reads.
+    const queueJobs = repositories.queueJobs;
+    logger.info("worker durable queue runtime starting", {
       tenantId: config.tenantId,
       workerId: config.workerId,
-      queueRuntime: "InMemoryQueueRuntime",
+      queueRuntime: "PrismaQueueRuntime",
     });
-    await runWorkerFromEnv({
+    const app = await runWorkerFromEnv({
       ...createBootstrapOnlyWorkerDependencies(config),
+      queues: new PrismaQueueRuntime({ queueJobs }),
       services: {
         ...createBootstrapOnlyWorkerServices(),
         claimLifecycle,
@@ -1662,9 +1649,24 @@ if (isMainModule()) {
         acquisitionGovernance,
       },
     });
-    await new Promise<void>((resolve) => {
-      process.once("SIGINT", () => resolve());
-      process.once("SIGTERM", () => resolve());
+
+    let stopped = false;
+    process.once("SIGINT", () => { stopped = true; });
+    process.once("SIGTERM", () => { stopped = true; });
+
+    const durableQueueNames = [...new Set(app.getRegisteredWorkers().map((definition) => definition.queue.queueName))];
+    logger.info("worker durable queue poll loop starting", {
+      tenantId: config.tenantId,
+      workerId: config.workerId,
+      queueNames: durableQueueNames.join(","),
+    });
+    await runDurableQueuePollLoop({
+      app,
+      queueJobs,
+      tenantId: config.tenantId,
+      queueNames: durableQueueNames,
+      isStopped: () => stopped,
+      logger,
     });
   } catch (error) {
     logger.error("worker bootstrap failed", { errorMessage: error instanceof Error ? error.message : "unknown error" });

@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
-import { prisma } from "@/lib/prisma";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { PersistenceError } from "@whisperm/repositories";
 import { SellerAcquisitionCampaignService, ServiceError } from "@whisperm/services";
 import { createAcquisitionServiceBundle } from "@/lib/marketplace-acquisition/acquisition-services";
+
+type CampaignAssignmentResult =
+  | { readonly status: "COMPLETED" }
+  | { readonly status: "ALREADY_ASSIGNED" }
+  | { readonly status: "FAILED"; readonly error: { readonly code: string; readonly message: string } };
 
 const clean = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
@@ -152,25 +156,29 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    const { services } = createAcquisitionServiceBundle();
+    const { services, repositories } = createAcquisitionServiceBundle();
+    const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
 
     const result = await services.marketplaceAcquisition.capture(
       {
         tenantId: tenant.id,
         actorId: tenantUserId,
         correlation: {
-          correlationId: request.headers.get("x-correlation-id") ?? crypto.randomUUID(),
+          correlationId,
           requestId: request.headers.get("x-request-id") ?? undefined,
         },
       },
       captureInput,
     );
 
-    // Assign to campaign if provided
+    // ST1-013M: campaign assignment is intentionally not transactional with capture (capture
+    // must still succeed if a campaign later becomes invalid), but a failure here must never be
+    // silently swallowed -- it is surfaced in the response and recorded durably in the audit log
+    // so operators and the caller can both see and retry it. See docs/runtime/runtime-surface.md.
+    let campaignAssignment: CampaignAssignmentResult | undefined;
     if (campaignId !== undefined) {
+      const campaignSvc = new SellerAcquisitionCampaignService(repositories.sellerAcquisitionCampaigns);
       try {
-        const campaignRepo = new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient);
-        const campaignSvc = new SellerAcquisitionCampaignService(campaignRepo);
         await campaignSvc.addSeller(
           { tenantId: tenant.id },
           campaignId,
@@ -180,12 +188,33 @@ export async function POST(request: NextRequest) {
             ...(result.dealId === undefined ? {} : { dealId: result.dealId }),
           }
         );
-      } catch {
-        // Non-fatal: capture succeeded, campaign assignment failed silently
+        campaignAssignment = { status: "COMPLETED" };
+      } catch (error) {
+        if (error instanceof PersistenceError && error.code === "PERSISTENCE_CONFLICT") {
+          // Idempotent: the unique constraint on [tenantId, campaignId, marketplaceCaptureId]
+          // means this capture is already a member of this campaign -- not a failure.
+          campaignAssignment = { status: "ALREADY_ASSIGNED" };
+        } else {
+          const code = error instanceof PersistenceError ? error.code : "CAMPAIGN_ASSIGNMENT_FAILED";
+          const message = error instanceof Error ? error.message : "Campaign assignment failed";
+          campaignAssignment = { status: "FAILED", error: { code, message } };
+          await repositories.auditLogs.append(
+            { tenantId: tenant.id },
+            {
+              tenantId: tenant.id,
+              actorId: tenantUserId,
+              action: "MARKETPLACE_CAPTURE_CAMPAIGN_ASSIGNMENT_FAILED",
+              targetType: "MarketplaceCapture",
+              targetId: result.captureId,
+              correlationId,
+              metadata: { campaignId, errorCode: code, errorMessage: message },
+            },
+          );
+        }
       }
     }
 
-    return NextResponse.json({ ok: true, data: result });
+    return NextResponse.json({ ok: true, data: result, ...(campaignAssignment === undefined ? {} : { campaignAssignment }) });
   } catch (error) {
     if (error instanceof ServiceError) {
       return errorResponse(error.message, error.status, error.code, error.details);
