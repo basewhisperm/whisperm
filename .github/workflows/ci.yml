@@ -39,6 +39,14 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Bootstrap check (ST1-013L)
+        run: pnpm check:bootstrap
+        env:
+          # `pnpm run doctor` only checks DATABASE_URL is set and parseable -- it never connects.
+          # No real database is provisioned in CI; this placeholder exists so a missing/malformed
+          # DATABASE_URL is caught here rather than only discovered by a new engineer locally.
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/whisperm_ci
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -47,3 +55,6 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Doctor script tests
+        run: pnpm test:doctor
