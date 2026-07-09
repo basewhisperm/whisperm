@@ -15,7 +15,10 @@ import {
 import { CampaignRuntimeService, type CampaignRuntimeInvitationQueue } from "@whisperm/services";
 import { sellerInvitationCreateRequestSchema } from "@whisperm/types";
 import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
-import { invitationExecutionResponse } from "@/lib/marketplace-acquisition/invitation-execution-response";
+import {
+  invitationEligibilityHttpStatus,
+  resolveInvitationEligibility,
+} from "@/lib/marketplace-acquisition/invitation-eligibility";
 
 interface RouteContext { readonly params: { readonly id: string } }
 
@@ -55,15 +58,6 @@ const runtimeService = () => new CampaignRuntimeService({
   invitationExecutor: createSellerInvitationExecutor(prisma as unknown as PrismaPersistenceClient),
 });
 
-const resolveCampaignId = async (tenantId: string, captureId: string): Promise<string | null> => {
-  const membership = await prisma.sellerAcquisitionCampaignMember.findFirst({
-    where: { tenantId, marketplaceCaptureId: captureId, removedAt: null },
-    select: { campaignId: true },
-    orderBy: { assignedAt: "desc" },
-  });
-  return membership?.campaignId ?? null;
-};
-
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
   if (!tenantContext) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -84,13 +78,19 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "A supported preferredChannel is required when provided" }, { status: 400 });
   }
 
-  const campaignId = await resolveCampaignId(tenant.id, params.id);
-  if (campaignId === null) return NextResponse.json({ ok: false, error: { message: "Capture is not assigned to a campaign." } }, { status: 409 });
+  const preferredChannel = parsed.data.preferredChannel ?? "WHATSAPP";
+  const eligibility = await resolveInvitationEligibility(prisma, { tenantId: tenant.id, captureId: params.id, channel: preferredChannel });
+  if (!eligibility.eligible) {
+    return NextResponse.json(
+      { ok: false, error: { code: eligibility.code, message: eligibility.message } },
+      { status: invitationEligibilityHttpStatus(eligibility) },
+    );
+  }
 
   const { denied } = await authorizeAcquisitionActionForApi(tenant.id, {
     capability: "INVITATION",
-    campaignId,
-    provider: parsed.data.preferredChannel,
+    campaignId: eligibility.campaignId,
+    provider: preferredChannel,
     actorId: tenantUserId,
     source: "API",
   });
@@ -101,14 +101,27 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     const execution = await runtimeService().executeInvitation(
       { tenantId: tenant.id },
       {
-        campaignId,
-        opportunityId: params.id,
-        preferredChannel: parsed.data.preferredChannel,
+        campaignId: eligibility.campaignId,
+        opportunityId: eligibility.captureId,
+        preferredChannel,
         initiatedBy: tenantUserId,
         correlationId,
       },
     );
-    return invitationExecutionResponse(execution);
+    const metrics = execution.metrics ?? {};
+    const invitationId = typeof metrics.invitationId === "string" ? metrics.invitationId : undefined;
+    if (execution.status === "FAILED") {
+      return NextResponse.json(
+        { ok: false, error: { code: execution.errorCode ?? "INVITATION_DELIVERY_FAILED", message: execution.errorMessage ?? "Seller invitation delivery failed" } },
+        { status: execution.errorCode === "SERVICE_PROVIDER_UNAVAILABLE" ? 503 : 422 },
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      invitationId,
+      executionId: execution.id,
+      status: execution.status === "COMPLETED" ? "SENT" : "QUEUED",
+    }, { status: execution.status === "COMPLETED" ? 200 : 202 });
   } catch (error) {
     if (error instanceof PersistenceError) {
       return NextResponse.json({ ok: false, error: { message: error.message, code: error.code } }, { status: error.status });

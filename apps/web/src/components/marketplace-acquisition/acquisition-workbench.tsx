@@ -461,6 +461,7 @@ export function AcquisitionWorkbench({
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
   const [selectedBulkIds, setSelectedBulkIds] = useState<readonly string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResultMessage, setBulkResultMessage] = useState<string | null>(null);
   const [queueFilter, setQueueFilter] = useState<QueueBucketId>("all");
   const [healthFilter, setHealthFilter] = useState("all");
   const [nextActionFilter, setNextActionFilter] = useState("all");
@@ -554,7 +555,8 @@ export function AcquisitionWorkbench({
   const ungroupedVisibleRollups = queueFilter === "all"
     ? filteredRollups.filter((rollup) => !queueBuckets.some((bucket) => rollup.records.some(bucket.matches)))
     : [];
-  const bulkEligibleRecords = filteredRecords.filter(isEligibleForInvitation);
+  const invitationActionsSupported = mode === "campaign";
+  const bulkEligibleRecords = invitationActionsSupported ? filteredRecords.filter(isEligibleForInvitation) : [];
   const selectedBulkRecords = bulkEligibleRecords.filter((record) => selectedBulkIds.includes(record.capture.id));
   const allEligibleSelected = bulkEligibleRecords.length > 0 && selectedBulkRecords.length === bulkEligibleRecords.length;
   const stages = [...new Set(records.map((r) => r.currentStage).filter(Boolean))];
@@ -620,23 +622,21 @@ export function AcquisitionWorkbench({
         body: JSON.stringify({ captureIds: selectedBulkRecords.map((r) => r.capture.id), channel: "WHATSAPP" }),
       });
       const payload = await response.json().catch(() => ({}));
-      const data = (payload as { data?: { completed?: number; pending?: number; failed?: number; invalid?: string[] } })?.data;
-      const completed = data?.completed ?? 0;
-      const pending = data?.pending ?? 0;
-      const failed = data?.failed ?? 0;
-      const invalidCount = data?.invalid?.length ?? 0;
+      if (!response.ok) throw new Error(errorMessageFromPayload(payload) ?? "Bulk invitation failed.");
+      const summary = (payload as { summary?: { requested?: number; eligible?: number; queued?: number; skipped?: number; failed?: number } }).summary;
+      const failedResults = ((payload as { results?: readonly { ok?: boolean; captureId?: string; code?: string; message?: string }[] }).results ?? [])
+        .filter((result) => result.ok === false)
+        .slice(0, 5)
+        .map((result) => `${result.captureId ?? "unknown"}: ${result.code ?? "FAILED"}`);
       setSelectedBulkIds([]);
       await refreshRecords();
-      setActionError(null);
-      const parts: string[] = [];
-      if (completed > 0) parts.push(`${completed} invitation${completed === 1 ? "" : "s"} sent.`);
-      if (pending > 0) parts.push(`${pending} invitation${pending === 1 ? "" : "s"} pending.`);
-      if (failed > 0) parts.push(`${failed} invitation${failed === 1 ? "" : "s"} failed.`);
-      if (invalidCount > 0) parts.push(`${invalidCount} skipped — no valid phone.`);
-      if (parts.length > 0) {
-        setActionError(parts.join(" "));
-        setTimeout(() => setActionError(null), 5_000);
-      }
+      const parts = [
+        `${summary?.queued ?? 0} queued`,
+        `${summary?.failed ?? 0} failed`,
+        `${summary?.skipped ?? 0} skipped`,
+        `of ${summary?.requested ?? selectedBulkRecords.length} requested`,
+      ];
+      setBulkResultMessage(failedResults.length > 0 ? `${parts.join(" · ")} — ${failedResults.join(", ")}` : parts.join(" · "));
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Bulk invitation failed.");
     } finally {
@@ -837,8 +837,9 @@ export function AcquisitionWorkbench({
                 <span className="hidden sm:inline">·</span>
                 <span>{bulkEligibleRecords.length} eligible in current view</span>
                 <span className="hidden sm:inline">·</span>
-                <span>WhatsApp first, SMS fallback</span>
+                <span>{invitationActionsSupported ? "WhatsApp first, SMS fallback" : "Assign this seller to a campaign before sending an invitation."}</span>
               </div>
+              {bulkResultMessage ? <p className="mt-3 rounded-xl bg-secondary p-3 text-xs font-medium text-foreground">{bulkResultMessage}</p> : null}
             </div>
             <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
               <button
@@ -888,6 +889,7 @@ export function AcquisitionWorkbench({
                         selectedBulkIds={selectedBulkIds}
                         bulkEligibleRecords={bulkEligibleRecords}
                         onBulkToggle={() => toggleBulkRollup(rollup.records)}
+                        primaryActionEnabled={invitationActionsSupported || !["SEND_INVITATION", "RETRY_INVITATION"].includes(rollup.primary.nextAction) ? undefined : false}
                         onPrimaryAction={runCardPrimaryAction}
                         onSelect={() => setSelectedCaptureId(rollup.primary.capture.id)}
                       />
@@ -911,6 +913,7 @@ export function AcquisitionWorkbench({
                         selectedBulkIds={selectedBulkIds}
                         bulkEligibleRecords={bulkEligibleRecords}
                         onBulkToggle={() => toggleBulkRollup(rollup.records)}
+                        primaryActionEnabled={invitationActionsSupported || !["SEND_INVITATION", "RETRY_INVITATION"].includes(rollup.primary.nextAction) ? undefined : false}
                         onPrimaryAction={runCardPrimaryAction}
                         onSelect={() => setSelectedCaptureId(rollup.primary.capture.id)}
                       />
@@ -927,6 +930,7 @@ export function AcquisitionWorkbench({
           actionError={actionError}
           onActionError={setActionError}
           onRefresh={refreshRecords}
+          invitationActionsSupported={invitationActionsSupported}
           onRecordPatched={patchRecord}
         />
       </section>
@@ -1063,11 +1067,12 @@ function CheckLine({ label, passed, detail }: { readonly label: string; readonly
   );
 }
 
-function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkEligibleRecords, onBulkToggle, onPrimaryAction, onSelect }: {
+function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkEligibleRecords, primaryActionEnabled, onBulkToggle, onPrimaryAction, onSelect }: {
   readonly rollup: SellerRollup;
   readonly selectedCaptureId: string | null;
   readonly selectedBulkIds: readonly string[];
   readonly bulkEligibleRecords: readonly SellerAcquisitionRecord[];
+  readonly primaryActionEnabled?: boolean | undefined;
   readonly onBulkToggle: () => void;
   readonly onPrimaryAction: (record: SellerAcquisitionRecord) => Promise<void>;
   readonly onSelect: () => void;
@@ -1086,6 +1091,7 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
       <SellerCard
         bulkEligible={bulkEligible}
         bulkSelected={bulkSelected}
+        primaryActionEnabled={primaryActionEnabled}
         listingCountOverride={rollupListingCount(rollup)}
         onBulkToggle={onBulkToggle}
         onPrimaryAction={() => onPrimaryAction(primary)}
@@ -1107,10 +1113,11 @@ function SellerRollupCard({ rollup, selectedCaptureId, selectedBulkIds, bulkElig
   );
 }
 
-function Workbench({ record, rollupRecords, actionError, onActionError, onRefresh, onRecordPatched }: {
+function Workbench({ record, rollupRecords, actionError, invitationActionsSupported, onActionError, onRefresh, onRecordPatched }: {
   readonly record: SellerAcquisitionRecord | null;
   readonly rollupRecords: readonly SellerAcquisitionRecord[];
   readonly actionError: string | null;
+  readonly invitationActionsSupported: boolean;
   readonly onActionError: (message: string | null) => void;
   readonly onRefresh: () => Promise<void>;
   readonly onRecordPatched: (updated: SellerAcquisitionRecord) => void;
@@ -1140,7 +1147,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
   }
 
   const blocked = record.missingRequirements.includes("PHONE_REQUIRED");
-  const enabled = isActionEnabled(record);
+  const enabled = (!invitationActionsSupported && ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction)) ? false : isActionEnabled(record);
   const canonicalNextActionLabel = workflowNextActionFromRecord(record).label;
   const sellerRecords = rollupRecords.length > 0 ? rollupRecords : [record];
   const sellerListingTitles = [...new Set(sellerRecords.map(title))].slice(0, 8);
@@ -1241,6 +1248,7 @@ function Workbench({ record, rollupRecords, actionError, onActionError, onRefres
         <WorkbenchSection title="Why">
           <p className="text-sm leading-6 text-muted-foreground">{nextActionReason(record)}</p>
           {blocked ? <p className="mt-2 text-sm font-semibold text-red-700">Missing phone number blocks invitation.</p> : null}
+          {!invitationActionsSupported && ["SEND_INVITATION", "RETRY_INVITATION"].includes(record.nextAction) ? <p className="mt-2 text-sm font-semibold text-amber-700">Assign this seller to a campaign before sending an invitation.</p> : null}
         </WorkbenchSection>
 
         <WorkbenchSection title="Invitation status">

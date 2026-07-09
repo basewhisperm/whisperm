@@ -13,6 +13,7 @@ import {
 } from "@whisperm/repositories";
 import { CampaignRuntimeService, type CampaignRuntimeInvitationQueue } from "@whisperm/services";
 import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
+import { resolveInvitationEligibility, type InvitationEligibility } from "@/lib/marketplace-acquisition/invitation-eligibility";
 
 const bulkInviteRequestSchema = z.object({
   captureIds: z.array(z.string().min(1)).min(1).max(100),
@@ -58,6 +59,29 @@ const runtimeService = () => new CampaignRuntimeService({
   invitationExecutor: createSellerInvitationExecutor(prisma as unknown as PrismaPersistenceClient),
 });
 
+type BulkInviteResult =
+  | {
+      readonly captureId: string;
+      readonly ok: true;
+      readonly status: "QUEUED" | "SENT" | "MANUAL_DELIVERY_REQUIRED";
+      readonly invitationId?: string;
+      readonly executionId?: string;
+    }
+  | {
+      readonly captureId: string;
+      readonly ok: false;
+      readonly code: Exclude<InvitationEligibility, { readonly eligible: true }>["code"] | "INVITATION_DELIVERY_FAILED" | "INVITATION_AUTHORIZATION_DENIED";
+      readonly message: string;
+    };
+
+const summarize = (requested: number, results: readonly BulkInviteResult[]) => {
+  const queued = results.filter((result) => result.ok && result.status === "QUEUED").length;
+  const sent = results.filter((result) => result.ok && result.status === "SENT").length;
+  const failed = results.filter((result) => !result.ok && result.code !== "CAPTURE_NOT_FOUND").length;
+  const skipped = results.filter((result) => !result.ok && result.code === "CAPTURE_NOT_FOUND").length;
+  return { requested, eligible: queued + sent, queued, skipped, failed };
+};
+
 export async function POST(request: NextRequest) {
   const tenantContext = await getTenantContextForCurrentUser();
   if (!tenantContext) return errorResponse("Unauthorized", 401);
@@ -77,63 +101,58 @@ export async function POST(request: NextRequest) {
   const parsed = bulkInviteRequestSchema.safeParse(body);
   if (!parsed.success) return errorResponse("captureIds and channel are invalid.", 400);
 
-  const captures = await prisma.marketplaceCapture.findMany({
-    where: { tenantId: tenant.id, id: { in: parsed.data.captureIds } },
-    select: {
-      id: true,
-      campaignMemberships: {
-        where: { removedAt: null },
-        select: { campaignId: true },
-        orderBy: { assignedAt: "desc" },
-        take: 1,
-      },
-    },
-  });
-
+  const requestedIds = parsed.data.captureIds;
   const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
   const runtime = runtimeService();
-  const invalid: string[] = [];
-  const results: Array<{ readonly captureId: string; readonly executionId: string; readonly status: "COMPLETED" | "PENDING" | "FAILED" }> = [];
+  const results: BulkInviteResult[] = [];
 
-  for (const capture of captures) {
-    const campaignId = capture.campaignMemberships[0]?.campaignId;
-    if (campaignId === undefined) {
-      invalid.push(capture.id);
+  for (const captureId of requestedIds) {
+    const eligibility = await resolveInvitationEligibility(prisma, { tenantId: tenant.id, captureId, channel: parsed.data.channel });
+    if (!eligibility.eligible) {
+      results.push({ captureId, ok: false, code: eligibility.code, message: eligibility.message });
       continue;
     }
+
     const { denied } = await authorizeAcquisitionActionForApi(tenant.id, {
       capability: "INVITATION",
-      campaignId,
+      campaignId: eligibility.campaignId,
       provider: parsed.data.channel,
       actorId: tenantUserId,
       source: "API",
     });
     if (denied) {
-      invalid.push(capture.id);
+      results.push({ captureId, ok: false, code: "INVITATION_AUTHORIZATION_DENIED", message: "Invitation is not authorized for this capture." });
       continue;
     }
-    const execution = await runtime.executeInvitation(
-      { tenantId: tenant.id },
-      {
-        campaignId,
-        opportunityId: capture.id,
-        preferredChannel: parsed.data.channel,
-        initiatedBy: tenantUserId,
-        correlationId,
-      },
-    );
-    const status = execution.status === "COMPLETED" ? "COMPLETED" : execution.status === "FAILED" ? "FAILED" : "PENDING";
-    results.push({ captureId: capture.id, executionId: execution.id, status });
+
+    try {
+      const execution = await runtime.executeInvitation(
+        { tenantId: tenant.id },
+        {
+          campaignId: eligibility.campaignId,
+          opportunityId: eligibility.captureId,
+          preferredChannel: parsed.data.channel,
+          initiatedBy: tenantUserId,
+          correlationId,
+        },
+      );
+      if (execution.status === "FAILED") {
+        results.push({ captureId, ok: false, code: "INVITATION_DELIVERY_FAILED", message: execution.errorMessage ?? "Seller invitation delivery failed." });
+        continue;
+      }
+      const metrics = execution.metrics ?? {};
+      const invitationId = typeof metrics.invitationId === "string" ? metrics.invitationId : undefined;
+      results.push({
+        captureId,
+        ok: true,
+        status: execution.status === "COMPLETED" ? "SENT" : "QUEUED",
+        ...(invitationId === undefined ? {} : { invitationId }),
+        executionId: execution.id,
+      });
+    } catch {
+      results.push({ captureId, ok: false, code: "INVITATION_DELIVERY_FAILED", message: "Seller invitation delivery failed." });
+    }
   }
 
-  if (results.length === 0) return errorResponse("No captures assigned to a campaign.", 422);
-
-  const completed = results.filter((result) => result.status === "COMPLETED").length;
-  const pending = results.filter((result) => result.status === "PENDING").length;
-  const failed = results.filter((result) => result.status === "FAILED").length;
-
-  return NextResponse.json(
-    { ok: true, data: { results, completed, pending, failed, invalid, channel: parsed.data.channel } },
-    { status: 200 },
-  );
+  return NextResponse.json({ ok: true, summary: summarize(requestedIds.length, results), results }, { status: 200 });
 }
