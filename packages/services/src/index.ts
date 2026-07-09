@@ -43,7 +43,7 @@ export { RenderInventoryConversionService, RenderInventoryConversionError } from
 export { MarketplaceCaptureCompletionService, MarketplaceCaptureCompletionError } from "./marketplace-capture-completion.js";
 export type { RenderInventoryConnector as RenderInventoryConversionConnector, RenderInventoryConversionContext, RenderInventoryConversionDependencies, RenderInventoryConversionResult } from "./render-inventory-conversion.js";
 export type { ClaimPreview, ClaimTokenRecord, ClaimTokenRepository, SellerClaimPortalDependencies } from "./seller-claim-portal.js";
-export type { ClaimIntelligenceResult, ClaimLifecycleDependencies, ClaimLifecycleScheduleJob, ClaimReminderType, MarketplaceClaimTokenRecord } from "./claim-lifecycle.js";
+export type { ClaimIntelligenceResult, ClaimInvitationChannel, ClaimLifecycleDependencies, ClaimLifecycleNotificationPort, ClaimLifecycleScheduleJob, ClaimReminderDeliveryOutcome, ClaimReminderEligibility, ClaimReminderEligibilityReason, ClaimReminderType, ClaimTokenStatus, MarketplaceClaimTokenRecord } from "./claim-lifecycle.js";
 
 import {
   type ApprovalDecisionRecord,

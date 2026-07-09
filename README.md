@@ -118,6 +118,36 @@ the seller has a phone and SMS is configured).
 
 None of the above are committed to the repo with real values -- set them per environment.
 
+## Seller claim lifecycle (ST1-013K)
+
+A claim token moves through `ACTIVE` (`PENDING`/`SENT`/`OPENED`) → `CLAIMED` | `EXPIRED` |
+`ABANDONED`, and is always stored hashed (`MarketplaceClaimToken.tokenHash`) -- the raw token
+exists only long enough to build the invite URL at send time and is never persisted or logged.
+`packages/services/src/claim-lifecycle.ts` (`MarketplaceClaimLifecycleService`) is the single
+place lifecycle transitions happen; route handlers and the worker call into it rather than
+mutating token/capture/invitation status directly.
+
+- **Expiration**: a token expires exactly 7 days after it was sent (`expireClaimInvitation`).
+  Already-`CLAIMED`/`CONVERTED` captures are left untouched; an already-`EXPIRED` token is a no-op
+  success. Expiring a token also moves its `MarketplaceCapture` and `DraftInventory` to `EXPIRED`
+  (unless already claimed/converted) and records a `MARKETPLACE_CLAIM_INVITATION_EXPIRED` audit
+  event. An expired claim link shows a clear "this link has expired" state in
+  `/claim/[token]` and cannot be claimed.
+- **Reminders**: Day 3 and Day 6 reminders (`sendClaimReminder`) resend the *same* claim link the
+  seller originally received (looked up via the claim token's linked `MarketplaceSellerInvitation`
+  row), through the same `MessagingProviderRegistry` the original invitation used -- WhatsApp →
+  SMS → Email, per the Seller Invitation Engine's channel priority. A reminder is only attempted
+  once eligibility holds (token `ACTIVE`, capture not terminal, that reminder not already sent);
+  ineligible or already-claimed/expired/revoked tokens are skipped, never reminded.
+  If no provider is configured for the channel (routine in preview/local/demo -- see above), or the
+  original invitation record can't be found, the reminder cleanly reports "not delivered" and
+  records a `MARKETPLACE_CLAIM_REMINDER_SKIPPED` audit event instead of throwing or claiming a
+  false success -- it does **not** mark the reminder as sent, so it stays eligible for a later
+  retry. This replaced an earlier stopgap where the worker's reminder notification port always
+  threw an HTTP 501.
+- **No raw-token logging**: token lookups always hash the incoming token before any
+  comparison/lookup; audit events and lifecycle logs never carry the raw token or its hash.
+
 ## Tests / CI
 
 ```bash
@@ -135,5 +165,7 @@ pnpm test
 - **`apps/api` does not currently start.** Nothing in it calls `.listen()`; treat it as a library of
   routes/services that would need a bootstrap entrypoint before it could run as a service.
 - **`apps/worker`'s queue is in-memory, not durable.** Anything meant to run asynchronously
-  (trial reminders, scheduled campaign ticks, claim expiry) needs a real BullMQ/Redis wiring before
-  it can be relied on unattended.
+  (trial reminders, scheduled campaign ticks, claim expiry/reminders) needs a real BullMQ/Redis
+  wiring before it can be relied on unattended -- the claim lifecycle job handlers themselves are
+  correct and tested (see "Seller claim lifecycle" above), but nothing currently drains the queue
+  those jobs are scheduled onto.
