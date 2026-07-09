@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
-import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, RuntimeJobService, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, marketplaceInviteQueueName, marketplaceInviteSendJobType, marketplaceInviteSendPayloadSchema, marketplaceClaimLifecycleQueueName, marketplaceClaimReminderJobType, marketplaceClaimExpireJobType, marketplaceClaimIntelligenceJobType, claimLifecycleJobPayloadSchema, growthLoopQueueName, growthLoopJobType, growthLoopJobPayloadSchema, type ClaimInvitationChannel, type ClaimLifecycleScheduleJob, type ClaimReminderDeliveryOutcome, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
+import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, createInvitationRuntimeJobQueue, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, marketplaceInviteQueueName, marketplaceInviteSendJobType, marketplaceInviteSendPayloadSchema, marketplaceClaimLifecycleQueueName, marketplaceClaimReminderJobType, marketplaceClaimExpireJobType, marketplaceClaimIntelligenceJobType, claimLifecycleJobPayloadSchema, growthLoopQueueName, growthLoopJobType, growthLoopJobPayloadSchema, type ClaimInvitationChannel, type ClaimLifecycleScheduleJob, type ClaimReminderDeliveryOutcome, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
 import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { PrismaQueueRuntime, runDurableQueuePollLoop } from "./durable-queue-runtime.js";
 import { ProviderDeliveryError, buildSellerInvitationNotificationPorts, createConsoleMessagingProviderLogger, createMessagingProviderRegistryFromEnv, type MessagingProviderRegistry } from "@whisperm/provider-adapters";
@@ -1375,7 +1375,7 @@ const lifecycleClaimTokenRecordSchema = z.object({
 
 type QueueJobDelegate = Pick<PrismaPersistenceClient["queueJob"], "upsert">;
 
-const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
+export const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
   async schedule(job: ClaimLifecycleScheduleJob): Promise<void> {
     if (queueJob.upsert === undefined) {
       throw new WorkerRuntimeError({
@@ -1408,17 +1408,25 @@ const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
         availableAt: new Date(job.runAt),
         correlationId: job.correlation.correlationId,
       },
+      // ST1-013M: reset state/lockedUntil/attemptsMade on re-schedule, matching
+      // createGrowthLoopScheduler -- otherwise re-scheduling a reminder whose previous QueueJob
+      // row already reached COMPLETED/DEAD_LETTERED would leave it permanently unclaimable.
       update: {
+        state: "DELAYED",
         payload,
+        maxAttempts: 3,
+        attemptsMade: 0,
         scheduledAt: new Date(job.runAt),
         availableAt: new Date(job.runAt),
+        lockedUntil: null,
+        lastError: null,
         correlationId: job.correlation.correlationId,
       },
     });
   },
 });
 
-const createGrowthLoopScheduler = (queueJob: QueueJobDelegate) => ({
+export const createGrowthLoopScheduler = (queueJob: QueueJobDelegate) => ({
   async enqueueGrowthLoopEvaluation(job: { readonly tenantId: string; readonly campaignId: string; readonly trigger: string; readonly correlationId?: string | undefined; readonly replaySafe: true }): Promise<void> {
     if (queueJob.upsert === undefined) {
       throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "QueueJob upsert is not available for growth loop scheduling", status: 503, retryable: true, correlation: { correlationId: job.correlationId ?? job.campaignId } });
@@ -1432,7 +1440,11 @@ const createGrowthLoopScheduler = (queueJob: QueueJobDelegate) => ({
     await queueJob.upsert({
       where: { tenantId_queueName_jobKey: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobKey } },
       create: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobName: growthLoopJobType, jobKey, state: "WAITING", payload, maxAttempts: 3, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
-      update: { payload, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
+      // ST1-013M: the jobKey is fixed per tenant+campaign, so a re-evaluation reuses the same
+      // row via this update branch. Without resetting state/lockedUntil/attemptsMade, a row left
+      // COMPLETED or DEAD_LETTERED by a prior evaluation is never claimable again -- the campaign
+      // metadata would say growthLoopStatus: "QUEUED" while no worker ever picks the row back up.
+      update: { state: "WAITING", payload, maxAttempts: 3, attemptsMade: 0, scheduledAt: now, availableAt: now, lockedUntil: null, lastError: null, correlationId: job.correlationId ?? jobKey },
     });
   },
 });
@@ -1594,6 +1606,12 @@ if (isMainModule()) {
       sellerInvitations: new PrismaSellerInvitationRepository(persistence),
       opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence),
       usageMetering,
+      // ST1-013M: without this, a worker-driven marketplace.invite.send job that fails
+      // retryably calls recordInvitationResult, which silently drops the scheduled retry
+      // because no queue is configured to enqueue it into -- automatic retries would stop
+      // after the first attempt this process makes. Uses the same canonical producer as
+      // apps/web's routes (packages/services/src/invitation-runtime-job-queue.ts).
+      invitationQueue: createInvitationRuntimeJobQueue(repositories.queueJobs),
     });
     const acquisitionGovernanceService = new AcquisitionGovernanceService({
       governance: repositories.acquisitionGovernance,
@@ -1654,7 +1672,27 @@ if (isMainModule()) {
     process.once("SIGINT", () => { stopped = true; });
     process.once("SIGTERM", () => { stopped = true; });
 
-    const durableQueueNames = [...new Set(app.getRegisteredWorkers().map((definition) => definition.queue.queueName))];
+    // ST1-013M: only poll queues whose handler has a real service port configured above --
+    // event-ingestion, score-recomputation, notification, crm-conversion, revenue-attribution,
+    // render-conversion-retry, and publish are registered (createWorkerDefinitions registers a
+    // handler for every queue) but have no configured port in this bootstrap (their `services.*`
+    // dependency is either the always-throwing stub from createBootstrapOnlyWorkerServices, or
+    // simply never wired here). Polling them would claim any pre-existing QueueJob row for those
+    // queues and immediately fail it as "service port is not configured" instead of leaving it
+    // for a correctly-wired worker.
+    const configuredWorkerNames = new Set([
+      "claim-lifecycle-worker",
+      "marketplace-invite-worker",
+      "marketplace-discovery-worker",
+      "marketplace-qualification-worker",
+      "growth-loop-worker",
+      "scheduler-worker",
+    ]);
+    const durableQueueNames = [...new Set(
+      app.getRegisteredWorkers()
+        .filter((definition) => configuredWorkerNames.has(definition.name))
+        .map((definition) => definition.queue.queueName),
+    )];
     logger.info("worker durable queue poll loop starting", {
       tenantId: config.tenantId,
       workerId: config.workerId,

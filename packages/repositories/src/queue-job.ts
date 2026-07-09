@@ -32,7 +32,10 @@ export const queueJobStateSchema = z.enum([
 ]);
 export type QueueJobState = z.infer<typeof queueJobStateSchema>;
 
-const claimableStates = ["WAITING", "RETRY_SCHEDULED"] as const;
+// DELAYED covers claim-lifecycle reminders scheduled ahead of time (see
+// createClaimLifecycleScheduler): those rows must become claimable once availableAt passes,
+// exactly like WAITING/RETRY_SCHEDULED, or scheduled work is silently never picked up.
+const claimableStates = ["WAITING", "DELAYED", "RETRY_SCHEDULED"] as const;
 const activeState = "ACTIVE" as const;
 
 const isoDateSchema = z.string().datetime();
@@ -188,14 +191,17 @@ export class PrismaQueueJobRepository implements QueueJobRepository {
     for (const candidate of candidates) {
       const id = (candidate as { readonly id: string }).id;
       // Conditional UPDATE claim: two workers racing on the same row serialize at the DB, and
-      // the loser's WHERE (state still WAITING/RETRY_SCHEDULED/stale-ACTIVE) no longer matches
-      // once the winner's transaction commits, so `count` is 0 for the loser -- no double-claim.
+      // the loser's WHERE (state still WAITING/RETRY_SCHEDULED/DELAYED/stale-ACTIVE, and still
+      // due) no longer matches once the winner's transaction commits, so `count` is 0 for the
+      // loser -- no double-claim. availableAt is re-checked here (not just in the candidate
+      // read above) so a row another worker rescheduled to a future retry time between the read
+      // and this update can't be immediately reclaimed, which would bypass its backoff window.
       const result = await this.jobs.updateMany({
         where: {
           tenantId: input.tenantId,
           id,
           OR: [
-            { state: { in: [...claimableStates] } },
+            { state: { in: [...claimableStates] }, availableAt: { lte: input.now } },
             { state: activeState, lockedUntil: { lt: input.now } },
           ],
         },
@@ -233,6 +239,9 @@ export class PrismaQueueJobRepository implements QueueJobRepository {
 
   async recordDeadLetter(context: TenantScoped, input: RecordDeadLetterInput): Promise<void> {
     ensureContext(context);
+    if (context.tenantId !== input.tenantId) {
+      throw new PersistenceError({ code: "PERSISTENCE_TENANT_MISMATCH", message: "Dead letter job tenantId must match context", status: 403 });
+    }
     try {
       await this.deadLetters.create({
         data: dataWithDefined({

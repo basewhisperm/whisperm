@@ -36,11 +36,15 @@ export class PrismaQueueRuntime implements QueueRuntimePort {
   async deadLetter(contract: DeadLetterQueueContract): Promise<void> {
     const context: TenantScoped = { tenantId: contract.tenantId };
     const lastError = contract.error === undefined ? undefined : { code: contract.error.code, message: contract.error.message };
+    // The QueueJob row's own jobKey (not contract.job.idempotency.key, which is per-attempt --
+    // see buildJobContractFromQueueJobRow) is what DeadLetterJob's unique constraint correlates
+    // against.
+    const queueJobKey = typeof contract.job.metadata?.queueJobKey === "string" ? contract.job.metadata.queueJobKey : contract.job.idempotency.key;
     await this.deps.queueJobs.recordDeadLetter(context, {
       tenantId: contract.tenantId,
       queueName: contract.sourceQueueName,
       jobName: contract.job.jobType,
-      jobKey: contract.job.idempotency.key,
+      jobKey: queueJobKey,
       payload: contract.job.payload,
       reason: contract.reason,
       attemptsMade: contract.attempt,
@@ -56,10 +60,15 @@ const defaultDurableRetryPolicy = (tenantId: string, maxAttempts: number) => ({
   maxAttempts: Math.max(1, maxAttempts),
   backoff: { kind: "EXPONENTIAL" as const, baseDelayMs: 60_000, maxDelayMs: 3_600_000, multiplier: 2, jitter: false as const },
   retryableErrorCodes: [],
-  // Matches the convention already established for job fixtures elsewhere in this codebase
-  // (see apps/worker/test/worker.test.js): a validation or tenant-isolation failure is a
-  // configuration/data problem, not a transient one, and must not spin through retries.
-  nonRetryableErrorCodes: ["WORKER_RUNTIME_VALIDATION_FAILED", "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION"],
+  // ST1-013M: WORKER_RUNTIME_VALIDATION_FAILED is deliberately NOT denied here, even though it's
+  // also the code used for genuinely-invalid payloads -- it's the same code claim-reminder
+  // delivery uses for transient provider failures (see createClaimLifecycleHandler), and
+  // RuntimeJobService.enqueueRuntimeJob already validates every payload against its canonical
+  // contract before a row is ever persisted, so a truly-invalid payload reaching this consumer
+  // should be rare; if one does, it still terminates once maxAttempts is exhausted, just not on
+  // the first attempt. Tenant isolation violations are a data-integrity problem, never transient,
+  // and must not spin through retries.
+  nonRetryableErrorCodes: ["WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION"],
   deadLetterAfterMaxAttempts: true as const,
   replaySafe: true as const,
 });
@@ -78,7 +87,12 @@ export const buildJobContractFromQueueJobRow = (row: QueueJobRecord): JobContrac
     idempotency: {
       tenantId: row.tenantId,
       scope: "JOB",
-      key: row.jobKey,
+      // ST1-013M: scoped to this specific attempt (attemptsMade was already incremented at
+      // claim time), not just the row's stable jobKey. IdempotencyStore only releases a claim on
+      // success (see executeReplaySafeJob in worker-runtime); a key stable across attempts would
+      // leave a failed attempt's claim held forever, so the next RETRY_SCHEDULED attempt for the
+      // same row would come back DUPLICATE_SKIPPED and the handler would never actually re-run.
+      key: `${row.jobKey}:attempt:${row.attemptsMade}`,
       replaySafe: true,
       conflictPolicy: "SKIP_DUPLICATE",
     },
@@ -86,7 +100,10 @@ export const buildJobContractFromQueueJobRow = (row: QueueJobRecord): JobContrac
     retryPolicy: defaultDurableRetryPolicy(row.tenantId, row.maxAttempts),
     poisonPolicy: { tenantId: row.tenantId, enabled: false, maxValidationFailures: 5, maxConsecutiveFailures: 5, deadLetterOnPoison: true },
     createdAt: row.createdAt,
-    metadata: {},
+    // queueJobKey carries the QueueJob row's own stable jobKey through to PrismaQueueRuntime's
+    // deadLetter() callback, since idempotency.key above is intentionally per-attempt, not
+    // per-row (see the comment above).
+    metadata: { queueJobKey: row.jobKey },
   });
 };
 

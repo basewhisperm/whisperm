@@ -168,8 +168,13 @@ test('attempt count from the QueueJob row is honored: a job at its last attempt 
   assert.equal(queueJobs.deadLetters[0].reason, 'MAX_ATTEMPTS_EXCEEDED');
 });
 
-test('an invalid payload fails terminally instead of retrying', async () => {
-  const queueJobs = createFakeQueueJobs([baseRow({ payload: { event: { tenantId: 'tenant-1' } } })]);
+test('an invalid payload eventually fails terminally once the queue-configured maxAttempts is exhausted', async () => {
+  // ST1-013M: WORKER_RUNTIME_VALIDATION_FAILED is deliberately not in the default durable retry
+  // policy's deny-list (it's also the code claim-reminder delivery uses for transient provider
+  // failures), since RuntimeJobService.enqueueRuntimeJob already validates every payload before
+  // it is ever persisted -- a bad payload reaching this consumer is the rare exception, not the
+  // rule, and it still terminates once the producer's own maxAttempts is exhausted.
+  const queueJobs = createFakeQueueJobs([baseRow({ payload: { event: { tenantId: 'tenant-1' } }, maxAttempts: 1 })]);
   const app = createApp(async () => ({ id: 'never-called', tenantId: 'tenant-1' }), queueJobs);
   await app.start();
 
@@ -177,7 +182,60 @@ test('an invalid payload fails terminally instead of retrying', async () => {
 
   assert.equal(result.outcome, 'DEAD_LETTERED');
   assert.equal(queueJobs.deadLetters.length, 1);
+  assert.equal(queueJobs.deadLetters[0].reason, 'MAX_ATTEMPTS_EXCEEDED');
+  assert.equal(queueJobs.deadLetters[0].jobKey, 'row-1-key', 'DeadLetterJob must record the QueueJob row\'s own stable jobKey, not the per-attempt idempotency key');
+});
+
+test('WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION is always terminal, even on the first attempt', async () => {
+  const queueJobs = createFakeQueueJobs([baseRow({ maxAttempts: 5 })]);
+  const app = createApp(async () => { throw new WorkerRuntimeError({ code: 'WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION', message: 'tenant mismatch', status: 403 }); }, queueJobs);
+  await app.start();
+
+  const result = await claimAndProcessOneDurableQueueJob({ app, queueJobs, tenantId: 'tenant-1', queueNames: ['event.ingestion'], now: new Date('2026-01-02T00:00:00.000Z') });
+
+  assert.equal(result.outcome, 'DEAD_LETTERED');
   assert.equal(queueJobs.deadLetters[0].reason, 'NON_RETRYABLE_ERROR');
+});
+
+test('a retryable provider failure using the same code as payload validation still retries (e.g. claim reminder delivery)', async () => {
+  // Regression: a blanket deny-list on WORKER_RUNTIME_VALIDATION_FAILED would dead-letter a
+  // transient claim-reminder provider failure (which also uses this code) on the first attempt.
+  const queueJobs = createFakeQueueJobs([baseRow({ maxAttempts: 3 })]);
+  const app = createApp(async () => { throw new WorkerRuntimeError({ code: 'WORKER_RUNTIME_VALIDATION_FAILED', message: 'provider timeout', status: 502, retryable: true }); }, queueJobs);
+  await app.start();
+
+  const now = new Date('2026-01-02T00:00:00.000Z');
+  const result = await claimAndProcessOneDurableQueueJob({ app, queueJobs, tenantId: 'tenant-1', queueNames: ['event.ingestion'], now });
+
+  assert.equal(result.outcome, 'RETRY_SCHEDULED');
+  assert.ok(new Date(queueJobs.rows.get('row-1').availableAt).getTime() > now.getTime());
+});
+
+test('a retry attempt actually re-executes the handler instead of being skipped as a duplicate', async () => {
+  // Regression: buildJobContractFromQueueJobRow must scope idempotency.key to the attempt
+  // (attemptsMade), not just the row's stable jobKey -- InMemoryIdempotencyStore never releases
+  // a claim on failure, so a stable key would make every retry come back DUPLICATE_SKIPPED and
+  // the handler would never run a second time.
+  const queueJobs = createFakeQueueJobs([baseRow({ maxAttempts: 5 })]);
+  let callCount = 0;
+  const app = createApp(async () => {
+    callCount += 1;
+    if (callCount === 1) throwRetryableError();
+    return { id: 'ingestion-1', tenantId: 'tenant-1' };
+  }, queueJobs);
+  await app.start();
+
+  const firstAttemptAt = new Date('2026-01-02T00:00:00.000Z');
+  const first = await claimAndProcessOneDurableQueueJob({ app, queueJobs, tenantId: 'tenant-1', queueNames: ['event.ingestion'], now: firstAttemptAt });
+  assert.equal(first.outcome, 'RETRY_SCHEDULED');
+  assert.equal(callCount, 1);
+
+  const retryAt = new Date(queueJobs.rows.get('row-1').availableAt);
+  const second = await claimAndProcessOneDurableQueueJob({ app, queueJobs, tenantId: 'tenant-1', queueNames: ['event.ingestion'], now: retryAt });
+
+  assert.equal(callCount, 2, 'the handler must actually run again on retry, not be skipped as a duplicate');
+  assert.equal(second.outcome, 'COMPLETED');
+  assert.equal(queueJobs.rows.get('row-1').state, 'COMPLETED');
 });
 
 test('runDurableQueuePollLoop drains every claimable job then stops', async () => {
