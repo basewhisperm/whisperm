@@ -1,4 +1,9 @@
 import type { PrismaClient } from "@prisma/client";
+import {
+  checkInvitationProviderHealth,
+  createMessagingProviderRegistryFromEnv,
+  type InvitationProviderHealth,
+} from "@whisperm/provider-adapters";
 
 export type InvitationEligibility =
   | {
@@ -46,9 +51,17 @@ const contactValueForChannel = (
   return text(capture.contact?.phone) ?? text(metadata.sellerPhone) ?? text(metadata.phone) ?? text(metadata.primaryPhoneNumber);
 };
 
+export type InvitationProviderHealthChecker = (channel: InvitationChannel) => InvitationProviderHealth;
+
+/** ST1-013J: fresh registry per check -- cheap (no network calls at construction) and avoids
+ * reporting health computed from a stale snapshot of env taken at process start. */
+const defaultProviderHealthChecker: InvitationProviderHealthChecker = (channel) =>
+  checkInvitationProviderHealth({ channel, registry: createMessagingProviderRegistryFromEnv() });
+
 export async function resolveInvitationEligibility(
   prisma: EligibilityPrisma,
   input: { readonly tenantId: string; readonly captureId: string; readonly channel: InvitationChannel },
+  options: { readonly checkProviderHealth?: InvitationProviderHealthChecker } = {},
 ): Promise<InvitationEligibility> {
   const capture = await prisma.marketplaceCapture.findFirst({
     where: { tenantId: input.tenantId, id: input.captureId },
@@ -103,6 +116,19 @@ export async function resolveInvitationEligibility(
 
   if (contactValueForChannel(input.channel, capture) === null) {
     return { eligible: false, captureId: capture.id, code: "MISSING_CONTACT_CHANNEL", message: "Seller is missing a supported contact channel for this invitation." };
+  }
+
+  // ST1-013J: a seller having a reachable contact channel doesn't mean WhispeRM can actually
+  // deliver to it -- the provider for this channel (and the claim-link runtime it depends on)
+  // must independently prove itself healthy before an invite is allowed to enqueue or execute.
+  const providerHealth = (options.checkProviderHealth ?? defaultProviderHealthChecker)(input.channel);
+  if (!providerHealth.ok) {
+    return {
+      eligible: false,
+      captureId: capture.id,
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: "Invitation provider is not configured for this workspace/environment.",
+    };
   }
 
   const campaignId = capture.campaignMemberships[0]?.campaignId;

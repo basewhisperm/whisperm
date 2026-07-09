@@ -3,10 +3,12 @@
 // call-to-action on a Seller Card; every other action (view detail, edit) is
 // visually secondary. The label always comes from the ST1-013D canonical
 // workflow resolver -- never invented here.
-export function SellerNextAction({ label, enabled, busy, onRun }: {
+export function SellerNextAction({ label, enabled, busy, blockedReason, onRun }: {
   readonly label: string;
   readonly enabled: boolean;
   readonly busy: boolean;
+  /** ST1-013J: operator-facing reason the action is disabled -- e.g. "Invitation provider is not configured." */
+  readonly blockedReason?: string | undefined;
   readonly onRun: () => void;
 }) {
   return (
@@ -21,6 +23,9 @@ export function SellerNextAction({ label, enabled, busy, onRun }: {
       >
         {busy ? "Working…" : label}
       </button>
+      {!enabled && blockedReason ? (
+        <p className="mt-1.5 text-xs font-medium text-amber-700" data-testid="seller-primary-action-blocked-reason">{blockedReason}</p>
+      ) : null}
     </div>
   );
 }

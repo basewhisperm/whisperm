@@ -17,13 +17,15 @@ import { SellerThumbnail } from "@/components/marketplace-acquisition/seller-thu
 // out; every display decision (fallback copy, formatting, workflow stage)
 // comes from `sellerPresentationFromRecord`, never from raw record fields
 // read inline here.
-export function SellerCard({ record, listingCountOverride, selected, bulkSelected, bulkEligible, primaryActionEnabled, onBulkToggle, onSelect, onPrimaryAction }: {
+export function SellerCard({ record, listingCountOverride, selected, bulkSelected, bulkEligible, primaryActionEnabled, blockedReason, onBulkToggle, onSelect, onPrimaryAction }: {
   readonly record: SellerAcquisitionRecord;
   readonly listingCountOverride?: number | undefined;
   readonly selected: boolean;
   readonly bulkSelected: boolean;
   readonly bulkEligible: boolean;
   readonly primaryActionEnabled?: boolean | undefined;
+  /** ST1-013J: e.g. "Invitation provider is not configured." -- shown under the primary action when it's disabled for this reason, distinct from seller-ineligible states. */
+  readonly blockedReason?: string | undefined;
   readonly onBulkToggle: () => void;
   readonly onSelect: () => void;
   readonly onPrimaryAction: () => Promise<void>;
@@ -99,7 +101,7 @@ export function SellerCard({ record, listingCountOverride, selected, bulkSelecte
       </div>
 
       {/* Section 6 -- Primary action (large) and secondary action (small). */}
-      <SellerNextAction busy={busy} enabled={enabled} label={presentation.nextAction.label} onRun={() => void runPrimaryAction()} />
+      <SellerNextAction blockedReason={enabled ? undefined : blockedReason} busy={busy} enabled={enabled} label={presentation.nextAction.label} onRun={() => void runPrimaryAction()} />
 
       {record.deal?.deal.id ? (
         <Link
