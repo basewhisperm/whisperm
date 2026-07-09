@@ -97,6 +97,14 @@ export interface CampaignRuntimeInvitationQueue {
     readonly preferredChannel?: "WHATSAPP" | "SMS" | "EMAIL" | undefined;
     readonly correlationId?: string | undefined;
     readonly delayMs?: number | undefined;
+    /**
+     * ST1-013M: distinguishes a scheduled retry from the original dispatch job so a canonical
+     * queue producer can give each attempt its own idempotency key (e.g.
+     * `{executionId}:retry:{attempt}`) instead of colliding with the still-ACTIVE original job's
+     * key -- which would make the retry enqueue silently return the original row instead of
+     * creating a new one. Omitted for the initial dispatch.
+     */
+    readonly attempt?: number | undefined;
     readonly replaySafe: true;
   }): Promise<void> | void;
 }
@@ -803,6 +811,11 @@ export class CampaignRuntimeService {
         preferredChannel: input.channel,
         correlationId: typeof (context as { readonly correlation?: { readonly correlationId?: unknown } }).correlation?.correlationId === "string" ? (context as { readonly correlation?: { readonly correlationId?: string } }).correlation?.correlationId : input.executionId,
         delayMs: Date.parse(nextRetryAt ?? now) - Date.parse(now),
+        // ST1-013M: this execution's QueueJob row is still ACTIVE (the worker is mid-handler,
+        // inside the catch branch that led here) when this fires for a worker-driven attempt --
+        // an idempotency key shared with that row would make the retry enqueue return the
+        // in-flight row instead of creating a new one, silently dropping the retry.
+        attempt: retryCount,
         replaySafe: true,
       });
     }

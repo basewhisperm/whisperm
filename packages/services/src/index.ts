@@ -22,6 +22,7 @@ export type { SellerRelationshipMemory, SellerRelationshipMemoryServiceDependenc
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
 export { RuntimeJobService } from "./runtime-job-service.js";
 export type { RuntimeJobServiceDependencies, EnqueueRuntimeJobInput, ClaimNextRuntimeJobInput, FailRuntimeJobInput, RuntimeJobRetryPolicyInput } from "./runtime-job-service.js";
+export { createInvitationRuntimeJobQueue, createManualRetryInvitationRuntimeJobQueue } from "./invitation-runtime-job-queue.js";
 export {
   runtimeJobPayloadSchemas,
   marketplaceInviteQueueName,

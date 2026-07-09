@@ -182,6 +182,59 @@ test("claimNext does not claim an ACTIVE job whose lock has not yet expired (no 
   assert.equal(claimed, null);
 });
 
+test("claimNext claims a due DELAYED job (scheduled claim reminder becoming due)", async () => {
+  const prisma = createFakePrisma();
+  const repo = new PrismaQueueJobRepository(prisma);
+  const now = new Date("2026-07-09T00:00:00.000Z");
+  prisma.jobs.push({ id: "job-delayed", tenantId: "tenant-1", queueName: "marketplace.claim.lifecycle", jobName: "marketplace.claim.reminder", jobKey: "delayed", state: "DELAYED", payload: {}, attemptsMade: 0, maxAttempts: 3, availableAt: new Date(now.getTime() - 1000), lockedUntil: null, lastError: null, correlationId: "corr", createdAt: now, updatedAt: now });
+
+  const claimed = await repo.claimNext({ tenantId: "tenant-1", queueNames: ["marketplace.claim.lifecycle"], now, lockDurationMs: 60_000 });
+
+  assert.ok(claimed, "a due DELAYED job must be claimable, or scheduled claim-lifecycle work never runs");
+  assert.equal(claimed.id, "job-delayed");
+  assert.equal(claimed.state, "ACTIVE");
+});
+
+test("claimNext does not claim a DELAYED job whose availableAt is still in the future", async () => {
+  const prisma = createFakePrisma();
+  const repo = new PrismaQueueJobRepository(prisma);
+  const now = new Date("2026-07-09T00:00:00.000Z");
+  prisma.jobs.push({ id: "job-not-due", tenantId: "tenant-1", queueName: "marketplace.claim.lifecycle", jobName: "marketplace.claim.reminder", jobKey: "not-due", state: "DELAYED", payload: {}, attemptsMade: 0, maxAttempts: 3, availableAt: new Date(now.getTime() + 60_000), lockedUntil: null, lastError: null, correlationId: "corr", createdAt: now, updatedAt: now });
+
+  const claimed = await repo.claimNext({ tenantId: "tenant-1", queueNames: ["marketplace.claim.lifecycle"], now, lockDurationMs: 60_000 });
+
+  assert.equal(claimed, null);
+});
+
+test("claimNext does not reclaim a RETRY_SCHEDULED job another worker just rescheduled to a future backoff window", async () => {
+  // Regression: the candidate read (findMany) can see a row as claimable, but if another worker
+  // reschedules it to RETRY_SCHEDULED with a future availableAt before this worker's conditional
+  // UPDATE runs, the update must re-check availableAt too -- otherwise it bypasses the backoff.
+  const prisma = createFakePrisma();
+  const repo = new PrismaQueueJobRepository(prisma);
+  const now = new Date("2026-07-09T00:00:00.000Z");
+  const jobId = "job-rescheduled-mid-claim";
+  prisma.jobs.push({ id: jobId, tenantId: "tenant-1", queueName: "marketplace.invite", jobName: "marketplace.invite.send", jobKey: "rescheduled", state: "WAITING", payload: {}, attemptsMade: 0, maxAttempts: 3, availableAt: new Date(now.getTime() - 1000), lockedUntil: null, lastError: null, correlationId: "corr", createdAt: now, updatedAt: now });
+
+  // Simulate another worker's full claim -> fail -> reschedule cycle happening between this
+  // repository's candidate read and its conditional update by racing a concurrent reschedule
+  // against the claim call.
+  const originalFindMany = prisma.queueJob.findMany;
+  prisma.queueJob.findMany = async (args) => {
+    const result = await originalFindMany(args);
+    const row = prisma.jobs.find((candidate) => candidate.id === jobId);
+    if (row !== undefined) {
+      row.state = "RETRY_SCHEDULED";
+      row.availableAt = new Date(now.getTime() + 5 * 60_000); // 5 minutes in the future
+    }
+    return result;
+  };
+
+  const claimed = await repo.claimNext({ tenantId: "tenant-1", queueNames: ["marketplace.invite"], now, lockDurationMs: 60_000 });
+
+  assert.equal(claimed, null, "must not reclaim a row rescheduled to a future backoff window between read and update");
+});
+
 test("claimNext racing twice for the same row: the second caller gets nothing (no double-execution)", async () => {
   const prisma = createFakePrisma();
   const repo = new PrismaQueueJobRepository(prisma);
@@ -265,4 +318,24 @@ test("recordDeadLetter writes a DeadLetterJob row and is idempotent under the sa
   await repo.recordDeadLetter(tenant, input); // duplicate call must not throw or duplicate
 
   assert.equal(prisma.deadLetters.length, 1);
+});
+
+test("recordDeadLetter rejects a tenant mismatch instead of writing the dead letter under the wrong tenant", async () => {
+  const prisma = createFakePrisma();
+  const repo = new PrismaQueueJobRepository(prisma);
+
+  await assert.rejects(
+    () => repo.recordDeadLetter({ tenantId: "tenant-1" }, {
+      tenantId: "tenant-2",
+      queueName: "marketplace.invite",
+      jobName: "marketplace.invite.send",
+      jobKey: "dlq-key",
+      payload: {},
+      reason: "MAX_ATTEMPTS_EXCEEDED",
+      attemptsMade: 3,
+      correlationId: "corr-1",
+    }),
+    (error) => error instanceof PersistenceError && error.code === "PERSISTENCE_TENANT_MISMATCH",
+  );
+  assert.equal(prisma.deadLetters.length, 0);
 });

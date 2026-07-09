@@ -67,7 +67,7 @@ outcome of every row in `QueueJob` for the queues/job types `apps/worker` regist
 | Marketplace capture | `POST /api/marketplace-acquisition/captures` | `MarketplaceAcquisitionCaptureService.capture` (`packages/services/src/index.ts`) | `MarketplaceCapture` | none (synchronous) | `tenantId + listingUrl` (also `externalId` when present) — unique constraint on `MarketplaceCapture` | Request fails with a `ServiceError`; no partial capture row is left behind. |
 | Campaign assignment | Same request, immediately after capture, in `captures/route.ts` | `SellerAcquisitionCampaignService.addSeller` → `PrismaSellerAcquisitionCampaignRepository` | `SellerAcquisitionCampaignMember` | none (synchronous) | `tenantId + campaignId + marketplaceCaptureId` — `@@unique([tenantId, campaignId, marketplaceCaptureId])` on the model | `campaignAssignment: { status: "FAILED", error }` in the response + `MARKETPLACE_CAPTURE_CAMPAIGN_ASSIGNMENT_FAILED` audit log entry (see §5). Capture itself still succeeds. |
 | Invitation send (golden path) | `CampaignRuntimeService.executeInvitation` | `CampaignRuntimeService` → `CampaignRuntimeInvitationExecutor` (`createSellerInvitationExecutor`) | `CampaignRuntimeExecution`, `MarketplaceSellerInvitation` | none when executor configured; `marketplace.invite` / `marketplace.invite.send` as a fallback | `tenantId:campaignId:opportunityId` execution create is not itself deduped — see "duplicate invitation" note below; provider send is guarded by `MarketplaceSellerInvitation` row + provider idempotency where the provider adapter supports it | `CampaignRuntimeExecution.status = FAILED`, `metrics.invitationExecutionState = DEAD_LETTERED` after retries exhausted. |
-| Invitation retry (automatic) | `CampaignRuntimeService.recordInvitationResult` | `CampaignRuntimeService` → `CampaignRuntimeInvitationQueue` (`createInvitationRuntimeJobQueue`, `apps/web/src/lib/marketplace-acquisition/runtime-job-queue.ts`) | `QueueJob` (`marketplace.invite` / `marketplace.invite.send`) | `marketplace.invite.send` | `campaign-runtime:{tenantId}:{executionId}` | `QueueJobState.DEAD_LETTERED` + `DeadLetterJob` row after `maxAttempts`. |
+| Invitation retry (automatic) | `CampaignRuntimeService.recordInvitationResult` | `CampaignRuntimeService` → `CampaignRuntimeInvitationQueue` (`createInvitationRuntimeJobQueue`, `packages/services/src/invitation-runtime-job-queue.ts`, shared by `apps/web` routes and `apps/worker`'s bootstrap) | `QueueJob` (`marketplace.invite` / `marketplace.invite.send`) | `marketplace.invite.send` | `campaign-runtime:{tenantId}:{executionId}` for the initial dispatch; `campaign-runtime:{tenantId}:{executionId}:retry:{attempt}` for each scheduled retry — a retry must not reuse the initial dispatch's key, since that job's `QueueJob` row is still `ACTIVE` while the retry is being scheduled (the worker is mid-handler), and `enqueue()` would return that in-flight row instead of creating a new one. `availableAt` is set from the computed backoff delay, not left at `now()`. | `QueueJobState.DEAD_LETTERED` + `DeadLetterJob` row after `maxAttempts`. |
 | Invitation retry (manual) | `POST .../campaigns/{campaignId}/runtime/executions/{executionId}/retry` | `CampaignRuntimeService.retryInvitationExecution` | `CampaignRuntimeExecution` | none when executor configured; `marketplace.invite.send` fallback via `createManualRetryInvitationRuntimeJobQueue` | `campaign-runtime:{tenantId}:{executionId}:manual-retry:{timestamp}` (fallback path only) | Response `{ ok: false, error }`, execution `status = FAILED`. |
 | Claim reminder scheduling | `MarketplaceClaimLifecycleService.scheduleClaimLifecycle` | `apps/worker`'s `createClaimLifecycleScheduler` | `QueueJob` (`marketplace.claim.lifecycle`) | `marketplace.claim.reminder` / `marketplace.claim.expire` / `marketplace.claim.intelligence` | `job.dedupeKey` (per invitation + reminder type) | `QueueJobState.DEAD_LETTERED` + `DeadLetterJob` row. |
 | Claim reminder / expiry execution | Worker consumer, `createClaimLifecycleHandler` | `MarketplaceClaimLifecycleService` | `MarketplaceClaimToken` | (consumes the above) | same as above | Handler throws a retryable `WorkerRuntimeError`; consumer applies retry/dead-letter per §4. |
@@ -213,10 +213,11 @@ neither field is present".
 |---|---|---|
 | Capture | `tenantId + listingUrl` (`externalId` when present) | `MarketplaceCapture` unique constraints |
 | Campaign assignment | `tenantId + campaignId + marketplaceCaptureId` | `SellerAcquisitionCampaignMember.@@unique([tenantId, campaignId, marketplaceCaptureId])` |
-| Invitation queue enqueue | `tenantId + queueName + jobKey` (`campaign-runtime:{tenantId}:{executionId}`) | `QueueJob.@@unique([tenantId, queueName, jobKey])`, enforced by `PrismaQueueJobRepository.enqueue` (duplicate returns the existing row instead of erroring or duplicating) |
-| Claim reminder scheduling | `job.dedupeKey` | Same `QueueJob` unique constraint, via `queueJob.upsert` |
-| Growth loop evaluation | `{tenantId}:{campaignId}` | Same, via `queueJob.upsert` |
-| Worker job claim | `(tenantId, id)` + state precondition | `PrismaQueueJobRepository.claimNext`'s conditional `updateMany` — see §8 |
+| Invitation queue enqueue | `tenantId + queueName + jobKey`, distinct per dispatch/attempt: `campaign-runtime:{tenantId}:{executionId}` initially, `...:retry:{attempt}` per scheduled retry | `QueueJob.@@unique([tenantId, queueName, jobKey])`, enforced by `PrismaQueueJobRepository.enqueue` (duplicate returns the existing row instead of erroring or duplicating) |
+| Claim reminder scheduling | `job.dedupeKey` | Same `QueueJob` unique constraint, via `queueJob.upsert` (which resets `state`/`lockedUntil`/`attemptsMade` on re-schedule so a previously-terminal row becomes claimable again) |
+| Growth loop evaluation | `{tenantId}:{campaignId}` | Same, via `queueJob.upsert` (same reset-on-update behavior) |
+| Worker job claim | `(tenantId, id)` + state + `availableAt` precondition | `PrismaQueueJobRepository.claimNext`'s conditional `updateMany` — see §8 |
+| Worker job execution (per attempt) | `{jobKey}:attempt:{attemptsMade}` | `IdempotencyStore.claim`/`complete` via `buildJobContractFromQueueJobRow` — scoped per attempt so a claim held by a failed attempt (never released) doesn't suppress the next retry — see §8 |
 | Provider send | Delegated to the provider adapter where it supports idempotency keys; not re-implemented here | `packages/provider-adapters` |
 
 ## 8. Durable consumer behavior (worker restart / duplicate worker / stale lock)
@@ -234,18 +235,33 @@ WHERE id = $1 AND tenantId = $2
 
 Two workers racing the same row serialize at the database row lock; the loser's `WHERE` no longer
 matches once the winner's transaction commits (`state` moved to `ACTIVE`, or `lockedUntil` moved
-into the future), so `updateMany`'s `count` is `0` for the loser — **no double-execution.**
+into the future), so `updateMany`'s `count` is `0` for the loser — **no double-execution.** The
+conditional `updateMany` re-checks `availableAt` (not just `state`) for the WAITING/DELAYED/
+RETRY_SCHEDULED branch, so a row another worker rescheduled to a future backoff window between the
+candidate read and this update can't be immediately reclaimed and have its backoff bypassed.
 
 A worker that crashes mid-job leaves the row `ACTIVE` with a `lockedUntil` that eventually passes;
 the next `claimNext` call (from the same process after restart, or a different one) reclaims it
 via the second branch of that `WHERE` — **no lost job.**
+
+`DELAYED` (scheduled claim reminders) is claimable exactly like `WAITING`/`RETRY_SCHEDULED` once
+`availableAt` passes — it is not a separate "not yet real" state.
+
+**Idempotency key is scoped per attempt, not per row.** `buildJobContractFromQueueJobRow` sets
+`idempotency.key` to `` `${row.jobKey}:attempt:${row.attemptsMade}` ``, not the row's own stable
+`jobKey`. `IdempotencyStore.complete()` (the release) is only called by `executeReplaySafeJob` on
+success; a claim is never released on failure. Using the row's stable `jobKey` as the idempotency
+key would mean the first failed attempt's claim is held forever, and every subsequent
+`RETRY_SCHEDULED` re-claim of the same row would come back `DUPLICATE_SKIPPED` without the handler
+ever running again. The row's own `jobKey` is still threaded through to `DeadLetterJob` (via
+`JobContract.metadata.queueJobKey`) so dead letters correlate against the right row.
 
 ## 9. Retriable vs. terminal failures
 
 | Failure | Retriable? | Where decided |
 |---|---|---|
 | Payload fails `runtime-job-contracts.ts` schema at enqueue time | Terminal — the enqueue call itself throws; no `QueueJob` row is ever created | `RuntimeJobService.enqueueRuntimeJob` |
-| Payload fails the handler's own schema at execution time (defense in depth) | Terminal by default (`WORKER_RUNTIME_VALIDATION_FAILED` is in the default durable retry policy's `nonRetryableErrorCodes`) | `defaultDurableRetryPolicy` (`apps/worker/src/durable-queue-runtime.ts`) |
+| Payload fails the handler's own schema at execution time (defense in depth) | Retriable up to `maxAttempts`, same as any other `WorkerRuntimeError` — see rationale below | `defaultDurableRetryPolicy` (`apps/worker/src/durable-queue-runtime.ts`) |
 | Tenant isolation violation | Terminal | Same default policy |
 | Provider/service unavailable, network errors, other `WorkerRuntimeError`s | Retriable up to `QueueJob.maxAttempts`, exponential backoff (60s base, 1h cap, ×2 multiplier) | `computeRetryDecision` (`@whisperm/worker-runtime`) |
 | `maxAttempts` exhausted | Terminal — `DEAD_LETTERED` + `DeadLetterJob` row | `computeRetryDecision` / `PrismaQueueRuntime.deadLetter` |
@@ -253,8 +269,23 @@ via the second branch of that `WHERE` — **no lost job.**
 
 Known limitation carried over from the pre-existing `worker-runtime` error model: `WorkerRuntimeError`
 only has 7 coarse error codes, and `WORKER_RUNTIME_VALIDATION_FAILED` is used both for "a
-dependency isn't configured" (semantically transient) and "the payload/state is invalid"
-(semantically terminal). This slice does not redesign that taxonomy (out of scope — a much larger
-change with its own risk); the default durable retry policy treats that code as terminal, which is
-the safer default for a code whose two meanings disagree, and matches the convention already
-established in `apps/worker/test/worker.test.js`'s own default job fixture.
+dependency isn't configured" (transient) and "the payload/state is invalid" (terminal) — and also
+for genuinely transient provider failures during claim reminder delivery (`createClaimLifecycleHandler`
+wraps provider errors with this code while setting `retryable` from the underlying error). Because
+of that last case, `defaultDurableRetryPolicy` deliberately does **not** deny this code by default
+(an earlier draft of this slice did, and a review caught that it would dead-letter transient claim-
+reminder provider failures on the first attempt) — only `WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION`
+is denied outright. Since `RuntimeJobService.enqueueRuntimeJob` already validates every payload
+against its canonical contract before a row is ever persisted, a genuinely-invalid payload reaching
+this consumer should be rare; if one does, it still terminates once `maxAttempts` is exhausted,
+just not on the first attempt. This slice does not redesign the underlying error-code taxonomy
+(out of scope — a much larger change with its own risk).
+
+**Worker polls only queues with a configured service port.** `createWorkerDefinitions` registers a
+handler for every queue (including `event.ingestion`, `crm.scoring`, `notification`,
+`marketplace.crm.conversion`, `marketplace.revenue.attribution`, `render.conversion.retry`, and
+`publish`), but the `isMainModule()` bootstrap only wires real service ports for claim lifecycle,
+seller invitation, marketplace discovery/qualification, and growth loop. The poll loop's queue
+list is restricted to just those — polling an unconfigured queue would claim any pre-existing row
+there and immediately fail it as "service port is not configured" instead of leaving it for a
+correctly-wired worker (e.g. a future dedicated CRM-conversion worker process).
