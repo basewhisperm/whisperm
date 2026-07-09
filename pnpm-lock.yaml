@@ -270,6 +270,9 @@ importers:
       '@whisperm/types':
         specifier: workspace:*
         version: link:../types
+      '@whisperm/worker-runtime':
+        specifier: workspace:*
+        version: link:../worker-runtime
       resend:
         specifier: ^6.12.4
         version: 6.12.4

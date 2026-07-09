@@ -5,45 +5,18 @@ import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { PersistenceError, PrismaCampaignRuntimeExecutionRepository, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
-import { CampaignRuntimeService, type CampaignRuntimeInvitationQueue } from "@whisperm/services";
+import { CampaignRuntimeService } from "@whisperm/services";
 import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
+import { createManualRetryInvitationRuntimeJobQueue } from "@/lib/marketplace-acquisition/runtime-job-queue";
 
 interface RouteContext { readonly params: { readonly campaignId: string; readonly executionId: string } }
 
 const errorResponse = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 
-const invitationQueue = (): CampaignRuntimeInvitationQueue => ({
-  async enqueueInvitation(input) {
-    await prisma.queueJob.create({
-      data: {
-        tenantId: input.tenantId,
-        queueName: "marketplace.invite",
-        jobName: "marketplace.invite.send",
-        jobKey: `campaign-runtime:${input.tenantId}:${input.executionId}:manual-retry:${Date.now()}`,
-        payload: {
-          tenantId: input.tenantId,
-          campaignId: input.campaignId,
-          opportunityId: input.opportunityId,
-          captureId: input.opportunityId,
-          executionId: input.executionId,
-          invitationId: input.invitationId ?? null,
-          preferredChannel: input.preferredChannel ?? "WHATSAPP",
-          channel: input.preferredChannel ?? "WHATSAPP",
-          correlationId: input.correlationId ?? input.executionId,
-          delayMs: input.delayMs ?? 0,
-          replaySafe: true,
-        },
-        maxAttempts: 3,
-        correlationId: input.correlationId ?? input.executionId,
-      },
-    });
-  },
-});
-
 const runtimeService = () => new CampaignRuntimeService({
   campaigns: new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient),
   executions: new PrismaCampaignRuntimeExecutionRepository(prisma as unknown as PrismaPersistenceClient),
-  invitationQueue: invitationQueue(),
+  invitationQueue: createManualRetryInvitationRuntimeJobQueue(prisma as unknown as PrismaPersistenceClient),
   invitationExecutor: createSellerInvitationExecutor(prisma as unknown as PrismaPersistenceClient),
 });
 

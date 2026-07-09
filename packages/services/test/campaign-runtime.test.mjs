@@ -266,6 +266,36 @@ test('manual retry is tenant-scoped and dispatches through existing queue path',
   assert.equal(calls[0].opportunityId, 'capture-1');
 });
 
+test('ST1-013M: retry falls back to metrics.selectedChannel when metrics.channel is missing (does not default to WhatsApp)', async () => {
+  const executions = new MemoryExecutions();
+  const calls = [];
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, invitationQueue: { async enqueueInvitation(input) { calls.push(input); } } });
+  // Execution never reached recordInvitationResult (e.g. async worker path was never drained),
+  // so metrics.channel is absent -- only the originally selected channel is known.
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'FAILED', metrics: { invitationExecutionState: 'FAILED', opportunityId: 'capture-1', invitationId: 'invite-1', selectedChannel: 'EMAIL', retryCount: 1, maxRetries: 3 } });
+  await service.retryInvitationExecution({ tenantId: 'tenant-1' }, created.id);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].preferredChannel, 'EMAIL');
+});
+
+test('ST1-013M: retry only falls back to WhatsApp when neither metrics.channel nor metrics.selectedChannel is present', async () => {
+  const executions = new MemoryExecutions();
+  const sendCalls = [];
+  // Uses invitationExecutor (the synchronous golden path, ST-003) rather than invitationQueue:
+  // retryInvitationExecution's own last-resort `channel ?? "WHATSAPP"` fallback is on the
+  // dispatchInvitationInline path (line ~867); the queue-enqueue fallback path passes `channel`
+  // through as-is and lets the queue producer apply its own documented default instead.
+  const service = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions,
+    invitationExecutor: { async sendInvitation(context, input) { sendCalls.push(input); return { invitationId: 'invite-1', status: 'SENT' }; } },
+  });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'FAILED', metrics: { invitationExecutionState: 'FAILED', opportunityId: 'capture-1', invitationId: 'invite-1', retryCount: 1, maxRetries: 3 } });
+  await service.retryInvitationExecution({ tenantId: 'tenant-1' }, created.id);
+  assert.equal(sendCalls.length, 1);
+  assert.equal(sendCalls[0].channel, 'WHATSAPP');
+});
+
 test('due scheduled campaigns start scheduled executions and advance schedule', async () => {
   const source = campaign({ scheduleEnabled: true, scheduleCadence: 'DAILY', scheduleTimezone: 'UTC', nextRunAt: '2026-06-29T00:00:00.000Z', lastRunAt: null });
   const campaigns = new MemoryCampaigns([source]);

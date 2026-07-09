@@ -163,6 +163,10 @@ const transpileRoute = (routePath, tempDir) => {
     const file = transpileWebLib('lib/marketplace-acquisition/invitation-eligibility.ts', tempDir, 'invitation-eligibility.mjs');
     source = source.replace(/from "@\/lib\/marketplace-acquisition\/invitation-eligibility"/gu, `from "${file}"`);
   }
+  if (source.includes('@/lib/marketplace-acquisition/runtime-job-queue')) {
+    const file = transpileWebLib('lib/marketplace-acquisition/runtime-job-queue.ts', tempDir, 'runtime-job-queue.mjs');
+    source = source.replace(/from "@\/lib\/marketplace-acquisition\/runtime-job-queue"/gu, `from "${file}"`);
+  }
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
   const file = join(tempDir, `${relative(new URL('../src/app/api/marketplace-acquisition', import.meta.url).pathname, routePath).replaceAll('/', '-')}.mjs`);
   writeFileSync(file, output);
@@ -225,6 +229,10 @@ const createHarness = async (state, options = {}) => {
     'export class PersistenceError extends Error { constructor(input = {}) { super(input.message ?? "Persistence error"); this.code = input.code ?? "PERSISTENCE_ERROR"; this.status = input.status ?? 500; this.details = input.details; } }',
     'export class PrismaSellerAcquisitionCampaignRepository { constructor() { return { async findById() { return { id: "campaign-1", tenantId: "tenant-1", name: "Test Campaign", status: "ACTIVE", createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z", metadata: {} }; } }; } }',
     'export class PrismaCampaignRuntimeExecutionRepository { constructor() { return { async create(scope, input) { const row = { id: "execution-1", ...input, createdAt: "2026-06-15T00:00:00.000Z", updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; }, async findById(scope, id) { const row = globalThis.__routeState.execution; return row && row.id === id ? row : null; }, async update(scope, id, input) { const row = { ...(globalThis.__routeState.execution ?? { id, tenantId: scope.tenantId, campaignId: "campaign-1" }), ...input, id, updatedAt: "2026-06-15T00:00:00.000Z" }; globalThis.__routeState.execution = row; return row; } }; } }',
+    // ST1-013M: these E2E tests always use the synchronous invitationExecutor path (a real
+    // provider is configured), so CampaignRuntimeInvitationQueue.enqueueInvitation is never
+    // actually called -- this stub only needs to exist so runtime-job-queue.ts can construct one.
+    'export class PrismaQueueJobRepository { constructor(prisma) { this.prisma = prisma; } }',
     'export const createPrismaRepositories = () => globalThis.__routeRepositories;',
     '',
   ].join('\n'));

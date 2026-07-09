@@ -20,6 +20,23 @@ export type { GrowthLoopStatus, GrowthLoopTrigger, GrowthRecommendation, GrowthR
 export type { SellerAcquisitionHealthStatus, SellerAcquisitionMissingRequirement, SellerAcquisitionNextAction, SellerAcquisitionRecord, SellerAcquisitionRecordDependencies } from "./seller-acquisition-records.js";
 export type { SellerRelationshipMemory, SellerRelationshipMemoryServiceDependencies, SellerRelationshipTimelineEvent } from "./seller-relationship-memory.js";
 export type { SellerAcquisitionAnalyticsDependencies, SellerAcquisitionAnalyticsRepository } from "./acquisition-analytics.js";
+export { RuntimeJobService } from "./runtime-job-service.js";
+export type { RuntimeJobServiceDependencies, EnqueueRuntimeJobInput, ClaimNextRuntimeJobInput, FailRuntimeJobInput, RuntimeJobRetryPolicyInput } from "./runtime-job-service.js";
+export {
+  runtimeJobPayloadSchemas,
+  marketplaceInviteQueueName,
+  marketplaceInviteSendJobType,
+  marketplaceInviteSendPayloadSchema,
+  marketplaceClaimLifecycleQueueName,
+  marketplaceClaimReminderJobType,
+  marketplaceClaimExpireJobType,
+  marketplaceClaimIntelligenceJobType,
+  claimLifecycleJobPayloadSchema,
+  growthLoopQueueName,
+  growthLoopJobType,
+  growthLoopJobPayloadSchema,
+} from "./runtime-job-contracts.js";
+export type { MarketplaceInviteSendPayload, ClaimLifecycleJobPayload, GrowthLoopJobPayload } from "./runtime-job-contracts.js";
 export { MarketplaceClaimLifecycleService, ClaimLifecycleServiceError } from "./claim-lifecycle.js";
 export { CrmConversionRuntimeService, CrmConversionRuntimeError, crmConversionJobType, crmConversionQueueName } from "./crm-conversion-runtime.js";
 export type { CrmConversionContext, CrmConversionJob, CrmConversionResult, CrmConversionRuntimeDependencies, CrmConversionStatus, CrmConversionFailureCode } from "./crm-conversion-runtime.js";

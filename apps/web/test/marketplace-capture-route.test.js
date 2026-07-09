@@ -57,6 +57,21 @@ const repositories = (state) => ({
   },
   activities: { async create(scope, input) { state.activities.push(input); return record({ id: `activity-${state.activities.length}`, ...input }); } },
   auditLogs: { async append(scope, input) { state.audits.push(input); return record({ id: `audit-${state.audits.length}`, ...input }); } },
+  sellerAcquisitionCampaigns: {
+    async addSeller(scope, input) {
+      const mode = state.campaignAssignmentMode ?? 'SUCCEED';
+      if (mode === 'CONFLICT') {
+        throw new state.PersistenceError({ code: 'PERSISTENCE_CONFLICT', message: 'Seller already belongs to this acquisition campaign', status: 409 });
+      }
+      if (mode === 'FAIL') {
+        throw new state.PersistenceError({ code: 'PERSISTENCE_NOT_FOUND', message: 'Seller acquisition campaign not found', status: 404 });
+      }
+      state.campaignMembers = state.campaignMembers ?? [];
+      const member = record({ id: `member-${state.campaignMembers.length + 1}`, ...input });
+      state.campaignMembers.push(member);
+      return member;
+    },
+  },
 });
 
 const usageEventRepository = (state) => ({
@@ -89,7 +104,7 @@ const createHarness = async (state) => {
   writeFileSync(join(tempDir, 'request-body.mjs'), 'export class RequestBodyError extends Error { constructor(message, status = 400, code) { super(message); this.status = status; this.code = code; } }\nexport const readJsonBody = async (request) => request.json();\n');
   writeFileSync(join(tempDir, 'repositories.mjs'), [
     'export class PrismaAcquisitionUsageEventRepository { constructor() { return globalThis.__captureRouteUsageEvents; } }',
-    'export class PrismaSellerAcquisitionCampaignRepository { constructor() { return { async addSeller(scope, input) { globalThis.__captureRouteState.state.campaignMembers = globalThis.__captureRouteState.state.campaignMembers ?? []; const member = { id: `member-${globalThis.__captureRouteState.state.campaignMembers.length + 1}`, ...input }; globalThis.__captureRouteState.state.campaignMembers.push(member); return member; } }; } }',
+    'export class PersistenceError extends Error { constructor(input) { super(input.message); this.name = "PersistenceError"; this.code = input.code; this.status = input.status; this.details = input.details; } }',
     'export const createPrismaRepositories = () => globalThis.__captureRouteRepositories;',
     '',
   ].join('\n'));
@@ -108,6 +123,12 @@ const createHarness = async (state) => {
   globalThis.__captureRouteState = { tenantContext: { tenant: { id: tenantId }, tenantUserId: 'user-1' }, state };
   globalThis.__captureRouteUsageEvents = usageEventRepository(state);
   globalThis.__captureRouteRepositories = { ...repositories(state), acquisitionUsageEvents: globalThis.__captureRouteUsageEvents };
+
+  // The route's `error instanceof PersistenceError` check must compare against the exact
+  // PersistenceError class it imports (the stub below, since @whisperm/repositories is
+  // replaced) -- so the fake sellerAcquisitionCampaigns.addSeller throws this same class.
+  const repositoriesModule = await import(join(tempDir, 'repositories.mjs'));
+  state.PersistenceError = repositoriesModule.PersistenceError;
 
   const routePath = new URL('../src/app/api/marketplace-acquisition/captures/route.ts', import.meta.url).pathname;
   const source = sharedModuleReplacements(tempDir)(readFileSync(routePath, 'utf8'));
@@ -180,6 +201,67 @@ test('repeated capture API calls for the same listing do not duplicate Contact/D
     assert.equal(state.deals.size, 1);
     assert.equal(state.usageEvents.filter((event) => event.eventType === 'CRM_CONVERSION_CREATED').length, 1, 'CRM_CONVERSION_CREATED must fire exactly once across repeated capture calls');
     assert.equal(state.usageEvents.filter((event) => event.eventType === 'SELLER_QUALIFIED').length, 1, 'SELLER_QUALIFIED must fire exactly once across repeated capture calls');
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('ST1-013M: campaign assignment success is reported explicitly and capture still succeeds', async () => {
+  const state = makeState();
+  const harness = await createHarness(state);
+  try {
+    const response = await harness.route.POST(makeRequest({ campaignId: 'campaign-1', listingUrl: 'https://market.example/listings/4', title: 'Bike', priceText: 'USD 100', sellerPhone: '+15555550111', sellerName: 'Campaign Seller' }));
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.ok, true);
+    assert.deepEqual(body.campaignAssignment, { status: 'COMPLETED' });
+    assert.equal(state.campaignMembers.length, 1);
+    assert.equal(state.campaignMembers[0].campaignId, 'campaign-1');
+    assert.equal(state.campaignMembers[0].marketplaceCaptureId, body.data.captureId);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('ST1-013M: campaign assignment failure is visible in the response and durably audited, capture still succeeds', async () => {
+  const state = makeState();
+  state.campaignAssignmentMode = 'FAIL';
+  const harness = await createHarness(state);
+  try {
+    const response = await harness.route.POST(makeRequest({ campaignId: 'campaign-missing', listingUrl: 'https://market.example/listings/5', title: 'Bike', priceText: 'USD 100', sellerPhone: '+15555550112', sellerName: 'Failed Assignment Seller' }));
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.ok, true, 'capture must still be reported successful even when campaign assignment fails');
+    assert.equal(typeof body.data.captureId, 'string');
+    assert.equal(body.campaignAssignment.status, 'FAILED');
+    assert.equal(body.campaignAssignment.error.code, 'PERSISTENCE_NOT_FOUND');
+    assert.equal(state.campaignMembers, undefined, 'a failed assignment must never create a campaign seller record');
+    const assignmentFailureAudits = state.audits.filter((entry) => entry.action === 'MARKETPLACE_CAPTURE_CAMPAIGN_ASSIGNMENT_FAILED');
+    assert.equal(assignmentFailureAudits.length, 1, 'assignment failure must be recorded durably in the audit log, not swallowed');
+    assert.equal(assignmentFailureAudits[0].targetId, body.data.captureId);
+    assert.equal(assignmentFailureAudits[0].metadata.campaignId, 'campaign-missing');
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('ST1-013M: duplicate campaign assignment is idempotent, not reported as a failure', async () => {
+  const state = makeState();
+  const harness = await createHarness(state);
+  try {
+    const payload = { campaignId: 'campaign-1', listingUrl: 'https://market.example/listings/6', title: 'Bike', priceText: 'USD 100', sellerPhone: '+15555550113', sellerName: 'Duplicate Assignment Seller' };
+    const first = await (await harness.route.POST(makeRequest(payload))).json();
+    assert.deepEqual(first.campaignAssignment, { status: 'COMPLETED' });
+
+    // Simulate the underlying unique-constraint conflict a second identical assignment attempt
+    // would hit against the same (tenantId, campaignId, marketplaceCaptureId) row.
+    state.campaignAssignmentMode = 'CONFLICT';
+    const second = await (await harness.route.POST(makeRequest(payload))).json();
+    assert.equal(second.ok, true);
+    assert.deepEqual(second.campaignAssignment, { status: 'ALREADY_ASSIGNED' });
+    assert.equal(state.campaignMembers.length, 1, 'duplicate assignment must not create a second campaign seller record');
+    const assignmentFailureAudits = state.audits.filter((entry) => entry.action === 'MARKETPLACE_CAPTURE_CAMPAIGN_ASSIGNMENT_FAILED');
+    assert.equal(assignmentFailureAudits.length, 0, 'an idempotent duplicate is not a failure and must not be audited as one');
   } finally {
     harness.cleanup();
   }

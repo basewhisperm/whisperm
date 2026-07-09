@@ -11,8 +11,9 @@ import {
   PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { CampaignRuntimeService, type CampaignRuntimeInvitationQueue } from "@whisperm/services";
+import { CampaignRuntimeService } from "@whisperm/services";
 import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
+import { createInvitationRuntimeJobQueue } from "@/lib/marketplace-acquisition/runtime-job-queue";
 import { resolveInvitationEligibility, type InvitationEligibility } from "@/lib/marketplace-acquisition/invitation-eligibility";
 
 const bulkInviteRequestSchema = z.object({
@@ -23,39 +24,11 @@ const bulkInviteRequestSchema = z.object({
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
 
-const invitationQueue = (): CampaignRuntimeInvitationQueue => ({
-  async enqueueInvitation(input) {
-    await prisma.queueJob.create({
-      data: {
-        tenantId: input.tenantId,
-        queueName: "marketplace.invite",
-        jobName: "marketplace.invite.send",
-        jobKey: `campaign-runtime:${input.tenantId}:${input.executionId}`,
-        payload: {
-          tenantId: input.tenantId,
-          campaignId: input.campaignId,
-          opportunityId: input.opportunityId,
-          captureId: input.opportunityId,
-          executionId: input.executionId,
-          invitationId: input.invitationId ?? null,
-          preferredChannel: input.preferredChannel ?? "WHATSAPP",
-          channel: input.preferredChannel ?? "WHATSAPP",
-          correlationId: input.correlationId ?? input.executionId,
-          delayMs: input.delayMs ?? 0,
-          replaySafe: true,
-        },
-        maxAttempts: 3,
-        correlationId: input.correlationId ?? input.executionId,
-      },
-    });
-  },
-});
-
 const runtimeService = () => new CampaignRuntimeService({
   campaigns: new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient),
   executions: new PrismaCampaignRuntimeExecutionRepository(prisma as unknown as PrismaPersistenceClient),
   sellerInvitations: new PrismaSellerInvitationRepository(prisma as unknown as PrismaPersistenceClient),
-  invitationQueue: invitationQueue(),
+  invitationQueue: createInvitationRuntimeJobQueue(prisma as unknown as PrismaPersistenceClient),
   invitationExecutor: createSellerInvitationExecutor(prisma as unknown as PrismaPersistenceClient),
 });
 
