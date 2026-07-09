@@ -13,12 +13,16 @@
     "seed:pipelines": "node prisma/seed.mjs",
     "build": "pnpm -r --if-present run build",
     "seed:founding-workspaces": "node prisma/founding-workspaces-seed.mjs",
-    "seed:demo": "node prisma/demo-seed.mjs",
+    "seed:demo": "node scripts/seed-demo.mjs",
     "test:seed:demo": "node --test prisma/demo-seed.test.mjs",
     "typecheck:strict": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/notification-runtime build && pnpm --filter @whisperm/repositories build && pnpm -r --if-present run typecheck",
     "postinstall": "prisma generate",
     "tenant-feature": "node scripts/tenant-feature.mjs",
-    "test:tenant-feature": "node --test scripts/tenant-feature.test.mjs"
+    "test:tenant-feature": "node --test scripts/tenant-feature.test.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "test:doctor": "node --test scripts/doctor.test.mjs",
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "check:bootstrap": "pnpm run doctor && pnpm --filter @whisperm/types build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/web typecheck"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
