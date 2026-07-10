@@ -261,25 +261,29 @@ ever running again. The row's own `jobKey` is still threaded through to `DeadLet
 | Failure | Retriable? | Where decided |
 |---|---|---|
 | Payload fails `runtime-job-contracts.ts` schema at enqueue time | Terminal — the enqueue call itself throws; no `QueueJob` row is ever created | `RuntimeJobService.enqueueRuntimeJob` |
-| Payload fails the handler's own schema at execution time (defense in depth) | Retriable up to `maxAttempts`, same as any other `WorkerRuntimeError` — see rationale below | `defaultDurableRetryPolicy` (`apps/worker/src/durable-queue-runtime.ts`) |
+| Payload fails the handler's own schema at execution time (defense in depth) | Terminal (`WORKER_RUNTIME_VALIDATION_FAILED` is denied in the default durable retry policy) | `defaultDurableRetryPolicy` (`apps/worker/src/durable-queue-runtime.ts`) |
+| Acquisition governance DENY decision (`enforceAcquisitionGovernance`) | Terminal — same code and same reason | Same default policy |
 | Tenant isolation violation | Terminal | Same default policy |
-| Provider/service unavailable, network errors, other `WorkerRuntimeError`s | Retriable up to `QueueJob.maxAttempts`, exponential backoff (60s base, 1h cap, ×2 multiplier) | `computeRetryDecision` (`@whisperm/worker-runtime`) |
+| Provider/service unavailable, network errors, other `WorkerRuntimeError`s (except the two rows above) | Retriable up to `QueueJob.maxAttempts`, exponential backoff (60s base, 1h cap, ×2 multiplier) | `computeRetryDecision` (`@whisperm/worker-runtime`) |
 | `maxAttempts` exhausted | Terminal — `DEAD_LETTERED` + `DeadLetterJob` row | `computeRetryDecision` / `PrismaQueueRuntime.deadLetter` |
 | Campaign assignment failure on capture | Not retried automatically — surfaced in the response + audited (§5); the caller can re-submit the assignment, which is idempotent | `captures/route.ts` |
 
 Known limitation carried over from the pre-existing `worker-runtime` error model: `WorkerRuntimeError`
-only has 7 coarse error codes, and `WORKER_RUNTIME_VALIDATION_FAILED` is used both for "a
-dependency isn't configured" (transient) and "the payload/state is invalid" (terminal) — and also
-for genuinely transient provider failures during claim reminder delivery (`createClaimLifecycleHandler`
-wraps provider errors with this code while setting `retryable` from the underlying error). Because
-of that last case, `defaultDurableRetryPolicy` deliberately does **not** deny this code by default
-(an earlier draft of this slice did, and a review caught that it would dead-letter transient claim-
-reminder provider failures on the first attempt) — only `WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION`
-is denied outright. Since `RuntimeJobService.enqueueRuntimeJob` already validates every payload
-against its canonical contract before a row is ever persisted, a genuinely-invalid payload reaching
-this consumer should be rare; if one does, it still terminates once `maxAttempts` is exhausted,
-just not on the first attempt. This slice does not redesign the underlying error-code taxonomy
-(out of scope — a much larger change with its own risk).
+only has 7 coarse error codes, and `WORKER_RUNTIME_VALIDATION_FAILED` is used for at least three
+different things: "the payload/state is invalid" (terminal), "an acquisition-governance DENY
+decision" (terminal), and "a genuinely transient provider failure during claim reminder delivery"
+(`createClaimLifecycleHandler` wraps provider errors with this code while setting `retryable` from
+the underlying error — that instance-level flag exists, but `computeRetryDecision` only ever
+consults the error *code*, never that flag). An earlier revision of this slice relaxed the deny-list
+to let the third case retry, on the reasoning that `RuntimeJobService.enqueueRuntimeJob` already
+validates every payload before it's ever persisted, so a genuinely-invalid payload reaching this
+consumer should be rare. A follow-up review caught that this also made the *terminal* cases (DENY
+decisions, malformed job types) retry repeatedly instead of dead-lettering immediately, which is a
+worse failure mode than the transient case dead-lettering a bit too eagerly. The deny-list has been
+restored (`WORKER_RUNTIME_VALIDATION_FAILED` is terminal again); the claim-reminder transient-
+provider-failure case is a known, accepted limitation of this slice, not fixed here — properly
+fixing it means giving `worker-runtime` a distinct error code for "transient dependency failure"
+separate from "validation failed", which is a larger, separate change than this slice's scope.
 
 **Worker polls only queues with a configured service port.** `createWorkerDefinitions` registers a
 handler for every queue (including `event.ingestion`, `crm.scoring`, `notification`,
@@ -289,3 +293,15 @@ seller invitation, marketplace discovery/qualification, and growth loop. The pol
 list is restricted to just those — polling an unconfigured queue would claim any pre-existing row
 there and immediately fail it as "service port is not configured" instead of leaving it for a
 correctly-wired worker (e.g. a future dedicated CRM-conversion worker process).
+
+**Re-enqueue/re-schedule preserves an in-flight `ACTIVE` lock.** `createGrowthLoopScheduler` and
+`createClaimLifecycleScheduler` upsert into a fixed-`jobKey` `QueueJob` row (one row per
+tenant+campaign, or per reminder dedupe key). If a caller re-triggers evaluation/scheduling for
+that same key while the existing row is `ACTIVE` (a worker is mid-handler for it right now),
+`shouldResetQueueJobOnReenqueue` (`apps/worker/src/index.ts`) leaves `state`/`lockedUntil`/
+`attemptsMade` untouched — only `payload`/`scheduledAt`/`availableAt`/`correlationId` are
+refreshed. Resetting `state` back to `WAITING`/`DELAYED` on an `ACTIVE` row would let the poller
+claim it a second time concurrently, and the in-flight worker's own completion transition (which
+requires `state = ACTIVE` as its precondition) would then fail with a conflict. Re-enqueuing while
+the row is in any other state (`WAITING`/`DELAYED`/`RETRY_SCHEDULED`, or terminal
+`COMPLETED`/`DEAD_LETTERED`/`CANCELLED`) still resets it to a fresh claimable state as before.
