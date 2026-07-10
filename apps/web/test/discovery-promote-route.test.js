@@ -275,6 +275,7 @@ const servicesUrl = import.meta.resolve('@whisperm/services');
 const transpileRoute = (routePath, tempDir) => {
   const source = readFileSync(routePath, 'utf8')
     .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
+    .replace(/from "@\/app\/api\/_lib\/api-response"/gu, `from "${join(tempDir, 'api-response.mjs')}"`)
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
     .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
@@ -293,6 +294,11 @@ const createHarness = async (state) => {
   const tempDir = join(tmpdir(), `whisperm-discovery-promote-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(tempDir);
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\nexport class NextRequest extends Request {}\n');
+  writeFileSync(join(tempDir, 'api-response.mjs'), [
+    'import { NextResponse } from "./next-server.mjs";',
+    'export function apiSuccess(data, init) { return NextResponse.json({ ok: true, data }, init); }',
+    'export function apiFailure(status, code, message, details) { return NextResponse.json({ ok: false, error: details === undefined ? { code, message } : { code, message, details } }, { status }); }',
+  ].join('\n'));
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantContextForCurrentUser = async () => globalThis.__promoteRouteState.tenant === null ? null : { tenant: globalThis.__promoteRouteState.tenant, tenantUserId: "tenant-user-1" };\n');
   writeFileSync(join(tempDir, 'tenant-features.mjs'), [
     'export const featureNotEnabledResponse = () => Response.json({ ok: false, error: { message: "Seller Acquisition add-on is not enabled for this workspace." } }, { status: 403 });',

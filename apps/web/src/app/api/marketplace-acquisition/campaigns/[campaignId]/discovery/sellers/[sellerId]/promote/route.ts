@@ -1,4 +1,5 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
+import { apiFailure, apiSuccess } from "@/app/api/_lib/api-response";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
@@ -10,16 +11,13 @@ import {
 import { MarketplaceDiscoveryService, DiscoveryPromotionError, ServiceError } from "@whisperm/services";
 import { createAcquisitionServiceBundle } from "@/lib/marketplace-acquisition/acquisition-services";
 
-const errorResponse = (message: string, status: number) =>
-  NextResponse.json({ ok: false, error: { message } }, { status });
-
 interface RouteContext {
   readonly params: { readonly campaignId: string; readonly sellerId: string };
 }
 
 export async function POST(_request: NextRequest, context: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
-  if (!tenantContext) return errorResponse("Unauthorized", 401);
+  if (!tenantContext) return apiFailure(401, "UNAUTHORIZED", "Unauthorized");
 
   const { tenant, tenantUserId } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
@@ -45,14 +43,15 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       campaignId,
       sellerId,
     );
-    return NextResponse.json({ ok: true, data: result });
+    return apiSuccess(result);
   } catch (error) {
     if (error instanceof DiscoveryPromotionError) {
-      return errorResponse(error.message, error.status);
+      const code = error.code === "CAMPAIGN_MISMATCH" ? "SELLER_NOT_IN_CAMPAIGN" : error.code === "SELLER_NOT_FOUND" || error.code === "CAMPAIGN_NOT_FOUND" ? "NOT_FOUND" : error.code === "INSUFFICIENT_CAPTURE_DATA" ? "VALIDATION_ERROR" : error.code === "CAPTURE_ASSIGNMENT_FAILED" ? "CAPTURE_ASSIGNMENT_FAILED" : "INTERNAL_ERROR";
+      return apiFailure(error.status, code, error.message);
     }
     if (error instanceof ServiceError) {
-      return errorResponse(error.message, error.status);
+      return apiFailure(error.status, "INTERNAL_ERROR", error.message);
     }
-    return errorResponse("Failed to add seller to campaign.", 500);
+    return apiFailure(500, "INTERNAL_ERROR", "Failed to add seller to campaign.");
   }
 }
