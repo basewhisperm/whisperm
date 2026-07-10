@@ -250,7 +250,9 @@ test('retryable failures schedule a retry instead of dead-lettering', async () =
           multiplier: 2,
           jitter: false,
         },
-        retryableErrorCodes: ['WORKER_RUNTIME_VALIDATION_FAILED'],
+        // ST1-013M: a plain thrown Error is wrapped as WORKER_RUNTIME_TRANSIENT_FAILURE (see
+        // executeReplaySafeJob in @whisperm/worker-runtime), not WORKER_RUNTIME_VALIDATION_FAILED.
+        retryableErrorCodes: ['WORKER_RUNTIME_TRANSIENT_FAILURE'],
         nonRetryableErrorCodes: [],
         deadLetterAfterMaxAttempts: true,
         replaySafe: true,
