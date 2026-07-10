@@ -9,7 +9,7 @@
     "lint": "next lint",
     "typecheck": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/worker-runtime build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build && prisma generate --schema=../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.js",
-    "test:contracts": "node --test test/*.contract.test.js",
+    "test:contracts": "pnpm --filter @whisperm/types build && pnpm --filter @whisperm/worker-runtime build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/services build && node --test test/*.contract.test.js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:required": "WHISPERM_REQUIRE_E2E=true playwright test",

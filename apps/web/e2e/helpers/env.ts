@@ -54,7 +54,18 @@ export function assertAuthenticatedRunIsConfigured(): void {
 
 // ST1-013N: minimum set of env vars a real (non-skipped) golden-path E2E run needs. Kept in
 // one place so both the required-mode gate below and docs/CI wiring agree on the list.
-export const REQUIRED_E2E_ENV_VARS = ["E2E_USER_EMAIL", "E2E_USER_PASSWORD", "DATABASE_URL"] as const;
+//
+// NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY / CLERK_SECRET_KEY are included here (not just in
+// assertAuthenticatedRunIsConfigured) so a required-mode run fails at config-load time with the
+// exact missing variable names, rather than passing this gate and only failing later -- and less
+// legibly -- inside global-setup.ts/Clerk sign-in.
+export const REQUIRED_E2E_ENV_VARS = [
+  "E2E_USER_EMAIL",
+  "E2E_USER_PASSWORD",
+  "DATABASE_URL",
+  "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+  "CLERK_SECRET_KEY",
+] as const;
 
 /**
  * Required-mode is CI by default, or an explicit local opt-in via WHISPERM_REQUIRE_E2E=true.

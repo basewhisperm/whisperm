@@ -110,6 +110,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://whisperm:whisperm@localhost:5432/whisperm_e2e
       WHISPERM_REQUIRE_E2E: "true"
+      # The webServer block in apps/web/playwright.config.ts starts `pnpm dev` against this same
+      # localhost URL; without it set here, missingRequiredE2eEnv() (apps/web/e2e/helpers/env.ts)
+      # always reports "NEXT_PUBLIC_APP_URL or PLAYWRIGHT_BASE_URL" missing even once the secrets
+      # below are configured, and the job can never pass.
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
       E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
       E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
@@ -136,6 +141,13 @@ jobs:
 
       - name: Apply database migrations
         run: pnpm --filter @whisperm/web migrate:deploy
+
+      # The web app (via `pnpm dev` in playwright.config.ts's webServer) and the E2E specs both
+      # import @whisperm/services et al. by their package export, which resolves to dist/index.js
+      # -- same prerequisite chain as apps/web/package.json's own `build`/`typecheck` scripts.
+      # Without this, `pnpm dev` fails with ERR_MODULE_NOT_FOUND before Playwright ever starts.
+      - name: Build workspace packages
+        run: pnpm --filter @whisperm/types build && pnpm --filter @whisperm/worker-runtime build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build
 
       - name: Required-mode golden-path E2E
         run: pnpm test:e2e:required
