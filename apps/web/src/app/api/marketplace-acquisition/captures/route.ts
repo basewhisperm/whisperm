@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
+import { apiFailure, apiSuccess } from "@/app/api/_lib/api-response";
+import { apiFailureFromError } from "@/app/api/_lib/service-error";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { PersistenceError } from "@whisperm/repositories";
-import { SellerAcquisitionCampaignService, ServiceError } from "@whisperm/services";
+import { SellerAcquisitionCampaignService } from "@whisperm/services";
 import { createAcquisitionServiceBundle } from "@/lib/marketplace-acquisition/acquisition-services";
 
 type CampaignAssignmentResult =
@@ -75,22 +77,9 @@ const portfolioListings = (value: unknown) =>
       }).filter((item) => item.listingUrl !== undefined || item.marketplaceListingId !== undefined)
     : undefined;
 
-const errorResponse = (message: string, status: number, code?: string, details?: unknown) =>
-  NextResponse.json(
-    {
-      ok: false,
-      error: {
-        message,
-        ...(code === undefined ? {} : { code }),
-        ...(details === undefined ? {} : { details }),
-      },
-    },
-    { status },
-  );
-
 export async function POST(request: NextRequest) {
   const tenantContext = await getTenantContextForCurrentUser();
-  if (!tenantContext) return errorResponse("Unauthorized", 401);
+  if (!tenantContext) return apiFailure(401, "UNAUTHORIZED", "Unauthorized");
   const { tenant, tenantUserId } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
@@ -99,8 +88,8 @@ export async function POST(request: NextRequest) {
   try {
     body = safeRecord(await readJsonBody(request, { maxBytes: 96_000 }));
   } catch (error) {
-    if (error instanceof RequestBodyError) return errorResponse(error.message, error.status, error.code);
-    return errorResponse("Capture request body must be valid JSON.", 400);
+    if (error instanceof RequestBodyError) return apiFailure(error.status, "VALIDATION_ERROR", error.message);
+    return apiFailure(400, "VALIDATION_ERROR", "Capture request body must be valid JSON.");
   }
 
   const campaignId = clean(body.campaignId);
@@ -109,7 +98,7 @@ export async function POST(request: NextRequest) {
   const pageUrl = validUrl(body.pageUrl);
 
   if (listingUrl === undefined && sourceUrl === undefined) {
-    return errorResponse("Capture requires a valid listingUrl or sourceUrl.", 400);
+    return apiFailure(400, "VALIDATION_ERROR", "Capture requires a valid listingUrl or sourceUrl.");
   }
 
   const rawExtract = safeRecord(body.rawExtract);
@@ -214,12 +203,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ ok: true, data: result, ...(campaignAssignment === undefined ? {} : { campaignAssignment }) });
+    return apiSuccess({ ...result, ...(campaignAssignment === undefined ? {} : { campaignAssignment }) });
   } catch (error) {
-    if (error instanceof ServiceError) {
-      return errorResponse(error.message, error.status, error.code, error.details);
-    }
-
-    return errorResponse("Capture failed.", 500);
+    return apiFailureFromError(error, "Capture failed.");
   }
 }
