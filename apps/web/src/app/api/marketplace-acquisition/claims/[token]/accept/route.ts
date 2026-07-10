@@ -14,7 +14,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     const result = await createSellerClaimService().accept({ correlation: correlation(request) }, params.token, body);
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof Error && error.name === "ZodError") return NextResponse.json({ error: "acceptedTerms must be true" }, { status: 400 });
+    if (error instanceof Error && error.name === "ZodError") return NextResponse.json({ error: "acceptedTerms must be true", code: "VALIDATION_ERROR" }, { status: 400 });
     if (error instanceof SellerClaimPortalError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     return NextResponse.json({ error: "Claim acceptance failed" }, { status: 500 });
   }

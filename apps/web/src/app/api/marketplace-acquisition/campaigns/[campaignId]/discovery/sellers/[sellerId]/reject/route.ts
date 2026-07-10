@@ -21,8 +21,11 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
-  const campaignId = decodeURIComponent(context.params.campaignId);
-  const sellerId = decodeURIComponent(context.params.sellerId);
+  const campaignId = decodeURIComponent(context.params.campaignId).trim();
+  const sellerId = decodeURIComponent(context.params.sellerId).trim();
+  if (campaignId.length === 0) return apiFailure(400, "VALIDATION_ERROR", "campaignId is required.");
+  if (sellerId.length === 0) return apiFailure(400, "VALIDATION_ERROR", "sellerId is required.");
+
   const repo = new PrismaMarketplaceDiscoveryRepository(prisma as unknown as PrismaPersistenceClient);
   const service = new MarketplaceDiscoveryService({ discoveryRepo: repo });
 

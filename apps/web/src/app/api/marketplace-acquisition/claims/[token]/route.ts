@@ -11,6 +11,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json(preview);
   } catch (error) {
     if (error instanceof SellerClaimPortalError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    if (error instanceof Error && error.name === "ZodError") return NextResponse.json({ error: "Malformed claim token", code: "VALIDATION_ERROR" }, { status: 400 });
     return NextResponse.json({ error: "Claim preview failed" }, { status: 500 });
   }
 }
