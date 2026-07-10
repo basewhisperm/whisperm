@@ -49,6 +49,7 @@ import {
   normalizeInboundEvent,
   scoreRecomputationJobPayloadSchema,
   scoreRecomputationQueueContract,
+  PersistenceError,
   type ScoreRecomputationResult,
   type CorrelationMetadata,
   type InboundEvent,
@@ -486,6 +487,12 @@ const eventIngestionPayloadSchema = z.object({
   receivedAt: z.string().datetime().optional(),
 }).strict();
 
+// ST1-013M: PersistenceError codes that describe a condition expected to clear on its own (a
+// lease/lock another worker holds, a transient store outage). Every other PersistenceError code
+// (NOT_FOUND, VALIDATION_FAILED, CONFLICT, TENANT_MISMATCH, ...) is just as deterministic as a
+// ZodError and must dead-letter immediately rather than retry until maxAttempts.
+const transientPersistenceErrorCodes = new Set(["PERSISTENCE_TRANSIENT", "PERSISTENCE_LEASE_CONFLICT", "PERSISTENCE_LOCK_CONFLICT"]);
+
 const toRuntimeError = (error: unknown, correlation: CorrelationMetadata): WorkerRuntimeError => {
   if (error instanceof WorkerRuntimeError) {
     return error;
@@ -494,6 +501,10 @@ const toRuntimeError = (error: unknown, correlation: CorrelationMetadata): Worke
   // see the matching classification in executeReplaySafeJob's catch (@whisperm/worker-runtime).
   if (error instanceof z.ZodError) {
     return new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: error.message, status: 400, retryable: false, correlation });
+  }
+  if (error instanceof PersistenceError) {
+    const retryable = transientPersistenceErrorCodes.has(error.code);
+    return new WorkerRuntimeError({ code: retryable ? "WORKER_RUNTIME_TRANSIENT_FAILURE" : "WORKER_RUNTIME_VALIDATION_FAILED", message: error.message, status: error.status, retryable, correlation });
   }
   return new WorkerRuntimeError({
     code: "WORKER_RUNTIME_TRANSIENT_FAILURE",
@@ -657,12 +668,10 @@ const growthLoopSummary = (campaign: unknown): Readonly<Record<string, unknown>>
   };
 };
 
-const transientGrowthLoopErrorCodes = new Set(["PERSISTENCE_TRANSIENT", "PERSISTENCE_LEASE_CONFLICT", "PERSISTENCE_LOCK_CONFLICT"]);
-
 const mapGrowthLoopError = (error: unknown, correlation: CorrelationMetadata): WorkerRuntimeError => {
   if (error instanceof WorkerRuntimeError) return error;
   const code = typeof error === "object" && error !== null && "code" in error ? String((error as { readonly code: unknown }).code) : undefined;
-  const retryable = code !== undefined && transientGrowthLoopErrorCodes.has(code);
+  const retryable = code !== undefined && transientPersistenceErrorCodes.has(code);
   return new WorkerRuntimeError({
     // ST1-013M: the code itself must carry retryability -- computeRetryDecision only inspects
     // the code, never this instance's `retryable` flag (see workerRuntimeErrorCodeValues).
@@ -933,7 +942,13 @@ export const createDiscoveryExecutionHandler = (services: WorkerServices): Worke
     }
     const result = await services.discoveryExecution.execute({ ...payload, correlation: context.correlation });
     if (result.status === "FAILED") {
-      const retryable = result.metrics?.retryable !== false;
+      // ST1-013M: retryability must be explicit, not assumed. A discovery failure with no
+      // metrics.retryable flag at all (e.g. DiscoveryExecutionWorker's
+      // DISCOVERY_CAMPAIGN_NOT_FOUND, which reports only { discoveryStatus: "FAILED" }) is a
+      // deterministic domain failure, not a transient one -- it must dead-letter immediately like
+      // it always did before WORKER_RUNTIME_TRANSIENT_FAILURE existed, not retry until
+      // maxAttempts. Only an explicit `retryable: true` opts into the transient-failure retry path.
+      const retryable = result.metrics?.retryable === true;
       throw new WorkerRuntimeError({ code: retryable ? "WORKER_RUNTIME_TRANSIENT_FAILURE" : "WORKER_RUNTIME_VALIDATION_FAILED", message: result.errorMessage ?? "Discovery execution failed", status: 502, retryable, correlation: context.correlation });
     }
     return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId, ...(result.metrics ?? {}), correlationId: context.correlation.correlationId });

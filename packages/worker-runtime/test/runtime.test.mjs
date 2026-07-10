@@ -16,6 +16,8 @@ import {
   shouldTreatAsPoisonMessage,
   transitionJobLifecycleState
 } from "../dist/index.js";
+import { z } from "zod";
+import { PersistenceError } from "@whisperm/types";
 
 const correlation = { correlationId: "corr-1", requestId: "req-1", traceId: "trace-1" };
 const now = new Date("2026-01-01T00:00:00.000Z");
@@ -351,4 +353,94 @@ test("replay-safe execution propagates idempotency store transient failures", as
   );
 
   assert.deepEqual(calls, ["claim"]);
+});
+
+const defaultIdempotencyPort = () => ({
+  claim: () => ({ status: "CLAIMED" }),
+  complete: () => {},
+});
+
+test("replay-safe execution classifies a ZodError from the handler as terminal (WORKER_RUNTIME_VALIDATION_FAILED)", async () => {
+  const payloadSchema = z.object({ requiredField: z.string() }).strict();
+
+  await assert.rejects(
+    async () =>
+      executeReplaySafeJob({
+        job: { ...baseJob, approval: undefined, workflow: undefined },
+        lease: baseLease,
+        token: baseToken,
+        handler: { execute: (context) => payloadSchema.parse(context.job.payload) },
+        ports: { clock: { now: () => now }, idempotency: defaultIdempotencyPort() },
+      }),
+    (error) =>
+      error instanceof WorkerRuntimeError &&
+      error.code === "WORKER_RUNTIME_VALIDATION_FAILED" &&
+      error.retryable === false,
+  );
+});
+
+test("replay-safe execution classifies a transient PersistenceError from the handler as retriable (WORKER_RUNTIME_TRANSIENT_FAILURE)", async () => {
+  await assert.rejects(
+    async () =>
+      executeReplaySafeJob({
+        job: { ...baseJob, approval: undefined, workflow: undefined },
+        lease: baseLease,
+        token: baseToken,
+        handler: {
+          execute: () => {
+            throw new PersistenceError({ code: "PERSISTENCE_LEASE_CONFLICT", message: "row is leased by another worker", status: 409 });
+          },
+        },
+        ports: { clock: { now: () => now }, idempotency: defaultIdempotencyPort() },
+      }),
+    (error) =>
+      error instanceof WorkerRuntimeError &&
+      error.code === "WORKER_RUNTIME_TRANSIENT_FAILURE" &&
+      error.retryable === true,
+  );
+});
+
+test("replay-safe execution classifies a terminal PersistenceError (e.g. PERSISTENCE_NOT_FOUND) from the handler as terminal (WORKER_RUNTIME_VALIDATION_FAILED)", async () => {
+  // ST1-013M round 5: a stale executionId hitting recordDiscoveryResult/recordQualificationResult
+  // throws PersistenceError PERSISTENCE_NOT_FOUND -- that will never resolve on retry and must
+  // dead-letter immediately, not be swept into the generic transient-failure classification.
+  await assert.rejects(
+    async () =>
+      executeReplaySafeJob({
+        job: { ...baseJob, approval: undefined, workflow: undefined },
+        lease: baseLease,
+        token: baseToken,
+        handler: {
+          execute: () => {
+            throw new PersistenceError({ code: "PERSISTENCE_NOT_FOUND", message: "campaign runtime execution not found", status: 404 });
+          },
+        },
+        ports: { clock: { now: () => now }, idempotency: defaultIdempotencyPort() },
+      }),
+    (error) =>
+      error instanceof WorkerRuntimeError &&
+      error.code === "WORKER_RUNTIME_VALIDATION_FAILED" &&
+      error.retryable === false,
+  );
+});
+
+test("replay-safe execution classifies any other uncaught exception as retriable (WORKER_RUNTIME_TRANSIENT_FAILURE)", async () => {
+  await assert.rejects(
+    async () =>
+      executeReplaySafeJob({
+        job: { ...baseJob, approval: undefined, workflow: undefined },
+        lease: baseLease,
+        token: baseToken,
+        handler: {
+          execute: () => {
+            throw new Error("unexpected dependency hiccup");
+          },
+        },
+        ports: { clock: { now: () => now }, idempotency: defaultIdempotencyPort() },
+      }),
+    (error) =>
+      error instanceof WorkerRuntimeError &&
+      error.code === "WORKER_RUNTIME_TRANSIENT_FAILURE" &&
+      error.retryable === true,
+  );
 });

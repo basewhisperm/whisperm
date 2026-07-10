@@ -262,9 +262,12 @@ ever running again. The row's own `jobKey` is still threaded through to `DeadLet
 |---|---|---|
 | Payload fails `runtime-job-contracts.ts` schema at enqueue time | Terminal — the enqueue call itself throws; no `QueueJob` row is ever created | `RuntimeJobService.enqueueRuntimeJob` |
 | Payload fails the handler's own schema at execution time (defense in depth) — a `ZodError` | Terminal (`WORKER_RUNTIME_VALIDATION_FAILED`, denied in the default durable retry policy) | `executeReplaySafeJob` catch (`@whisperm/worker-runtime`) classifies `ZodError` explicitly |
+| A repository call throws `PersistenceError` with a terminal code (`PERSISTENCE_NOT_FOUND`, `PERSISTENCE_VALIDATION_FAILED`, `PERSISTENCE_CONFLICT`, `PERSISTENCE_TENANT_MISMATCH`, ...) — e.g. a stale `executionId` | Terminal (`WORKER_RUNTIME_VALIDATION_FAILED`) | Same `executeReplaySafeJob` catch classifies `PersistenceError` by code |
+| A repository call throws `PersistenceError` with a transient code (`PERSISTENCE_TRANSIENT`, `PERSISTENCE_LEASE_CONFLICT`, `PERSISTENCE_LOCK_CONFLICT`) | Retriable — `WORKER_RUNTIME_TRANSIENT_FAILURE` | Same classification |
+| Discovery execution reports `status: "FAILED"` without an explicit `metrics.retryable: true` | Terminal (`WORKER_RUNTIME_VALIDATION_FAILED`) — omitted retryability defaults to terminal, not transient | `createDiscoveryExecutionHandler` (`apps/worker/src/index.ts`) |
 | Acquisition governance DENY decision (`enforceAcquisitionGovernance`) | Terminal — same code and same reason | `defaultDurableRetryPolicy` (`apps/worker/src/durable-queue-runtime.ts`) |
 | Tenant isolation violation | Terminal | Same default policy |
-| Unconfigured/unreachable service port, provider delivery failure, any other uncaught (non-`ZodError`) exception | Retriable up to `QueueJob.maxAttempts`, exponential backoff (60s base, 1h cap, ×2 multiplier) — `WORKER_RUNTIME_TRANSIENT_FAILURE`, absent from the deny-list | `computeRetryDecision` (`@whisperm/worker-runtime`) |
+| Unconfigured/unreachable service port, provider delivery failure, discovery execution with `metrics.retryable: true`, any other uncaught (non-`ZodError`, non-terminal-`PersistenceError`) exception | Retriable up to `QueueJob.maxAttempts`, exponential backoff (60s base, 1h cap, ×2 multiplier) — `WORKER_RUNTIME_TRANSIENT_FAILURE`, absent from the deny-list | `computeRetryDecision` (`@whisperm/worker-runtime`) |
 | `maxAttempts` exhausted | Terminal — `DEAD_LETTERED` + `DeadLetterJob` row | `computeRetryDecision` / `PrismaQueueRuntime.deadLetter` |
 | Campaign assignment failure on capture | Not retried automatically — surfaced in the response + audited (§5); the caller can re-submit the assignment, which is idempotent | `captures/route.ts` |
 
@@ -282,11 +285,33 @@ retriable case its own code, deliberately left off `defaultDurableRetryPolicy`'s
 "service port is not configured" throw across `apps/worker/src/index.ts`, the claim-reminder
 provider-failure branch in `createClaimLifecycleServicePort`, `mapGrowthLoopError`'s
 `PERSISTENCE_TRANSIENT` branch, and `executeReplaySafeJob`'s catch-all for any uncaught exception
-now use it instead. The one exception inside that catch-all: a `ZodError` (a handler's own
-`schema.parse(context.job.payload)` rejecting the payload) is still classified as
-`WORKER_RUNTIME_VALIDATION_FAILED` — that failure is deterministic and will recur identically on
-every retry, so it must dead-letter immediately rather than burn through `maxAttempts` on a payload
-that can never become valid.
+now use it instead.
+
+That catch-all cannot just default every uncaught exception to `WORKER_RUNTIME_TRANSIENT_FAILURE`,
+though — two more deterministic-failure shapes had to be carved out explicitly, the same way
+`ZodError` is:
+
+- A `PersistenceError` (`@whisperm/types`) means a repository call rejected the operation for a
+  domain reason, not an infrastructure one. `PERSISTENCE_NOT_FOUND` (e.g. `recordDiscoveryResult`/
+  `recordQualificationResult` called against a stale `executionId`), `PERSISTENCE_VALIDATION_FAILED`,
+  `PERSISTENCE_CONFLICT`, and similar codes are exactly as deterministic as a malformed payload and
+  must dead-letter immediately. Only `PERSISTENCE_TRANSIENT`/`PERSISTENCE_LEASE_CONFLICT`/
+  `PERSISTENCE_LOCK_CONFLICT` (the same set `mapGrowthLoopError` already used) describe something
+  that can clear on its own. `apps/worker/src/index.ts`'s `toRuntimeError` mirrors this
+  classification for defense-in-depth, even though `executeReplaySafeJob` normalizes every error
+  before it reaches that fallback in the current call graph.
+- `createDiscoveryExecutionHandler` previously defaulted a `FAILED` result with no
+  `metrics.retryable` flag at all to *retryable* (`!== false`). A discovery failure with no flag
+  (e.g. `DISCOVERY_CAMPAIGN_NOT_FOUND`, which reports only `{ discoveryStatus: "FAILED" }`) is just
+  as deterministic as any other terminal case; the default was inverted to require an explicit
+  `retryable: true` opt-in (`=== true`), matching how this path always behaved back when it only
+  ever used `WORKER_RUNTIME_VALIDATION_FAILED`.
+
+Both are consequences of the same underlying rule: `WORKER_RUNTIME_TRANSIENT_FAILURE` is for
+failures actually expected to resolve with time, not a default resting state for "didn't recognize
+this error." When adding a new uncaught-exception classification here, default to terminal and
+name the specific transient codes explicitly — the opposite default is what caused every prior
+round of this slice's review findings.
 
 **Worker polls only queues with a configured service port.** `createWorkerDefinitions` registers a
 handler for every queue (including `event.ingestion`, `crm.scoring`, `notification`,
