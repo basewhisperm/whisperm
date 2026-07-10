@@ -20,10 +20,39 @@ import { WorkerRuntimeError } from '@whisperm/worker-runtime';
 const createFakeQueueJobs = (seedRows) => {
   const rows = new Map(seedRows.map((row) => [row.id, { ...row }]));
   const deadLetters = [];
+  let nextId = rows.size + 1;
   return {
     rows,
     deadLetters,
-    async enqueue() { throw new Error('not used in these tests'); },
+    // ST1-013N: mirrors PrismaQueueJobRepository.enqueue's real idempotency contract -- unique on
+    // (tenantId, queueName, jobKey); a duplicate enqueue returns the existing row rather than
+    // creating a second one, so the same logical job is never claimed/executed twice.
+    async enqueue(context, input) {
+      const existing = [...rows.values()].find((row) => row.tenantId === input.tenantId && row.queueName === input.queueName && row.jobKey === input.jobKey);
+      if (existing !== undefined) return { ...existing };
+      const row = {
+        id: `enqueued-${nextId++}`,
+        tenantId: input.tenantId,
+        queueName: input.queueName,
+        jobName: input.jobName,
+        jobKey: input.jobKey,
+        state: 'WAITING',
+        payload: input.payload,
+        attemptsMade: 0,
+        maxAttempts: input.maxAttempts ?? 3,
+        // Default to immediately-due (epoch), not real wall-clock "now": these tests drive the
+        // fake with fixed 2026-01-02 `now` values, and a real Date.now() default would be later
+        // than that, making a freshly-enqueued row spuriously unclaimable.
+        availableAt: input.availableAt ?? new Date(0).toISOString(),
+        lockedUntil: null,
+        lastError: null,
+        correlationId: input.correlationId ?? input.jobKey,
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      };
+      rows.set(row.id, row);
+      return { ...row };
+    },
     async claimNext({ tenantId, queueNames, now }) {
       const candidate = [...rows.values()].find((row) => row.tenantId === tenantId
         && queueNames.includes(row.queueName)
@@ -258,4 +287,75 @@ test('runDurableQueuePollLoop drains every claimable job then stops', async () =
   assert.equal(calls.length, 2, 'both seeded jobs must be drained');
   assert.equal(queueJobs.rows.get('row-1').state, 'COMPLETED');
   assert.equal(queueJobs.rows.get('row-2').state, 'COMPLETED');
+});
+
+// ST1-013N: end-to-end durable lifecycle proof -- enqueue (real repository dedup semantics,
+// not the pre-seeded fixture rows the tests above use) -> poll loop claims it -> handler
+// executes and persists a side effect in an external store -> QueueJob becomes COMPLETED, and
+// the side effect exists exactly once, not zero or two times.
+test('enqueue -> durable poll loop -> handler executes and the side effect is persisted exactly once', async () => {
+  const queueJobs = createFakeQueueJobs([]);
+  const ingestedEvents = [];
+  const app = createApp(async (context, input) => {
+    const record = { id: `ingestion-${ingestedEvents.length + 1}`, tenantId: input.tenantId, providerEventId: input.providerEventId };
+    ingestedEvents.push(record);
+    return record;
+  }, queueJobs);
+  await app.start();
+
+  const enqueued = await queueJobs.enqueue({ tenantId: 'tenant-1' }, {
+    tenantId: 'tenant-1',
+    queueName: 'event.ingestion',
+    jobName: 'event.ingestion',
+    jobKey: 'durable-e2e-key',
+    payload: { event: { tenantId: 'tenant-1', source: { provider: 'WEB_FORM', providerEventId: 'provider-event-e2e', eventType: 'lead.created' }, payload: { leadId: 'lead-e2e' } } },
+    maxAttempts: 3,
+    correlationId: 'corr-e2e',
+  });
+  assert.equal(enqueued.state, 'WAITING');
+  assert.equal(queueJobs.rows.size, 1);
+
+  const result = await claimAndProcessOneDurableQueueJob({ app, queueJobs, tenantId: 'tenant-1', queueNames: ['event.ingestion'], now: new Date('2026-01-02T00:00:00.000Z') });
+
+  assert.equal(result.claimed, true);
+  assert.equal(result.outcome, 'COMPLETED');
+  assert.equal(queueJobs.rows.get(enqueued.id).state, 'COMPLETED');
+  assert.equal(ingestedEvents.length, 1, 'the handler side effect must be persisted exactly once');
+  assert.equal(ingestedEvents[0].providerEventId, 'provider-event-e2e');
+});
+
+test('a duplicate enqueue under the same jobKey does not create a second QueueJob row or duplicate the side effect', async () => {
+  const queueJobs = createFakeQueueJobs([]);
+  const ingestedEvents = [];
+  const app = createApp(async (context, input) => {
+    ingestedEvents.push({ id: `ingestion-${ingestedEvents.length + 1}`, providerEventId: input.providerEventId });
+    return { id: 'ingestion-x', tenantId: input.tenantId };
+  }, queueJobs);
+  await app.start();
+
+  const enqueueInput = {
+    tenantId: 'tenant-1',
+    queueName: 'event.ingestion',
+    jobName: 'event.ingestion',
+    jobKey: 'durable-dedup-key',
+    payload: { event: { tenantId: 'tenant-1', source: { provider: 'WEB_FORM', providerEventId: 'provider-event-dedup', eventType: 'lead.created' }, payload: { leadId: 'lead-dedup' } } },
+    maxAttempts: 3,
+    correlationId: 'corr-dedup',
+  };
+
+  const first = await queueJobs.enqueue({ tenantId: 'tenant-1' }, enqueueInput);
+  const second = await queueJobs.enqueue({ tenantId: 'tenant-1' }, enqueueInput);
+
+  assert.equal(second.id, first.id, 'a duplicate enqueue under the same (tenantId, queueName, jobKey) must return the existing row, not create a new one');
+  assert.equal(queueJobs.rows.size, 1, 'only one QueueJob row must exist for the duplicate enqueue');
+
+  const result = await claimAndProcessOneDurableQueueJob({ app, queueJobs, tenantId: 'tenant-1', queueNames: ['event.ingestion'], now: new Date('2026-01-02T00:00:00.000Z') });
+  assert.equal(result.outcome, 'COMPLETED');
+
+  // A third enqueue attempt after the job has already completed must still be a no-op: it
+  // resolves to the same (now COMPLETED) row rather than re-queuing or re-running the handler.
+  const third = await queueJobs.enqueue({ tenantId: 'tenant-1' }, enqueueInput);
+  assert.equal(third.id, first.id);
+  assert.equal(queueJobs.rows.size, 1);
+  assert.equal(ingestedEvents.length, 1, 'the side effect must never be duplicated regardless of how many times the same jobKey is enqueued');
 });
