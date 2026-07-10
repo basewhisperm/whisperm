@@ -91,6 +91,53 @@ test('tenant isolation is preserved for list and detail repository calls', async
   assert.equal(result[0].capture.tenantId, tenantId);
 });
 
+// ST1-013N: the tests above rely on fakes that assert scope.tenantId === 'tenant-1' -- a bug
+// that read the wrong tenant's data would be caught by the assertion firing, but the fakes
+// can't prove the *service* itself is safe if handed a real, unmodified multi-tenant
+// repository. This test uses a repository fake that actually filters by whichever tenantId is
+// passed (matching PrismaMarketplaceAcquisitionRepository's `{ tenantId: context.tenantId, id }`
+// where-clause behavior), so it proves tenant A genuinely cannot read tenant B's capture record
+// through this service, not merely that the fake was called with the tenantId it expected.
+test('tenant A cannot read tenant B capture through findByCaptureId, and vice versa', async () => {
+  const captureA = capture({ id: 'shared-capture-id', tenantId: 'tenant-a', title: 'Tenant A listing' });
+  const captureB = capture({ id: 'shared-capture-id', tenantId: 'tenant-b', title: 'Tenant B listing' });
+  const contactA = contact({ id: 'contact-a', tenantId: 'tenant-a' });
+  const contactB = contact({ id: 'contact-b', tenantId: 'tenant-b' });
+  const captures = [captureA, captureB];
+
+  const multiTenantService = new SellerAcquisitionRecordService({
+    marketplaceCaptures: {
+      async findById(scope, id) { return captures.find((row) => row.tenantId === scope.tenantId && row.id === id) ?? null; },
+      async list(scope, page) { return { items: captures.filter((row) => row.tenantId === scope.tenantId) }; },
+    },
+    contacts: { async findById(scope, id) { return [contactA, contactB].find((row) => row.tenantId === scope.tenantId && row.id === id) ?? null; } },
+    deals: { async findDetailById() { return null; } },
+    draftInventories: { async findByMarketplaceCaptureId() { return null; } },
+    sellerInvitations: { async listSellerInvitationsByMarketplaceCaptureId() { return []; } },
+    marketplaceClaimTokens: { async listClaimTokensByMarketplaceCaptureId() { return []; } },
+    ownershipAttestations: { async findByMarketplaceCaptureId() { return null; } },
+    renderConversions: {
+      async findSuccessfulSellerConversion() { return null; },
+      async findSuccessfulInventoryConversion() { return null; },
+    },
+  });
+
+  const asTenantA = await multiTenantService.findByCaptureId({ tenantId: 'tenant-a' }, 'shared-capture-id');
+  const asTenantB = await multiTenantService.findByCaptureId({ tenantId: 'tenant-b' }, 'shared-capture-id');
+  assert.equal(asTenantA.capture.title, 'Tenant A listing');
+  assert.equal(asTenantB.capture.title, 'Tenant B listing');
+  assert.notEqual(asTenantA.capture.title, asTenantB.capture.title);
+
+  const listAsTenantA = await multiTenantService.list({ tenantId: 'tenant-a' });
+  assert.deepEqual(listAsTenantA.map((r) => r.capture.tenantId), ['tenant-a']);
+  const listAsTenantB = await multiTenantService.list({ tenantId: 'tenant-b' });
+  assert.deepEqual(listAsTenantB.map((r) => r.capture.tenantId), ['tenant-b']);
+
+  // A completely unknown tenant (never seeded any data) must see nothing at all.
+  const asUnknownTenant = await multiTenantService.findByCaptureId({ tenantId: 'tenant-c' }, 'shared-capture-id');
+  assert.equal(asUnknownTenant, null);
+});
+
 
 test('inventory conversion lookup uses draft inventory id instead of capture external id', async () => {
   const result = await record({
