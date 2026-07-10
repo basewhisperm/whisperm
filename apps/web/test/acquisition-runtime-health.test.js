@@ -12,11 +12,11 @@ test("runtime health route authenticates, gates the feature flag, and delegates 
   assert.match(route, /requireSellerAcquisitionFeatureForApi/u);
   assert.match(route, /AcquisitionRuntimeHealthService/u);
   assert.match(route, /getRuntimeHealth/u);
-  assert.match(route, /ok: true, data: snapshot/u);
+  assert.match(route, /apiSuccess\(snapshot\)/u);
 });
 
 test("runtime health route returns 401 when there is no tenant", () => {
-  assert.match(route, /if \(!tenant\) return errorResponse\("Unauthorized", 401\)/u);
+  assert.match(route, /if \(!tenant\) return apiFailure\(401, "UNAUTHORIZED", "Unauthorized"\)/u);
 });
 
 test("runtime health route returns the existing feature-denied response when the flag is off", () => {

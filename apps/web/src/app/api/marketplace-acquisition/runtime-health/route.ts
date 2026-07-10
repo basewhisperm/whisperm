@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-
+import { apiFailure, apiSuccess } from "@/app/api/_lib/api-response";
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
@@ -9,8 +8,6 @@ import {
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { AcquisitionRuntimeHealthService } from "@whisperm/services";
-
-const errorResponse = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 
 // CS-021: thin read-model route -- computation lives entirely in
 // AcquisitionRuntimeHealthService, which aggregates the existing canonical
@@ -30,16 +27,16 @@ const runtimeHealthService = () => {
 
 export async function GET() {
   const tenant = await getTenantForCurrentUser();
-  if (!tenant) return errorResponse("Unauthorized", 401);
+  if (!tenant) return apiFailure(401, "UNAUTHORIZED", "Unauthorized");
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
   try {
     const snapshot = await runtimeHealthService().getRuntimeHealth({ tenantId: tenant.id });
-    return NextResponse.json({ ok: true, data: snapshot });
+    return apiSuccess(snapshot);
   } catch (error) {
     const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { readonly status: unknown }).status) : 500;
     const message = error instanceof Error ? error.message : "Failed to load acquisition runtime health.";
-    return errorResponse(message, Number.isFinite(status) ? status : 500);
+    return apiFailure(Number.isFinite(status) ? status : 500, "RUNTIME_UNAVAILABLE", message);
   }
 }
