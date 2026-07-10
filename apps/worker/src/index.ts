@@ -1373,7 +1373,26 @@ const lifecycleClaimTokenRecordSchema = z.object({
   updatedAt: z.string().datetime(),
 }).strict();
 
-type QueueJobDelegate = Pick<PrismaPersistenceClient["queueJob"], "upsert">;
+type QueueJobDelegate = Pick<PrismaPersistenceClient["queueJob"], "upsert" | "findFirst">;
+
+/**
+ * ST1-013M: whether a re-enqueue/re-schedule targeting an existing (tenantId, queueName, jobKey)
+ * row should reset it back to a fresh claimable state. If the row is currently ACTIVE, a worker
+ * is mid-handler for it right now -- resetting state/lockedUntil/attemptsMade would let the
+ * poller claim it a second time concurrently, and the in-flight worker's own completion
+ * transition (which requires state=ACTIVE as its precondition) would then fail with a conflict.
+ * Only rows that are NOT currently being worked (WAITING/DELAYED/RETRY_SCHEDULED, or terminal
+ * COMPLETED/DEAD_LETTERED/CANCELLED) are safe to reset.
+ */
+const shouldResetQueueJobOnReenqueue = async (
+  queueJob: QueueJobDelegate,
+  where: { readonly tenantId: string; readonly queueName: string; readonly jobKey: string },
+): Promise<boolean> => {
+  if (queueJob.findFirst === undefined) return true;
+  const existing = await queueJob.findFirst({ where });
+  const state = existing !== null && typeof existing === "object" && "state" in existing ? (existing as { readonly state: unknown }).state : undefined;
+  return state !== "ACTIVE";
+};
 
 export const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
   async schedule(job: ClaimLifecycleScheduleJob): Promise<void> {
@@ -1394,8 +1413,10 @@ export const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
       correlationId: job.correlation.correlationId,
       replaySafe: true,
     });
+    const reenqueueWhere = { tenantId: job.tenantId, queueName: claimLifecycleQueueName, jobKey: job.dedupeKey };
+    const shouldReset = await shouldResetQueueJobOnReenqueue(queueJob, reenqueueWhere);
     await queueJob.upsert({
-      where: { tenantId_queueName_jobKey: { tenantId: job.tenantId, queueName: claimLifecycleQueueName, jobKey: job.dedupeKey } },
+      where: { tenantId_queueName_jobKey: reenqueueWhere },
       create: {
         tenantId: job.tenantId,
         queueName: claimLifecycleQueueName,
@@ -1408,20 +1429,23 @@ export const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
         availableAt: new Date(job.runAt),
         correlationId: job.correlation.correlationId,
       },
-      // ST1-013M: reset state/lockedUntil/attemptsMade on re-schedule, matching
-      // createGrowthLoopScheduler -- otherwise re-scheduling a reminder whose previous QueueJob
-      // row already reached COMPLETED/DEAD_LETTERED would leave it permanently unclaimable.
-      update: {
-        state: "DELAYED",
-        payload,
-        maxAttempts: 3,
-        attemptsMade: 0,
-        scheduledAt: new Date(job.runAt),
-        availableAt: new Date(job.runAt),
-        lockedUntil: null,
-        lastError: null,
-        correlationId: job.correlation.correlationId,
-      },
+      // ST1-013M: reset state/lockedUntil/attemptsMade on re-schedule -- otherwise re-scheduling
+      // a reminder whose previous QueueJob row already reached COMPLETED/DEAD_LETTERED would
+      // leave it permanently unclaimable. But NOT when the row is currently ACTIVE (a worker is
+      // mid-handler right now) -- see shouldResetQueueJobOnReenqueue.
+      update: shouldReset
+        ? {
+            state: "DELAYED",
+            payload,
+            maxAttempts: 3,
+            attemptsMade: 0,
+            scheduledAt: new Date(job.runAt),
+            availableAt: new Date(job.runAt),
+            lockedUntil: null,
+            lastError: null,
+            correlationId: job.correlation.correlationId,
+          }
+        : { payload, scheduledAt: new Date(job.runAt), availableAt: new Date(job.runAt), correlationId: job.correlation.correlationId },
     });
   },
 });
@@ -1437,14 +1461,20 @@ export const createGrowthLoopScheduler = (queueJob: QueueJobDelegate) => ({
     // QueueJobState (see prisma/schema.prisma) and would fail the upsert at the database.
     const payload = growthLoopJobPayloadSchema.parse({ tenantId: job.tenantId, campaignId: job.campaignId, trigger: job.trigger, correlationId: job.correlationId ?? jobKey, replaySafe: true });
     const now = new Date();
+    const reenqueueWhere = { tenantId: job.tenantId, queueName: growthLoopQueueName, jobKey };
+    const shouldReset = await shouldResetQueueJobOnReenqueue(queueJob, reenqueueWhere);
     await queueJob.upsert({
-      where: { tenantId_queueName_jobKey: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobKey } },
+      where: { tenantId_queueName_jobKey: reenqueueWhere },
       create: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobName: growthLoopJobType, jobKey, state: "WAITING", payload, maxAttempts: 3, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
       // ST1-013M: the jobKey is fixed per tenant+campaign, so a re-evaluation reuses the same
       // row via this update branch. Without resetting state/lockedUntil/attemptsMade, a row left
       // COMPLETED or DEAD_LETTERED by a prior evaluation is never claimable again -- the campaign
       // metadata would say growthLoopStatus: "QUEUED" while no worker ever picks the row back up.
-      update: { state: "WAITING", payload, maxAttempts: 3, attemptsMade: 0, scheduledAt: now, availableAt: now, lockedUntil: null, lastError: null, correlationId: job.correlationId ?? jobKey },
+      // But NOT when the row is currently ACTIVE (a worker is mid-evaluation right now) -- see
+      // shouldResetQueueJobOnReenqueue.
+      update: shouldReset
+        ? { state: "WAITING", payload, maxAttempts: 3, attemptsMade: 0, scheduledAt: now, availableAt: now, lockedUntil: null, lastError: null, correlationId: job.correlationId ?? jobKey }
+        : { payload, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
     });
   },
 });
