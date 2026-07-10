@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { CampaignRuntimeExecutionRecord } from "@whisperm/repositories";
+import { resolveExecutionChannel } from "@whisperm/services";
 
 // ST-003: maps a runtime execution record onto an honest JSON envelope so a route
 // response never claims success for work that was merely queued. COMPLETED means the
@@ -15,7 +16,7 @@ const httpStatusForFailureCode = (code: string | null | undefined): number => {
 export const invitationExecutionResponse = (execution: CampaignRuntimeExecutionRecord): NextResponse => {
   const metrics = execution.metrics ?? {};
   const invitationId = typeof metrics.invitationId === "string" ? metrics.invitationId : null;
-  const channel = typeof metrics.channel === "string" ? metrics.channel : typeof metrics.selectedChannel === "string" ? metrics.selectedChannel : undefined;
+  const channel = resolveExecutionChannel(metrics);
 
   if (execution.status === "COMPLETED") {
     return NextResponse.json({ ok: true, data: { executionId: execution.id, status: "COMPLETED", invitationId, channel } }, { status: 200 });

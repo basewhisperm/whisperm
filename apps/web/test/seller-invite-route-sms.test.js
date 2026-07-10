@@ -24,7 +24,9 @@ before(async () => {
   );
 
   const sourcePath = new URL('../src/lib/marketplace-acquisition/invitation-execution-response.ts', import.meta.url).pathname;
-  const source = readFileSync(sourcePath, 'utf8').replace('from "next/server"', `from "${join(tempDir, 'next-server.mjs')}"`);
+  const source = readFileSync(sourcePath, 'utf8')
+    .replace('from "next/server"', `from "${join(tempDir, 'next-server.mjs')}"`)
+    .replace('from "@whisperm/services"', `from "${import.meta.resolve('@whisperm/services')}"`);
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
   const file = join(tempDir, 'invitation-execution-response.mjs');
   writeFileSync(file, output);

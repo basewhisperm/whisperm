@@ -12,7 +12,7 @@ export type { BusinessGrowthOpportunityServiceDependencies } from "./business-gr
 export { SellerAcquisitionRecordService } from "./seller-acquisition-records.js";
 export { SellerRelationshipMemoryService, buildSellerRelationshipMemory, canonicalSellerKeyForRecord } from "./seller-relationship-memory.js";
 export { SellerAcquisitionCampaignService } from "./seller-acquisition-campaigns.js";
-export { CampaignRuntimeService, nextInvitationRetryAt } from "./campaign-runtime.js";
+export { CampaignRuntimeService, nextInvitationRetryAt, resolveExecutionChannel } from "./campaign-runtime.js";
 export { DiscoveryOptimizationWorker } from "./marketplace-acquisition/discovery-optimization-worker.js";
 export { GrowthLoopWorker, growthRecommendationTypeValues } from "./marketplace-acquisition/growth-loop-worker.js";
 export type { CampaignRuntimeServiceDependencies, StartCampaignExecutionInput, ExecuteInvitationInput, CampaignRuntimeInvitationQueue, CampaignRuntimeInvitationExecutor, CampaignRuntimeQualificationQueue, CampaignRuntimeOptimizationQueue, CampaignRuntimeGrowthLoopQueue, RecordInvitationResultInput, RecordQualificationResultInput } from "./campaign-runtime.js";

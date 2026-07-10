@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CampaignRuntimeService } from '@whisperm/services';
+import { CampaignRuntimeService, resolveExecutionChannel } from '@whisperm/services';
 
 const now = '2026-06-30T00:00:00.000Z';
 const campaign = (overrides = {}) => ({ id: 'campaign-1', tenantId: 'tenant-1', name: 'Growth', status: 'ACTIVE', metadata: { strategy: { category: 'bikes' }, targeting: { marketplaceSourceKey: 'JIJI', keyword: 'bikes', executionLimit: 25 } }, createdAt: now, updatedAt: now, ...overrides });
@@ -542,4 +542,48 @@ test('runtime prevents duplicate optimized invitations before worker execution',
   assert.equal(execution.metrics.invitationExecutionState, 'SUPPRESSED');
   assert.equal(execution.metrics.suppressionReason, 'DUPLICATE_INVITATION_PREVENTED');
   assert.equal(calls.length, 0);
+});
+
+// ST1-013N: resolveExecutionChannel is the single source of truth for the
+// metrics.channel ?? metrics.selectedChannel authority contract -- see
+// docs/runtime/status-vocabulary.md and campaign-runtime.ts's own JSDoc on the export.
+
+test('resolveExecutionChannel prefers metrics.channel (the completed-send-attempt outcome) when present', () => {
+  assert.equal(resolveExecutionChannel({ channel: 'SMS', selectedChannel: 'WHATSAPP' }), 'SMS');
+});
+
+test('resolveExecutionChannel falls back to metrics.selectedChannel when metrics.channel is absent', () => {
+  assert.equal(resolveExecutionChannel({ selectedChannel: 'EMAIL' }), 'EMAIL');
+});
+
+test('resolveExecutionChannel returns undefined (never a fabricated default) when neither field is present', () => {
+  assert.equal(resolveExecutionChannel({}), undefined);
+  assert.equal(resolveExecutionChannel(null), undefined);
+  assert.equal(resolveExecutionChannel(undefined), undefined);
+});
+
+test('resolveExecutionChannel rejects an invalid/unrecognized channel value rather than passing it through', () => {
+  assert.equal(resolveExecutionChannel({ channel: 'CARRIER_PIGEON' }), undefined);
+  assert.equal(resolveExecutionChannel({ selectedChannel: 42 }), undefined);
+});
+
+test('retry does not fall back to WhatsApp when the originally selected channel was SMS', async () => {
+  const executions = new MemoryExecutions();
+  const calls = [];
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, invitationQueue: { async enqueueInvitation(input) { calls.push(input); } } });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'FAILED', metrics: { invitationExecutionState: 'FAILED', opportunityId: 'capture-1', invitationId: 'invite-1', selectedChannel: 'SMS', retryCount: 1, maxRetries: 3 } });
+  await service.retryInvitationExecution({ tenantId: 'tenant-1' }, created.id);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].preferredChannel, 'SMS');
+  assert.notEqual(calls[0].preferredChannel, 'WHATSAPP');
+});
+
+test('retry preserves metrics.channel (the completed-attempt outcome) over metrics.selectedChannel when both are present', async () => {
+  const executions = new MemoryExecutions();
+  const calls = [];
+  const service = new CampaignRuntimeService({ campaigns: new MemoryCampaigns([campaign()]), executions, invitationQueue: { async enqueueInvitation(input) { calls.push(input); } } });
+  const created = await executions.create({ tenantId: 'tenant-1' }, { tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', status: 'FAILED', metrics: { invitationExecutionState: 'FAILED', opportunityId: 'capture-1', invitationId: 'invite-1', selectedChannel: 'WHATSAPP', channel: 'SMS', retryCount: 1, maxRetries: 3 } });
+  await service.retryInvitationExecution({ tenantId: 'tenant-1' }, created.id);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].preferredChannel, 'SMS');
 });

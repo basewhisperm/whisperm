@@ -5,7 +5,7 @@ import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { PersistenceError, PrismaCampaignRuntimeExecutionRepository, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
-import { CampaignRuntimeService } from "@whisperm/services";
+import { CampaignRuntimeService, resolveExecutionChannel } from "@whisperm/services";
 import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
 import { createManualRetryInvitationRuntimeJobQueue } from "@/lib/marketplace-acquisition/runtime-job-queue";
 
@@ -50,6 +50,7 @@ export async function POST(_request: Request, context: RouteContext) {
         status: execution.status === "COMPLETED" ? "COMPLETED" : "PENDING",
         retryCount: typeof metrics.retryCount === "number" ? metrics.retryCount : 0,
         nextRetryAt: typeof metrics.nextRetryAt === "string" ? metrics.nextRetryAt : null,
+        channel: resolveExecutionChannel(metrics),
       },
     }, { status: execution.status === "COMPLETED" ? 200 : 202 });
   } catch (error) {

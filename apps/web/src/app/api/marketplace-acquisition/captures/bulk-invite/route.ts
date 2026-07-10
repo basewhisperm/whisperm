@@ -11,7 +11,7 @@ import {
   PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { CampaignRuntimeService } from "@whisperm/services";
+import { CampaignRuntimeService, resolveExecutionChannel } from "@whisperm/services";
 import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
 import { createInvitationRuntimeJobQueue } from "@/lib/marketplace-acquisition/runtime-job-queue";
 import { resolveInvitationEligibility, type InvitationEligibility } from "@/lib/marketplace-acquisition/invitation-eligibility";
@@ -39,6 +39,7 @@ type BulkInviteResult =
       readonly status: "QUEUED" | "SENT" | "MANUAL_DELIVERY_REQUIRED";
       readonly invitationId?: string;
       readonly executionId?: string;
+      readonly channel?: "WHATSAPP" | "SMS" | "EMAIL";
     }
   | {
       readonly captureId: string;
@@ -115,11 +116,13 @@ export async function POST(request: NextRequest) {
       }
       const metrics = execution.metrics ?? {};
       const invitationId = typeof metrics.invitationId === "string" ? metrics.invitationId : undefined;
+      const channel = resolveExecutionChannel(metrics);
       results.push({
         captureId,
         ok: true,
         status: execution.status === "COMPLETED" ? "SENT" : "QUEUED",
         ...(invitationId === undefined ? {} : { invitationId }),
+        ...(channel === undefined ? {} : { channel }),
         executionId: execution.id,
       });
     } catch {
