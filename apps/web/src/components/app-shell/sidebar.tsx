@@ -8,6 +8,7 @@ import {
   IconBriefcase,
   IconChartBar,
   IconCircleCheck,
+  IconCreditCard,
   IconInbox,
   IconLayoutDashboard,
   IconReportAnalytics,
@@ -57,6 +58,7 @@ const reportsNavigationItems = [
 ] satisfies readonly NavigationItem[];
 
 const settingsNavigationItems = [
+  { labelKey: "billing.title", icon: IconCreditCard, href: "/billing" },
   { labelKey: "settings.title", icon: IconSettings, href: "/settings" },
 ] satisfies readonly NavigationItem[];
 

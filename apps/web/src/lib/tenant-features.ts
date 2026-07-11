@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
+import { hasActiveOrTrialingSubscription } from "@/lib/billing/subscription-gate";
 import { SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-feature-keys";
 
 export { SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-feature-keys";
+
+/**
+ * Feature keys that a paid (or trialing) subscription unlocks on its own,
+ * without needing an explicit TenantFeature row. The TenantFeature flag
+ * remains a valid path too (an ops override for comped/founding tenants) --
+ * this is additive, not a replacement, so no existing manually-flagged
+ * tenant loses access.
+ */
+const SUBSCRIPTION_UNLOCKED_FEATURES = new Set<string>([SELLER_ACQUISITION_FEATURE]);
 
 export async function getTenantFeatures(tenantId: string): Promise<readonly string[]> {
   try {
@@ -49,7 +59,15 @@ export async function getTenantFeatureState(
       select: { enabled: true },
     });
 
-    return { ok: true, enabled: feature?.enabled === true };
+    if (feature?.enabled === true) {
+      return { ok: true, enabled: true };
+    }
+
+    if (SUBSCRIPTION_UNLOCKED_FEATURES.has(featureKey) && (await hasActiveOrTrialingSubscription(tenantId))) {
+      return { ok: true, enabled: true };
+    }
+
+    return { ok: true, enabled: false };
   } catch (error) {
     console.error("tenant_feature_state_lookup_failed", {
       tenantId,
