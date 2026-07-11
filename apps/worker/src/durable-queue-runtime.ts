@@ -60,19 +60,24 @@ const defaultDurableRetryPolicy = (tenantId: string, maxAttempts: number) => ({
   maxAttempts: Math.max(1, maxAttempts),
   backoff: { kind: "EXPONENTIAL" as const, baseDelayMs: 60_000, maxDelayMs: 3_600_000, multiplier: 2, jitter: false as const },
   retryableErrorCodes: [],
-  // ST1-013M: WORKER_RUNTIME_VALIDATION_FAILED is denied here. This was briefly relaxed in a
-  // prior revision of this slice (to let claim-reminder delivery's transient provider failures,
-  // which reuse this same code, actually retry) -- but computeRetryDecision only looks at the
-  // error CODE, not the per-instance `retryable` flag on WorkerRuntimeError. Relaxing the code
-  // meant every WORKER_RUNTIME_VALIDATION_FAILED retried up to maxAttempts regardless of
-  // `retryable`, including ones that are deliberately terminal: acquisition-governance DENY
-  // decisions (enforceAcquisitionGovernance) and malformed claim-lifecycle job types both throw
-  // this code with retryable effectively false, and both need to dead-letter immediately, not
-  // get reclaimed repeatedly. Denying the whole code back out is the safer default -- it costs
-  // claim-reminder's transient-provider-failure case an extra dead-letter-then-manual-retry
-  // instead of an automatic one, which is a known, accepted limitation (not fixed in this slice;
-  // properly fixing it means giving worker-runtime a distinct error code for "transient
-  // dependency failure" separate from "validation failed", which is a larger, separate change).
+  // ST1-013M: WORKER_RUNTIME_VALIDATION_FAILED is denied here -- it is reserved for terminal
+  // failures (acquisition-governance DENY decisions, malformed job types/payloads, unregistered
+  // job types) that must dead-letter immediately, never spin through retries.
+  //
+  // Previously, unconfigured-dependency and provider-delivery failures (e.g. claim-reminder
+  // delivery) also threw this same code with retryable:true set on the WorkerRuntimeError
+  // instance. computeRetryDecision only ever inspects the error CODE, never that instance flag,
+  // so denying the code entirely silently killed retries for those transient cases too -- and
+  // relaxing the code instead (an earlier revision of this fix) let genuinely terminal governance
+  // DENY/malformed-payload failures retry up to maxAttempts instead of dead-lettering immediately.
+  // Neither direction is correct when both terminal and transient failures share one code.
+  //
+  // The actual fix: WORKER_RUNTIME_TRANSIENT_FAILURE is a distinct code (see
+  // workerRuntimeErrorCodeValues in @whisperm/worker-runtime) used for failures expected to
+  // succeed on a later attempt -- unconfigured/unreachable dependencies, provider outages,
+  // uncaught handler exceptions. It is deliberately absent from this deny-list, so it retries
+  // through the normal backoff/maxAttempts policy below.
+  //
   // Tenant isolation violations are a data-integrity problem, never transient, and must not spin
   // through retries either.
   nonRetryableErrorCodes: ["WORKER_RUNTIME_VALIDATION_FAILED", "WORKER_RUNTIME_TENANT_ISOLATION_VIOLATION"],

@@ -1,6 +1,13 @@
 import { z } from "zod";
-import { correlationMetadataSchema } from "@whisperm/types";
+import { correlationMetadataSchema, PersistenceError } from "@whisperm/types";
 import type { CorrelationMetadata } from "@whisperm/types";
+
+// ST1-013M: PersistenceError codes that represent a condition expected to clear on its own
+// (a lease/lock held by another worker, a transient store outage) -- mirrors the equivalent set
+// apps/worker's mapGrowthLoopError uses for the same classification problem. Every other
+// PersistenceError code (NOT_FOUND, VALIDATION_FAILED, CONFLICT, TENANT_MISMATCH, ...) describes
+// a condition that will not change on retry.
+const transientPersistenceErrorCodes = new Set<string>(["PERSISTENCE_TRANSIENT", "PERSISTENCE_LEASE_CONFLICT", "PERSISTENCE_LOCK_CONFLICT"]);
 
 const isoDurationPattern = /^P(?=\d|T\d)(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/u;
 const namespacedNamePattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
@@ -19,7 +26,14 @@ export const workerRuntimeErrorCodeValues = [
   "WORKER_RUNTIME_EXECUTION_TOKEN_INVALID",
   "WORKER_RUNTIME_IDEMPOTENCY_CONFLICT",
   "WORKER_RUNTIME_VISIBILITY_TIMEOUT_EXPIRED",
-  "WORKER_RUNTIME_LEASE_EXPIRED"
+  "WORKER_RUNTIME_LEASE_EXPIRED",
+  // ST1-013M: distinct from WORKER_RUNTIME_VALIDATION_FAILED, which is reserved for terminal
+  // input/governance failures that must never be retried. This code is for failures that are
+  // expected to succeed on a later attempt (an unconfigured/unreachable dependency, a provider
+  // outage, an uncaught handler exception) -- retry classification (computeRetryDecision) only
+  // ever inspects the error code, so conflating the two silently kills retries for one or the
+  // other whenever a caller's retry policy denies/allows just one of them.
+  "WORKER_RUNTIME_TRANSIENT_FAILURE"
 ] as const;
 export const workerRuntimeErrorCodeSchema = z.enum(workerRuntimeErrorCodeValues);
 export type WorkerRuntimeErrorCode = z.infer<typeof workerRuntimeErrorCodeSchema>;
@@ -837,9 +851,31 @@ export const executeReplaySafeJob = async <TResult extends WorkerRuntimeMetadata
     span?.end("OK");
     return { status: "SUCCEEDED", result };
   } catch (error) {
+    // ST1-013M: a ZodError means the handler rejected the job's own payload (e.g.
+    // `somePayloadSchema.parse(context.job.payload)`) -- that failure is deterministic and will
+    // recur identically on every retry, so it must dead-letter immediately like any other
+    // WORKER_RUNTIME_VALIDATION_FAILED, not spin through the transient-failure retry policy.
+    // Likewise a PersistenceError means a repository call rejected the operation for a domain
+    // reason (e.g. PERSISTENCE_NOT_FOUND for a stale executionId) -- only the handful of codes in
+    // transientPersistenceErrorCodes describe something that can clear on its own; every other
+    // PersistenceError code is just as deterministic as a ZodError and must dead-letter
+    // immediately, not retry until maxAttempts. Any other uncaught exception (a truly unknown
+    // domain error, or a raw thrown value) is treated as WORKER_RUNTIME_TRANSIENT_FAILURE --
+    // unexpected, but plausibly transient (a dependency hiccup), so it gets a chance to succeed on
+    // a later attempt.
     const runtimeError = error instanceof WorkerRuntimeError
       ? error
-      : new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: error instanceof Error ? error.message : "Worker job execution failed", status: 500, retryable: true, correlation: job.correlation });
+      : error instanceof z.ZodError
+        ? new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: error.message, status: 400, retryable: false, correlation: job.correlation })
+        : error instanceof PersistenceError
+          ? new WorkerRuntimeError({
+              code: transientPersistenceErrorCodes.has(error.code) ? "WORKER_RUNTIME_TRANSIENT_FAILURE" : "WORKER_RUNTIME_VALIDATION_FAILED",
+              message: error.message,
+              status: error.status,
+              retryable: transientPersistenceErrorCodes.has(error.code),
+              correlation: job.correlation
+            })
+          : new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: error instanceof Error ? error.message : "Worker job execution failed", status: 500, retryable: true, correlation: job.correlation });
     await telemetry.recordError?.({ error: runtimeError, tenantId: job.tenantId, correlation: job.correlation, jobId: job.jobId });
     span?.end("ERROR");
     throw runtimeError;

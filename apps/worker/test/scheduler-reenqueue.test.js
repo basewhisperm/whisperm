@@ -3,27 +3,46 @@ import test from 'node:test';
 import { createClaimLifecycleScheduler, createGrowthLoopScheduler } from '../dist/index.js';
 import { growthLoopQueueName, growthLoopJobType, marketplaceClaimLifecycleQueueName } from '@whisperm/services';
 
-// ST1-013M regression: createGrowthLoopScheduler/createClaimLifecycleScheduler upsert into a
-// fixed-jobKey QueueJob row. If a prior evaluation/reminder already reached a terminal state
-// (COMPLETED/DEAD_LETTERED), re-enqueuing for the same key must reset it back to a claimable
-// state -- otherwise the durable poller (which only looks at WAITING/DELAYED/RETRY_SCHEDULED/
-// stale-ACTIVE) never picks the reused row back up, and later evaluations/reminders silently
-// never run even though callers see success.
+// ST1-013M regression: createGrowthLoopScheduler/createClaimLifecycleScheduler re-enqueue into a
+// fixed-jobKey QueueJob row via atomic conditional updateMany writes (not a findFirst-then-upsert
+// read/write pair, which raced the durable poller/an in-flight worker -- see reenqueueQueueJobRow
+// in apps/worker/src/index.ts). This fake delegate mirrors the real Prisma queueJob delegate's
+// updateMany/create contract closely enough to exercise that atomicity, including surfacing a
+// P2002-style unique constraint violation from `create` when a row already exists.
 const compositeKey = ({ tenantId, queueName, jobKey }) => `${tenantId}::${queueName}::${jobKey}`;
+
+const matchesWhere = (row, where) => {
+  for (const [key, value] of Object.entries(where)) {
+    if (key === 'NOT') {
+      if (matchesWhere(row, value)) return false;
+      continue;
+    }
+    if (row[key] !== value) return false;
+  }
+  return true;
+};
 
 const createFakeQueueJobDelegate = () => {
   const rows = new Map();
   return {
     rows,
-    async upsert({ where, create, update }) {
-      const key = compositeKey(where.tenantId_queueName_jobKey);
+    async updateMany({ where, data }) {
+      const { tenantId, queueName, jobKey, ...rest } = where;
+      const key = compositeKey({ tenantId, queueName, jobKey });
       const existing = rows.get(key);
-      const row = existing === undefined ? { ...create } : { ...existing, ...update };
-      rows.set(key, row);
-      return row;
+      if (existing === undefined || !matchesWhere(existing, rest)) {
+        return { count: 0 };
+      }
+      rows.set(key, { ...existing, ...data });
+      return { count: 1 };
     },
-    async findFirst({ where }) {
-      return rows.get(compositeKey(where)) ?? null;
+    async create({ data }) {
+      const key = compositeKey(data);
+      if (rows.has(key)) {
+        throw { code: 'P2002', message: 'Unique constraint failed' };
+      }
+      rows.set(key, { ...data });
+      return { ...data };
     },
   };
 };
@@ -59,6 +78,7 @@ test('growth loop re-enqueue does NOT reset a row that is currently ACTIVE (a wo
 
   await scheduler.enqueueGrowthLoopEvaluation({ tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', replaySafe: true });
   const lockedUntil = '2026-01-01T00:05:00.000Z';
+  const scheduledAt = queueJob.rows.get(key).scheduledAt;
   queueJob.rows.set(key, { ...queueJob.rows.get(key), state: 'ACTIVE', attemptsMade: 1, lockedUntil });
 
   await scheduler.enqueueGrowthLoopEvaluation({ tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'SCHEDULED_REVIEW', replaySafe: true });
@@ -67,6 +87,9 @@ test('growth loop re-enqueue does NOT reset a row that is currently ACTIVE (a wo
   assert.equal(afterReenqueue.state, 'ACTIVE', 're-enqueuing while a worker is mid-evaluation must not touch state');
   assert.equal(afterReenqueue.attemptsMade, 1);
   assert.equal(afterReenqueue.lockedUntil, lockedUntil);
+  // Regression (round 3 review of PR #362): a crash-recovery reclaim of this row must honor the
+  // original lease/schedule, not one requested by a re-enqueue that arrived mid-evaluation.
+  assert.equal(afterReenqueue.scheduledAt, scheduledAt, 're-enqueuing an ACTIVE row must not touch its schedule fields');
 });
 
 test('claim lifecycle re-schedule resets a terminal row back to DELAYED and clears lock/attempt state', async () => {
@@ -113,6 +136,7 @@ test('claim lifecycle re-schedule does NOT reset a row that is currently ACTIVE 
 
   await scheduler.schedule(job);
   const lockedUntil = '2026-01-04T00:05:00.000Z';
+  const availableAt = queueJob.rows.get(key).availableAt;
   queueJob.rows.set(key, { ...queueJob.rows.get(key), state: 'ACTIVE', attemptsMade: 1, lockedUntil });
 
   await scheduler.schedule({ ...job, runAt: '2026-01-05T00:00:00.000Z' });
@@ -121,4 +145,34 @@ test('claim lifecycle re-schedule does NOT reset a row that is currently ACTIVE 
   assert.equal(afterReschedule.state, 'ACTIVE', 're-scheduling while a worker is mid-send must not touch state');
   assert.equal(afterReschedule.attemptsMade, 1);
   assert.equal(afterReschedule.lockedUntil, lockedUntil);
+  // Regression (round 3 review of PR #362): a crash of the in-flight worker must reclaim this row
+  // based on its original runAt/lease, not the newly requested (but not-yet-honored) runAt.
+  assert.equal(afterReschedule.availableAt, availableAt, 're-scheduling an ACTIVE row must not touch availableAt');
+});
+
+test('growth loop re-enqueue self-heals when create() races a concurrent creator (P2002)', async () => {
+  // Regression: if two callers race to enqueue the same fixed jobKey and neither updateMany finds
+  // an existing row, both fall through to create(). The loser must not throw -- it should retry
+  // and resolve via the reset/preserve updateMany branches against the row the winner just made.
+  const queueJob = createFakeQueueJobDelegate();
+  const key = compositeKey({ tenantId: 'tenant-1', queueName: growthLoopQueueName, jobKey: 'tenant-1:campaign-1' });
+  const realCreate = queueJob.create.bind(queueJob);
+  let createCalls = 0;
+  queueJob.create = async (args) => {
+    createCalls += 1;
+    if (createCalls === 1) {
+      // Simulate a concurrent writer creating the row between this call's updateMany misses and
+      // its own create().
+      await realCreate({ data: { tenantId: 'tenant-1', queueName: growthLoopQueueName, jobKey: 'tenant-1:campaign-1', jobName: growthLoopJobType, state: 'WAITING', payload: {}, attemptsMade: 0, maxAttempts: 3, correlationId: 'concurrent-writer' } });
+      throw { code: 'P2002', message: 'Unique constraint failed' };
+    }
+    return realCreate(args);
+  };
+  const scheduler = createGrowthLoopScheduler(queueJob);
+
+  await scheduler.enqueueGrowthLoopEvaluation({ tenantId: 'tenant-1', campaignId: 'campaign-1', trigger: 'MANUAL', replaySafe: true });
+
+  const row = queueJob.rows.get(key);
+  assert.ok(row !== undefined, 'the row must exist after the retry resolves the P2002 conflict');
+  assert.equal(row.state, 'WAITING');
 });

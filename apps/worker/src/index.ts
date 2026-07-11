@@ -49,6 +49,7 @@ import {
   normalizeInboundEvent,
   scoreRecomputationJobPayloadSchema,
   scoreRecomputationQueueContract,
+  PersistenceError,
   type ScoreRecomputationResult,
   type CorrelationMetadata,
   type InboundEvent,
@@ -342,7 +343,7 @@ export const createBootstrapOnlyWorkerServices = (): WorkerServices => ({
   events: {
     ingest: async (_context, _input) => {
       throw new WorkerRuntimeError({
-        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        code: "WORKER_RUNTIME_TRANSIENT_FAILURE",
         message: "Event ingestion service port is not configured for this worker process",
         status: 503,
         retryable: true,
@@ -352,7 +353,7 @@ export const createBootstrapOnlyWorkerServices = (): WorkerServices => ({
   scoring: {
     recomputeContactScore: async () => {
       throw new WorkerRuntimeError({
-        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        code: "WORKER_RUNTIME_TRANSIENT_FAILURE",
         message: "Score recomputation service port is not configured for this worker process",
         status: 503,
         retryable: true,
@@ -362,7 +363,7 @@ export const createBootstrapOnlyWorkerServices = (): WorkerServices => ({
   notifications: {
     sendTrialExpiryEmail: async () => {
       throw new WorkerRuntimeError({
-        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        code: "WORKER_RUNTIME_TRANSIENT_FAILURE",
         message: "Notification service port is not configured for this worker process",
         status: 503,
         retryable: true,
@@ -486,12 +487,27 @@ const eventIngestionPayloadSchema = z.object({
   receivedAt: z.string().datetime().optional(),
 }).strict();
 
+// ST1-013M: PersistenceError codes that describe a condition expected to clear on its own (a
+// lease/lock another worker holds, a transient store outage). Every other PersistenceError code
+// (NOT_FOUND, VALIDATION_FAILED, CONFLICT, TENANT_MISMATCH, ...) is just as deterministic as a
+// ZodError and must dead-letter immediately rather than retry until maxAttempts.
+const transientPersistenceErrorCodes = new Set(["PERSISTENCE_TRANSIENT", "PERSISTENCE_LEASE_CONFLICT", "PERSISTENCE_LOCK_CONFLICT"]);
+
 const toRuntimeError = (error: unknown, correlation: CorrelationMetadata): WorkerRuntimeError => {
   if (error instanceof WorkerRuntimeError) {
     return error;
   }
+  // ST1-013M: a ZodError is a deterministic payload-rejection that will recur on every retry --
+  // see the matching classification in executeReplaySafeJob's catch (@whisperm/worker-runtime).
+  if (error instanceof z.ZodError) {
+    return new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: error.message, status: 400, retryable: false, correlation });
+  }
+  if (error instanceof PersistenceError) {
+    const retryable = transientPersistenceErrorCodes.has(error.code);
+    return new WorkerRuntimeError({ code: retryable ? "WORKER_RUNTIME_TRANSIENT_FAILURE" : "WORKER_RUNTIME_VALIDATION_FAILED", message: error.message, status: error.status, retryable, correlation });
+  }
   return new WorkerRuntimeError({
-    code: "WORKER_RUNTIME_VALIDATION_FAILED",
+    code: "WORKER_RUNTIME_TRANSIENT_FAILURE",
     message: error instanceof Error ? error.message : "Worker job failed",
     status: 500,
     retryable: true,
@@ -552,7 +568,7 @@ export const createNotificationTrialReminderHandler = (services: WorkerServices)
   async execute(context) {
     if (services.notifications === undefined) {
       throw new WorkerRuntimeError({
-        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        code: "WORKER_RUNTIME_TRANSIENT_FAILURE",
         message: "Notification service port is not configured",
         status: 503,
         retryable: true,
@@ -588,7 +604,7 @@ const renderConversionRetryJobPayloadSchema = z.object({ tenantId: z.string().mi
 export const createRenderConversionRetryHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.renderConversionRetry === undefined) {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Render conversion retry service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: "Render conversion retry service port is not configured", status: 503, retryable: true, correlation: context.correlation });
     }
     const payload = renderConversionRetryJobPayloadSchema.parse(context.job.payload);
     if (payload.tenantId !== context.tenantId) {
@@ -612,7 +628,7 @@ const crmConversionJobPayloadSchema = z.object({ tenantId: z.string().min(1), cl
 export const createCrmConversionHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.crmConversionRuntime === undefined) {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "CRM conversion runtime service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: "CRM conversion runtime service port is not configured", status: 503, retryable: true, correlation: context.correlation });
     }
     const payload = crmConversionJobPayloadSchema.parse(context.job.payload);
     if (payload.tenantId !== context.tenantId) {
@@ -652,14 +668,14 @@ const growthLoopSummary = (campaign: unknown): Readonly<Record<string, unknown>>
   };
 };
 
-const transientGrowthLoopErrorCodes = new Set(["PERSISTENCE_TRANSIENT", "PERSISTENCE_LEASE_CONFLICT", "PERSISTENCE_LOCK_CONFLICT"]);
-
 const mapGrowthLoopError = (error: unknown, correlation: CorrelationMetadata): WorkerRuntimeError => {
   if (error instanceof WorkerRuntimeError) return error;
   const code = typeof error === "object" && error !== null && "code" in error ? String((error as { readonly code: unknown }).code) : undefined;
-  const retryable = code !== undefined && transientGrowthLoopErrorCodes.has(code);
+  const retryable = code !== undefined && transientPersistenceErrorCodes.has(code);
   return new WorkerRuntimeError({
-    code: "WORKER_RUNTIME_VALIDATION_FAILED",
+    // ST1-013M: the code itself must carry retryability -- computeRetryDecision only inspects
+    // the code, never this instance's `retryable` flag (see workerRuntimeErrorCodeValues).
+    code: retryable ? "WORKER_RUNTIME_TRANSIENT_FAILURE" : "WORKER_RUNTIME_VALIDATION_FAILED",
     message: error instanceof Error ? error.message : "Growth loop evaluation failed",
     status: retryable ? 503 : 409,
     retryable,
@@ -670,7 +686,7 @@ const mapGrowthLoopError = (error: unknown, correlation: CorrelationMetadata): W
 export const createGrowthLoopHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.growthLoop === undefined) {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Growth loop service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: "Growth loop service port is not configured", status: 503, retryable: true, correlation: context.correlation });
     }
     const payload = growthLoopJobPayloadSchema.parse(context.job.payload);
     if (payload.tenantId !== context.tenantId) {
@@ -691,7 +707,7 @@ const revenueAttributionJobPayloadSchema = z.object({ tenantId: z.string().min(1
 export const createRevenueAttributionHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.revenueAttribution === undefined) {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Revenue attribution runtime service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: "Revenue attribution runtime service port is not configured", status: 503, retryable: true, correlation: context.correlation });
     }
     const payload = revenueAttributionJobPayloadSchema.parse(context.job.payload);
     if (payload.tenantId !== context.tenantId) {
@@ -708,7 +724,7 @@ export const createClaimLifecycleHandler = (services: WorkerServices): WorkerJob
   async execute(context) {
     if (services.claimLifecycle === undefined) {
       throw new WorkerRuntimeError({
-        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        code: "WORKER_RUNTIME_TRANSIENT_FAILURE",
         message: "Claim lifecycle service port is not configured",
         status: 503,
         retryable: true,
@@ -734,7 +750,7 @@ export const createClaimLifecycleHandler = (services: WorkerServices): WorkerJob
       await services.claimLifecycle.expireClaimInvitation({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId);
     } else if (context.job.jobType === "marketplace.claim.intelligence") {
       if (services.claimLifecycle.evaluateClaimIntelligence === undefined || services.claimLifecycle.executeClaimRecovery === undefined) {
-        throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Claim intelligence jobs require evaluation and recovery ports", status: 503, retryable: true, correlation: context.correlation });
+        throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: "Claim intelligence jobs require evaluation and recovery ports", status: 503, retryable: true, correlation: context.correlation });
       }
       await services.claimLifecycle.evaluateClaimIntelligence({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId);
       await services.claimLifecycle.executeClaimRecovery({ tenantId: payload.tenantId, correlation: context.correlation }, payload.invitationId);
@@ -749,7 +765,7 @@ export const createScoreRecomputationHandler = (services: WorkerServices): Worke
   async execute(context) {
     if (services.scoring === undefined) {
       throw new WorkerRuntimeError({
-        code: "WORKER_RUNTIME_VALIDATION_FAILED",
+        code: "WORKER_RUNTIME_TRANSIENT_FAILURE",
         message: "Score recomputation service port is not configured",
         status: 503,
         retryable: true,
@@ -786,7 +802,7 @@ export const createSellerInvitationHandler = (services: WorkerServices): WorkerJ
   async execute(context) {
     if (services.sellerInvitation === undefined) {
       throw new WorkerRuntimeError({
-        code: 'WORKER_RUNTIME_VALIDATION_FAILED',
+        code: 'WORKER_RUNTIME_TRANSIENT_FAILURE',
         message: 'Seller invitation service port is not configured',
         status: 503,
         retryable: true,
@@ -849,7 +865,7 @@ const marketplaceDiscoveryJobPayloadSchema = z.object({
 export const createMarketplaceDiscoveryHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.marketplaceDiscovery === undefined || services.campaignRuntime?.recordDiscoveryResult === undefined) {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Marketplace discovery service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: "Marketplace discovery service port is not configured", status: 503, retryable: true, correlation: context.correlation });
     }
     const payload = marketplaceDiscoveryJobPayloadSchema.parse(context.job.payload);
     if (payload.tenantId !== context.tenantId) {
@@ -887,7 +903,7 @@ const marketplaceQualificationJobPayloadSchema = z.object({
 export const createMarketplaceQualificationHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.marketplaceQualification === undefined || services.campaignRuntime?.recordQualificationResult === undefined) {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Marketplace qualification service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: "Marketplace qualification service port is not configured", status: 503, retryable: true, correlation: context.correlation });
     }
     const payload = marketplaceQualificationJobPayloadSchema.parse(context.job.payload);
     if (payload.tenantId !== context.tenantId) {
@@ -918,7 +934,7 @@ const discoveryExecutionJobPayloadSchema = z.object({ tenantId: z.string().min(1
 export const createDiscoveryExecutionHandler = (services: WorkerServices): WorkerJobHandler => ({
   async execute(context) {
     if (services.discoveryExecution === undefined) {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "Discovery execution service port is not configured", status: 503, retryable: true, correlation: context.correlation });
+      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_TRANSIENT_FAILURE", message: "Discovery execution service port is not configured", status: 503, retryable: true, correlation: context.correlation });
     }
     const payload = discoveryExecutionJobPayloadSchema.parse(context.job.payload);
     if (payload.tenantId !== context.tenantId) {
@@ -926,7 +942,14 @@ export const createDiscoveryExecutionHandler = (services: WorkerServices): Worke
     }
     const result = await services.discoveryExecution.execute({ ...payload, correlation: context.correlation });
     if (result.status === "FAILED") {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: result.errorMessage ?? "Discovery execution failed", status: 502, retryable: result.metrics?.retryable !== false, correlation: context.correlation });
+      // ST1-013M: retryability must be explicit, not assumed. A discovery failure with no
+      // metrics.retryable flag at all (e.g. DiscoveryExecutionWorker's
+      // DISCOVERY_CAMPAIGN_NOT_FOUND, which reports only { discoveryStatus: "FAILED" }) is a
+      // deterministic domain failure, not a transient one -- it must dead-letter immediately like
+      // it always did before WORKER_RUNTIME_TRANSIENT_FAILURE existed, not retry until
+      // maxAttempts. Only an explicit `retryable: true` opts into the transient-failure retry path.
+      const retryable = result.metrics?.retryable === true;
+      throw new WorkerRuntimeError({ code: retryable ? "WORKER_RUNTIME_TRANSIENT_FAILURE" : "WORKER_RUNTIME_VALIDATION_FAILED", message: result.errorMessage ?? "Discovery execution failed", status: 502, retryable, correlation: context.correlation });
     }
     return workerRuntimeMetadataSchema.parse({ tenantId: payload.tenantId, campaignId: payload.campaignId, executionId: payload.executionId, ...(result.metrics ?? {}), correlationId: context.correlation.correlationId });
   },
@@ -936,7 +959,7 @@ export const createSchedulerTickHandler = (services: WorkerServices): WorkerJobH
   async execute(context) {
     if (services.campaignRuntime?.runDueScheduledCampaigns === undefined) {
       throw new WorkerRuntimeError({
-        code: 'WORKER_RUNTIME_VALIDATION_FAILED',
+        code: 'WORKER_RUNTIME_TRANSIENT_FAILURE',
         message: 'Campaign runtime scheduler port is not configured',
         status: 503,
         retryable: true,
@@ -1373,38 +1396,62 @@ const lifecycleClaimTokenRecordSchema = z.object({
   updatedAt: z.string().datetime(),
 }).strict();
 
-type QueueJobDelegate = Pick<PrismaPersistenceClient["queueJob"], "upsert" | "findFirst">;
+type QueueJobDelegate = Pick<PrismaPersistenceClient["queueJob"], "updateMany" | "create">;
+
+const isPrismaUniqueConstraintViolation = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && "code" in error && (error as { readonly code: unknown }).code === "P2002";
 
 /**
- * ST1-013M: whether a re-enqueue/re-schedule targeting an existing (tenantId, queueName, jobKey)
- * row should reset it back to a fresh claimable state. If the row is currently ACTIVE, a worker
- * is mid-handler for it right now -- resetting state/lockedUntil/attemptsMade would let the
- * poller claim it a second time concurrently, and the in-flight worker's own completion
- * transition (which requires state=ACTIVE as its precondition) would then fail with a conflict.
- * Only rows that are NOT currently being worked (WAITING/DELAYED/RETRY_SCHEDULED, or terminal
- * COMPLETED/DEAD_LETTERED/CANCELLED) are safe to reset.
+ * ST1-013M: atomically re-enqueue/re-schedule a fixed-(tenantId, queueName, jobKey) QueueJob row
+ * without racing the durable poller or an in-flight worker.
+ *
+ * A prior revision read the row's state with `findFirst` and then wrote based on that read --
+ * not atomic, since the row can transition (ACTIVE -> COMPLETED, or WAITING -> ACTIVE) between
+ * the read and the write. This version instead makes the reset decision part of the WHERE clause
+ * of the write itself, so each write is self-consistent at the instant it executes:
+ *
+ *   1. Try to reset the row, but only where it is NOT currently ACTIVE (no worker is mid-handler
+ *      for it). If this touches a row, done -- a stale WAITING/DELAYED/RETRY_SCHEDULED/terminal
+ *      row is now fresh and claimable again.
+ *   2. If step 1 touched nothing, the row is either ACTIVE or doesn't exist yet. Try to update
+ *      only non-schedule fields (payload/correlationId), but only where it IS currently ACTIVE.
+ *      This preserves the in-flight worker's claim -- state/lockedUntil/attemptsMade/schedule are
+ *      left untouched, so a crash-recovery reclaim still honors the original lease/runAt rather
+ *      than silently adopting the newly requested one.
+ *   3. If neither update touched a row, it doesn't exist yet -- create it. A concurrent creator
+ *      racing this step surfaces as a unique constraint violation (P2002) on
+ *      (tenantId, queueName, jobKey); retry once from step 1, which will now find the row the
+ *      other caller just created and resolve it via steps 1 or 2.
  */
-const shouldResetQueueJobOnReenqueue = async (
+const reenqueueQueueJobRow = async (
   queueJob: QueueJobDelegate,
   where: { readonly tenantId: string; readonly queueName: string; readonly jobKey: string },
-): Promise<boolean> => {
-  if (queueJob.findFirst === undefined) return true;
-  const existing = await queueJob.findFirst({ where });
-  const state = existing !== null && typeof existing === "object" && "state" in existing ? (existing as { readonly state: unknown }).state : undefined;
-  return state !== "ACTIVE";
+  fields: {
+    readonly resetData: Readonly<Record<string, unknown>>;
+    readonly activePreserveData: Readonly<Record<string, unknown>>;
+    readonly createData: Readonly<Record<string, unknown>>;
+  },
+  retriesRemaining = 1,
+): Promise<void> => {
+  const reset = await queueJob.updateMany({ where: { ...where, NOT: { state: "ACTIVE" } }, data: fields.resetData });
+  if (reset.count > 0) return;
+
+  const preserved = await queueJob.updateMany({ where: { ...where, state: "ACTIVE" }, data: fields.activePreserveData });
+  if (preserved.count > 0) return;
+
+  try {
+    await queueJob.create({ data: fields.createData });
+  } catch (error) {
+    if (retriesRemaining > 0 && isPrismaUniqueConstraintViolation(error)) {
+      await reenqueueQueueJobRow(queueJob, where, fields, retriesRemaining - 1);
+      return;
+    }
+    throw error;
+  }
 };
 
 export const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
   async schedule(job: ClaimLifecycleScheduleJob): Promise<void> {
-    if (queueJob.upsert === undefined) {
-      throw new WorkerRuntimeError({
-        code: "WORKER_RUNTIME_VALIDATION_FAILED",
-        message: "QueueJob upsert is not available for claim lifecycle scheduling",
-        status: 503,
-        retryable: true,
-        correlation: job.correlation,
-      });
-    }
     // ST1-013M: validate against the canonical contract before persisting -- see runtime-job-contracts.ts.
     const payload = claimLifecycleJobPayloadSchema.parse({
       tenantId: job.tenantId,
@@ -1414,10 +1461,27 @@ export const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
       replaySafe: true,
     });
     const reenqueueWhere = { tenantId: job.tenantId, queueName: claimLifecycleQueueName, jobKey: job.dedupeKey };
-    const shouldReset = await shouldResetQueueJobOnReenqueue(queueJob, reenqueueWhere);
-    await queueJob.upsert({
-      where: { tenantId_queueName_jobKey: reenqueueWhere },
-      create: {
+    await reenqueueQueueJobRow(queueJob, reenqueueWhere, {
+      // ST1-013M: reset state/lockedUntil/attemptsMade on re-schedule -- otherwise re-scheduling
+      // a reminder whose previous QueueJob row already reached COMPLETED/DEAD_LETTERED would
+      // leave it permanently unclaimable.
+      resetData: {
+        state: "DELAYED",
+        payload,
+        maxAttempts: 3,
+        attemptsMade: 0,
+        scheduledAt: new Date(job.runAt),
+        availableAt: new Date(job.runAt),
+        lockedUntil: null,
+        lastError: null,
+        correlationId: job.correlation.correlationId,
+      },
+      // ST1-013M: while the row is ACTIVE (a worker is mid-handler right now), only refresh
+      // payload/correlationId. Never touch scheduledAt/availableAt/lockedUntil/attemptsMade/state
+      // here -- if the in-flight worker crashes, claimNext's stale-ACTIVE reclaim path must honor
+      // the original lease/runAt, not a runAt requested by a re-schedule that arrived mid-handler.
+      activePreserveData: { payload, correlationId: job.correlation.correlationId },
+      createData: {
         tenantId: job.tenantId,
         queueName: claimLifecycleQueueName,
         jobName: job.jobType,
@@ -1429,32 +1493,12 @@ export const createClaimLifecycleScheduler = (queueJob: QueueJobDelegate) => ({
         availableAt: new Date(job.runAt),
         correlationId: job.correlation.correlationId,
       },
-      // ST1-013M: reset state/lockedUntil/attemptsMade on re-schedule -- otherwise re-scheduling
-      // a reminder whose previous QueueJob row already reached COMPLETED/DEAD_LETTERED would
-      // leave it permanently unclaimable. But NOT when the row is currently ACTIVE (a worker is
-      // mid-handler right now) -- see shouldResetQueueJobOnReenqueue.
-      update: shouldReset
-        ? {
-            state: "DELAYED",
-            payload,
-            maxAttempts: 3,
-            attemptsMade: 0,
-            scheduledAt: new Date(job.runAt),
-            availableAt: new Date(job.runAt),
-            lockedUntil: null,
-            lastError: null,
-            correlationId: job.correlation.correlationId,
-          }
-        : { payload, scheduledAt: new Date(job.runAt), availableAt: new Date(job.runAt), correlationId: job.correlation.correlationId },
     });
   },
 });
 
 export const createGrowthLoopScheduler = (queueJob: QueueJobDelegate) => ({
   async enqueueGrowthLoopEvaluation(job: { readonly tenantId: string; readonly campaignId: string; readonly trigger: string; readonly correlationId?: string | undefined; readonly replaySafe: true }): Promise<void> {
-    if (queueJob.upsert === undefined) {
-      throw new WorkerRuntimeError({ code: "WORKER_RUNTIME_VALIDATION_FAILED", message: "QueueJob upsert is not available for growth loop scheduling", status: 503, retryable: true, correlation: { correlationId: job.correlationId ?? job.campaignId } });
-    }
     const jobKey = `${job.tenantId}:${job.campaignId}`;
     // ST1-013M: validate against the canonical contract before persisting -- see
     // runtime-job-contracts.ts. Previously this wrote state: "PENDING", which is not a valid
@@ -1462,19 +1506,17 @@ export const createGrowthLoopScheduler = (queueJob: QueueJobDelegate) => ({
     const payload = growthLoopJobPayloadSchema.parse({ tenantId: job.tenantId, campaignId: job.campaignId, trigger: job.trigger, correlationId: job.correlationId ?? jobKey, replaySafe: true });
     const now = new Date();
     const reenqueueWhere = { tenantId: job.tenantId, queueName: growthLoopQueueName, jobKey };
-    const shouldReset = await shouldResetQueueJobOnReenqueue(queueJob, reenqueueWhere);
-    await queueJob.upsert({
-      where: { tenantId_queueName_jobKey: reenqueueWhere },
-      create: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobName: growthLoopJobType, jobKey, state: "WAITING", payload, maxAttempts: 3, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
+    await reenqueueQueueJobRow(queueJob, reenqueueWhere, {
       // ST1-013M: the jobKey is fixed per tenant+campaign, so a re-evaluation reuses the same
-      // row via this update branch. Without resetting state/lockedUntil/attemptsMade, a row left
-      // COMPLETED or DEAD_LETTERED by a prior evaluation is never claimable again -- the campaign
-      // metadata would say growthLoopStatus: "QUEUED" while no worker ever picks the row back up.
-      // But NOT when the row is currently ACTIVE (a worker is mid-evaluation right now) -- see
-      // shouldResetQueueJobOnReenqueue.
-      update: shouldReset
-        ? { state: "WAITING", payload, maxAttempts: 3, attemptsMade: 0, scheduledAt: now, availableAt: now, lockedUntil: null, lastError: null, correlationId: job.correlationId ?? jobKey }
-        : { payload, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
+      // row. Without resetting state/lockedUntil/attemptsMade, a row left COMPLETED or
+      // DEAD_LETTERED by a prior evaluation is never claimable again -- the campaign metadata
+      // would say growthLoopStatus: "QUEUED" while no worker ever picks the row back up.
+      resetData: { state: "WAITING", payload, maxAttempts: 3, attemptsMade: 0, scheduledAt: now, availableAt: now, lockedUntil: null, lastError: null, correlationId: job.correlationId ?? jobKey },
+      // ST1-013M: while ACTIVE (a worker is mid-evaluation right now), only refresh
+      // payload/correlationId -- never the schedule/lock/attempt fields (see
+      // createClaimLifecycleScheduler for the crash-recovery rationale).
+      activePreserveData: { payload, correlationId: job.correlationId ?? jobKey },
+      createData: { tenantId: job.tenantId, queueName: growthLoopQueueName, jobName: growthLoopJobType, jobKey, state: "WAITING", payload, maxAttempts: 3, scheduledAt: now, availableAt: now, correlationId: job.correlationId ?? jobKey },
     });
   },
 });
@@ -1568,11 +1610,12 @@ export const createClaimLifecycleServicePort = (
           await send;
         } catch (error) {
           const message = error instanceof ProviderDeliveryError ? error.toSafeMessage() : "Claim reminder delivery failed";
+          const retryable = error instanceof ProviderDeliveryError ? error.retryable : true;
           throw new WorkerRuntimeError({
-            code: "WORKER_RUNTIME_VALIDATION_FAILED",
+            code: retryable ? "WORKER_RUNTIME_TRANSIENT_FAILURE" : "WORKER_RUNTIME_VALIDATION_FAILED",
             message,
             status: 502,
-            retryable: error instanceof ProviderDeliveryError ? error.retryable : true,
+            retryable,
             correlation: input.correlation,
           });
         }

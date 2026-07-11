@@ -213,6 +213,41 @@ test('a governance DENY decision (WORKER_RUNTIME_VALIDATION_FAILED, retryable:fa
   assert.equal(queueJobs.rows.get('row-1').state, 'DEAD_LETTERED');
 });
 
+test('WORKER_RUNTIME_TRANSIENT_FAILURE (an unconfigured dependency / provider outage) is retried, not dead-lettered on the first attempt', async () => {
+  // ST1-013M round 4: WORKER_RUNTIME_VALIDATION_FAILED being deny-listed for terminal cases (the
+  // test above) previously also deny-listed every unconfigured-dependency and provider-delivery
+  // failure that reused the same code with retryable:true -- computeRetryDecision only inspects
+  // the code, not the per-instance flag. WORKER_RUNTIME_TRANSIENT_FAILURE is the distinct code
+  // for exactly those cases, and must retry through the normal backoff/maxAttempts policy.
+  const queueJobs = createFakeQueueJobs([baseRow({ maxAttempts: 5 })]);
+  const app = createApp(async () => { throw new WorkerRuntimeError({ code: 'WORKER_RUNTIME_TRANSIENT_FAILURE', message: 'downstream provider unreachable', status: 503, retryable: true }); }, queueJobs);
+  await app.start();
+
+  const now = new Date('2026-01-02T00:00:00.000Z');
+  const result = await claimAndProcessOneDurableQueueJob({ app, queueJobs, tenantId: 'tenant-1', queueNames: ['event.ingestion'], now });
+
+  assert.equal(result.outcome, 'RETRY_SCHEDULED');
+  const row = queueJobs.rows.get('row-1');
+  assert.equal(row.state, 'RETRY_SCHEDULED');
+  assert.ok(new Date(row.availableAt).getTime() > now.getTime(), 'retry must be scheduled in the future');
+  assert.equal(queueJobs.deadLetters.length, 0);
+});
+
+test('an uncaught (non-WorkerRuntimeError) handler exception is retried, not dead-lettered on the first attempt', async () => {
+  // executeReplaySafeJob wraps any plain thrown Error as WORKER_RUNTIME_TRANSIENT_FAILURE (see
+  // packages/worker-runtime/src/index.ts) -- an unexpected exception is exactly the kind of
+  // failure that should get another attempt, not dead-letter immediately.
+  const queueJobs = createFakeQueueJobs([baseRow({ maxAttempts: 5 })]);
+  const app = createApp(async () => { throw new Error('unexpected failure'); }, queueJobs);
+  await app.start();
+
+  const result = await claimAndProcessOneDurableQueueJob({ app, queueJobs, tenantId: 'tenant-1', queueNames: ['event.ingestion'], now: new Date('2026-01-02T00:00:00.000Z') });
+
+  assert.equal(result.outcome, 'RETRY_SCHEDULED');
+  assert.equal(queueJobs.rows.get('row-1').state, 'RETRY_SCHEDULED');
+  assert.equal(queueJobs.deadLetters.length, 0);
+});
+
 test('a retry attempt actually re-executes the handler instead of being skipped as a duplicate', async () => {
   // Regression: buildJobContractFromQueueJobRow must scope idempotency.key to the attempt
   // (attemptsMade), not just the row's stable jobKey -- InMemoryIdempotencyStore never releases

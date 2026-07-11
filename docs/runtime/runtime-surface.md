@@ -261,29 +261,57 @@ ever running again. The row's own `jobKey` is still threaded through to `DeadLet
 | Failure | Retriable? | Where decided |
 |---|---|---|
 | Payload fails `runtime-job-contracts.ts` schema at enqueue time | Terminal — the enqueue call itself throws; no `QueueJob` row is ever created | `RuntimeJobService.enqueueRuntimeJob` |
-| Payload fails the handler's own schema at execution time (defense in depth) | Terminal (`WORKER_RUNTIME_VALIDATION_FAILED` is denied in the default durable retry policy) | `defaultDurableRetryPolicy` (`apps/worker/src/durable-queue-runtime.ts`) |
-| Acquisition governance DENY decision (`enforceAcquisitionGovernance`) | Terminal — same code and same reason | Same default policy |
+| Payload fails the handler's own schema at execution time (defense in depth) — a `ZodError` | Terminal (`WORKER_RUNTIME_VALIDATION_FAILED`, denied in the default durable retry policy) | `executeReplaySafeJob` catch (`@whisperm/worker-runtime`) classifies `ZodError` explicitly |
+| A repository call throws `PersistenceError` with a terminal code (`PERSISTENCE_NOT_FOUND`, `PERSISTENCE_VALIDATION_FAILED`, `PERSISTENCE_CONFLICT`, `PERSISTENCE_TENANT_MISMATCH`, ...) — e.g. a stale `executionId` | Terminal (`WORKER_RUNTIME_VALIDATION_FAILED`) | Same `executeReplaySafeJob` catch classifies `PersistenceError` by code |
+| A repository call throws `PersistenceError` with a transient code (`PERSISTENCE_TRANSIENT`, `PERSISTENCE_LEASE_CONFLICT`, `PERSISTENCE_LOCK_CONFLICT`) | Retriable — `WORKER_RUNTIME_TRANSIENT_FAILURE` | Same classification |
+| Discovery execution reports `status: "FAILED"` without an explicit `metrics.retryable: true` | Terminal (`WORKER_RUNTIME_VALIDATION_FAILED`) — omitted retryability defaults to terminal, not transient | `createDiscoveryExecutionHandler` (`apps/worker/src/index.ts`) |
+| Acquisition governance DENY decision (`enforceAcquisitionGovernance`) | Terminal — same code and same reason | `defaultDurableRetryPolicy` (`apps/worker/src/durable-queue-runtime.ts`) |
 | Tenant isolation violation | Terminal | Same default policy |
-| Provider/service unavailable, network errors, other `WorkerRuntimeError`s (except the two rows above) | Retriable up to `QueueJob.maxAttempts`, exponential backoff (60s base, 1h cap, ×2 multiplier) | `computeRetryDecision` (`@whisperm/worker-runtime`) |
+| Unconfigured/unreachable service port, provider delivery failure, discovery execution with `metrics.retryable: true`, any other uncaught (non-`ZodError`, non-terminal-`PersistenceError`) exception | Retriable up to `QueueJob.maxAttempts`, exponential backoff (60s base, 1h cap, ×2 multiplier) — `WORKER_RUNTIME_TRANSIENT_FAILURE`, absent from the deny-list | `computeRetryDecision` (`@whisperm/worker-runtime`) |
 | `maxAttempts` exhausted | Terminal — `DEAD_LETTERED` + `DeadLetterJob` row | `computeRetryDecision` / `PrismaQueueRuntime.deadLetter` |
 | Campaign assignment failure on capture | Not retried automatically — surfaced in the response + audited (§5); the caller can re-submit the assignment, which is idempotent | `captures/route.ts` |
 
-Known limitation carried over from the pre-existing `worker-runtime` error model: `WorkerRuntimeError`
-only has 7 coarse error codes, and `WORKER_RUNTIME_VALIDATION_FAILED` is used for at least three
-different things: "the payload/state is invalid" (terminal), "an acquisition-governance DENY
-decision" (terminal), and "a genuinely transient provider failure during claim reminder delivery"
-(`createClaimLifecycleHandler` wraps provider errors with this code while setting `retryable` from
-the underlying error — that instance-level flag exists, but `computeRetryDecision` only ever
-consults the error *code*, never that flag). An earlier revision of this slice relaxed the deny-list
-to let the third case retry, on the reasoning that `RuntimeJobService.enqueueRuntimeJob` already
-validates every payload before it's ever persisted, so a genuinely-invalid payload reaching this
-consumer should be rare. A follow-up review caught that this also made the *terminal* cases (DENY
-decisions, malformed job types) retry repeatedly instead of dead-lettering immediately, which is a
-worse failure mode than the transient case dead-lettering a bit too eagerly. The deny-list has been
-restored (`WORKER_RUNTIME_VALIDATION_FAILED` is terminal again); the claim-reminder transient-
-provider-failure case is a known, accepted limitation of this slice, not fixed here — properly
-fixing it means giving `worker-runtime` a distinct error code for "transient dependency failure"
-separate from "validation failed", which is a larger, separate change than this slice's scope.
+**`WORKER_RUNTIME_TRANSIENT_FAILURE` vs. `WORKER_RUNTIME_VALIDATION_FAILED`.** Earlier revisions of
+this slice reused `WORKER_RUNTIME_VALIDATION_FAILED` for three different things: "the payload/state
+is invalid" (terminal), "an acquisition-governance DENY decision" (terminal), and "a genuinely
+transient dependency/provider failure" (retriable) — e.g. an unconfigured service port, or claim
+reminder delivery hitting a provider outage. `computeRetryDecision` only ever consults the error
+*code*, never the per-instance `retryable` flag on `WorkerRuntimeError`, so whichever way that single
+code's deny-list was set, one side of the split was wrong: denying it dead-lettered transient
+provider failures on the first attempt; allowing it let terminal governance-DENY/malformed-payload
+failures retry repeatedly instead of dead-lettering immediately. `WORKER_RUNTIME_TRANSIENT_FAILURE`
+(added to `workerRuntimeErrorCodeValues` in `@whisperm/worker-runtime`) resolves this by giving the
+retriable case its own code, deliberately left off `defaultDurableRetryPolicy`'s deny-list: every
+"service port is not configured" throw across `apps/worker/src/index.ts`, the claim-reminder
+provider-failure branch in `createClaimLifecycleServicePort`, `mapGrowthLoopError`'s
+`PERSISTENCE_TRANSIENT` branch, and `executeReplaySafeJob`'s catch-all for any uncaught exception
+now use it instead.
+
+That catch-all cannot just default every uncaught exception to `WORKER_RUNTIME_TRANSIENT_FAILURE`,
+though — two more deterministic-failure shapes had to be carved out explicitly, the same way
+`ZodError` is:
+
+- A `PersistenceError` (`@whisperm/types`) means a repository call rejected the operation for a
+  domain reason, not an infrastructure one. `PERSISTENCE_NOT_FOUND` (e.g. `recordDiscoveryResult`/
+  `recordQualificationResult` called against a stale `executionId`), `PERSISTENCE_VALIDATION_FAILED`,
+  `PERSISTENCE_CONFLICT`, and similar codes are exactly as deterministic as a malformed payload and
+  must dead-letter immediately. Only `PERSISTENCE_TRANSIENT`/`PERSISTENCE_LEASE_CONFLICT`/
+  `PERSISTENCE_LOCK_CONFLICT` (the same set `mapGrowthLoopError` already used) describe something
+  that can clear on its own. `apps/worker/src/index.ts`'s `toRuntimeError` mirrors this
+  classification for defense-in-depth, even though `executeReplaySafeJob` normalizes every error
+  before it reaches that fallback in the current call graph.
+- `createDiscoveryExecutionHandler` previously defaulted a `FAILED` result with no
+  `metrics.retryable` flag at all to *retryable* (`!== false`). A discovery failure with no flag
+  (e.g. `DISCOVERY_CAMPAIGN_NOT_FOUND`, which reports only `{ discoveryStatus: "FAILED" }`) is just
+  as deterministic as any other terminal case; the default was inverted to require an explicit
+  `retryable: true` opt-in (`=== true`), matching how this path always behaved back when it only
+  ever used `WORKER_RUNTIME_VALIDATION_FAILED`.
+
+Both are consequences of the same underlying rule: `WORKER_RUNTIME_TRANSIENT_FAILURE` is for
+failures actually expected to resolve with time, not a default resting state for "didn't recognize
+this error." When adding a new uncaught-exception classification here, default to terminal and
+name the specific transient codes explicitly — the opposite default is what caused every prior
+round of this slice's review findings.
 
 **Worker polls only queues with a configured service port.** `createWorkerDefinitions` registers a
 handler for every queue (including `event.ingestion`, `crm.scoring`, `notification`,
@@ -294,13 +322,22 @@ list is restricted to just those — polling an unconfigured queue would claim a
 there and immediately fail it as "service port is not configured" instead of leaving it for a
 correctly-wired worker (e.g. a future dedicated CRM-conversion worker process).
 
-**Re-enqueue/re-schedule preserves an in-flight `ACTIVE` lock.** `createGrowthLoopScheduler` and
-`createClaimLifecycleScheduler` upsert into a fixed-`jobKey` `QueueJob` row (one row per
-tenant+campaign, or per reminder dedupe key). If a caller re-triggers evaluation/scheduling for
-that same key while the existing row is `ACTIVE` (a worker is mid-handler for it right now),
-`shouldResetQueueJobOnReenqueue` (`apps/worker/src/index.ts`) leaves `state`/`lockedUntil`/
-`attemptsMade` untouched — only `payload`/`scheduledAt`/`availableAt`/`correlationId` are
-refreshed. Resetting `state` back to `WAITING`/`DELAYED` on an `ACTIVE` row would let the poller
+**Re-enqueue/re-schedule is atomic and preserves an in-flight `ACTIVE` lock's schedule.**
+`createGrowthLoopScheduler` and `createClaimLifecycleScheduler` write into a fixed-`jobKey`
+`QueueJob` row (one row per tenant+campaign, or per reminder dedupe key). `reenqueueQueueJobRow`
+(`apps/worker/src/index.ts`) makes the reset-vs-preserve decision part of the `WHERE` clause of each
+write, not a prior `findFirst` read: it tries a conditional `updateMany` scoped to `NOT: {state:
+"ACTIVE"}` (full reset to fresh/claimable), then a conditional `updateMany` scoped to `state:
+"ACTIVE"` (refresh `payload`/`correlationId` only — schedule/lock/attempt fields are left
+untouched), then falls back to `create()`, retrying once on a unique-constraint conflict (`P2002`)
+from a concurrent creator. An earlier revision read the row's state with `findFirst` and then wrote
+based on that read; a review caught that this was not atomic (the row can transition between the
+read and the write) and that the `ACTIVE`-preserve branch still refreshed `scheduledAt`/
+`availableAt`, so a crash-recovery reclaim of that row would silently adopt a re-schedule's newly
+requested `runAt` instead of honoring the original lease. Both are fixed by construction: each
+`updateMany`'s `WHERE` is evaluated atomically against the row's state at write time, and the
+`ACTIVE`-preserve branch never touches `state`/`lockedUntil`/`attemptsMade`/`scheduledAt`/
+`availableAt`. Resetting `state` back to `WAITING`/`DELAYED` on an `ACTIVE` row would let the poller
 claim it a second time concurrently, and the in-flight worker's own completion transition (which
 requires `state = ACTIVE` as its precondition) would then fail with a conflict. Re-enqueuing while
 the row is in any other state (`WAITING`/`DELAYED`/`RETRY_SCHEDULED`, or terminal

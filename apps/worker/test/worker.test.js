@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   InMemoryQueueRuntime,
   createWorkerApplication,
+  createDiscoveryExecutionHandler,
 } from '../dist/index.js';
 
 const fixedDate = new Date('2026-01-01T00:00:00.000Z');
@@ -250,7 +251,9 @@ test('retryable failures schedule a retry instead of dead-lettering', async () =
           multiplier: 2,
           jitter: false,
         },
-        retryableErrorCodes: ['WORKER_RUNTIME_VALIDATION_FAILED'],
+        // ST1-013M: a plain thrown Error is wrapped as WORKER_RUNTIME_TRANSIENT_FAILURE (see
+        // executeReplaySafeJob in @whisperm/worker-runtime), not WORKER_RUNTIME_VALIDATION_FAILED.
+        retryableErrorCodes: ['WORKER_RUNTIME_TRANSIENT_FAILURE'],
         nonRetryableErrorCodes: [],
         deadLetterAfterMaxAttempts: true,
         replaySafe: true,
@@ -946,4 +949,53 @@ test('marketplace invite worker proceeds normally when governance allows', async
 
   assert.equal(result.status, 'SUCCEEDED');
   assert.equal(calls[0][0], 'sendInvitation');
+});
+
+const createDiscoveryExecutionContext = (payload) => ({
+  tenantId: 'tenant-1',
+  job: { payload },
+  correlation,
+  telemetry: {},
+});
+
+test('discovery execution worker treats a failure with no explicit retryable flag as terminal', async () => {
+  // ST1-013M round 5: a discovery failure with no metrics.retryable at all (e.g.
+  // DISCOVERY_CAMPAIGN_NOT_FOUND, reporting only { discoveryStatus: 'FAILED' }) is deterministic
+  // and must dead-letter immediately -- omitted retryability must default to terminal, not
+  // transient.
+  const handler = createDiscoveryExecutionHandler({
+    discoveryExecution: {
+      async execute() {
+        return { status: 'FAILED', metrics: { discoveryStatus: 'FAILED' }, errorCode: 'DISCOVERY_CAMPAIGN_NOT_FOUND', errorMessage: 'Campaign not found' };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => handler.execute(createDiscoveryExecutionContext({ tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', trigger: 'MANUAL' })),
+    (error) => {
+      assert.equal(error.code, 'WORKER_RUNTIME_VALIDATION_FAILED');
+      assert.equal(error.retryable, false);
+      return true;
+    },
+  );
+});
+
+test('discovery execution worker retries when the failure explicitly opts into retryable', async () => {
+  const handler = createDiscoveryExecutionHandler({
+    discoveryExecution: {
+      async execute() {
+        return { status: 'FAILED', metrics: { retryable: true }, errorMessage: 'upstream provider timed out' };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => handler.execute(createDiscoveryExecutionContext({ tenantId: 'tenant-1', campaignId: 'campaign-1', executionId: 'execution-1', trigger: 'MANUAL' })),
+    (error) => {
+      assert.equal(error.code, 'WORKER_RUNTIME_TRANSIENT_FAILURE');
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
 });
