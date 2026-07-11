@@ -78,6 +78,9 @@ importers:
       '@whisperm/types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@whisperm/worker':
+        specifier: workspace:*
+        version: link:../worker
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1

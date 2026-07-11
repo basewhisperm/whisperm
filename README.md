@@ -17,10 +17,13 @@ This is a pnpm workspace monorepo:
 
 - **`apps/web`** is the actual product -- a Next.js app. All CRM and Seller Acquisition UI and
   API routes live here. This is what you run.
-- **`apps/worker`** is a BullMQ-*shaped* worker scaffold. It is **not** wired to a durable queue
-  yet (its queue runtime is in-memory only). The golden path (capture -> invite -> claim ->
-  convert) runs synchronously inside `apps/web` request handlers and does not depend on this
-  process being up.
+- **`apps/worker`** is a BullMQ-*shaped* durable-queue worker: its `QueueJob` table is
+  Postgres-backed, not in-memory, but nothing in this repo's deployment keeps this process running
+  continuously. `apps/web`'s `GET /api/internal/queue-drain` (Vercel Cron) reuses its exact
+  production wiring to drain the same queue instead -- see "Known gaps" below. The golden path
+  (capture -> invite -> claim -> convert) runs synchronously inside `apps/web` request handlers
+  and does not depend on either process being up; only the *retry* and *scheduled* paths (claim
+  reminders/expiry, growth-loop evaluation) go through this queue.
 - **`apps/api`** is a standalone Fastify-style HTTP API (billing, a second CRM implementation).
   Nothing in this repo currently starts it (no `.listen()` call is wired up) or calls it from
   `apps/web` -- treat it as a library of routes/services, not a running service, until a bootstrap
@@ -40,7 +43,7 @@ Auth is [Clerk](https://clerk.com) -- there is no NextAuth/custom session layer 
 | Path | What it is | Status |
 | --- | --- | --- |
 | `apps/web` | Next.js app -- the actual product. All CRM and Seller Acquisition UI + API routes live here. | Live, this is what you run. |
-| `apps/worker` | BullMQ-shaped worker scaffold. | Not wired to a durable queue yet (in-memory only) -- see "Known gaps" below. |
+| `apps/worker` | BullMQ-shaped worker with a Postgres-backed durable queue. | Not run as a standing process by this repo's deployment -- `apps/web`'s Vercel-Cron-triggered `/api/internal/queue-drain` drains the same queue instead. See "Known gaps" below. |
 | `apps/api` | Standalone Fastify-style HTTP API (billing, a second CRM implementation). | Not currently started by anything and not called by `apps/web` -- see "Known gaps" below. |
 | `packages/*` | Shared domain logic, Prisma repositories, and runtimes consumed by the apps above. | |
 | `prisma/` | The Postgres schema, migrations, and seed scripts. | |
@@ -184,6 +187,7 @@ account matching `WHISPERM_DEMO_USER_EMAIL`, and you should land on a populated 
 | `GET /readyz` | `apps/api` | Readiness (configurable checks via `ReadinessCheck`). |
 | `GET /api/marketplace-acquisition/provider-health?channel=WHATSAPP\|SMS\|EMAIL` | `apps/web` | Reports whether an invitation channel is actually usable given current env config. |
 | `GET /api/marketplace-acquisition/runtime-health` | `apps/web` | Acquisition runtime health/governance surface. |
+| `GET /api/internal/queue-drain` | `apps/web` | Not a health check -- drains the durable `QueueJob` table for every tenant with due work. Requires `Authorization: Bearer $CRON_SECRET`; wired to Vercel Cron in `apps/web/vercel.json`. See "Known gaps". |
 
 `apps/worker` exposes `getHealth()`/`getReadiness()` as in-process methods
 (`apps/worker/src/index.ts`) but does not currently serve them over HTTP.
@@ -319,15 +323,30 @@ mutating token/capture/invitation status directly.
 
 ## Known gaps (see full review for detail)
 
-- **No self-service signup.** Nothing creates a `TenantUser` row for a new sign-up -- every
-  workspace today is provisioned by a seed script (`prisma/demo-seed.mjs`,
-  `prisma/founding-workspaces-seed.mjs`).
-- **Billing (Stripe/Paystack) is not reachable from the live app.** That logic lives in
-  `apps/api`, which nothing calls.
+- **Self-service signup is real but minimal.** A signed-in Clerk user with no matching
+  `TenantUser` row is auto-provisioned a `Tenant`, an `OWNER` `TenantUser`, a default CRM
+  pipeline, and a 14-day trial `Subscription` (`apps/web/src/lib/provision-tenant.ts`). There is
+  still no onboarding flow (workspace name, team invites, etc.) beyond this bare-minimum
+  provisioning.
+- **Billing is wired into `apps/web`, not just `apps/api`.** `/api/webhooks/stripe`,
+  `/api/webhooks/paystack`, and `/api/billing/upgrade` (`apps/web/src/lib/billing/`) verify
+  signatures, upsert the tenant's `Subscription` row, and start a real Stripe/Paystack checkout
+  session. `SELLER_ACQUISITION` now also unlocks from an active/trialing subscription, not only
+  the manual `tenant-feature` CLI toggle (which still works, as an ops override). Paystack routing
+  is effectively unreachable today: `resolveBillingProvider` only picks it for country `"GH"`, and
+  nothing in the live sign-up flow collects a country yet.
 - **`apps/api` does not currently start.** Nothing in it calls `.listen()`; treat it as a library
-  of routes/services that would need a bootstrap entrypoint before it could run as a service.
-- **`apps/worker`'s queue is in-memory, not durable.** Anything meant to run asynchronously
-  (trial reminders, scheduled campaign ticks, claim expiry/reminders) needs a real BullMQ/Redis
-  wiring before it can be relied on unattended -- the claim lifecycle job handlers themselves are
-  correct and tested (see "Seller claim lifecycle" above), but nothing currently drains the queue
-  those jobs are scheduled onto.
+  of routes/services that would need a bootstrap entrypoint before it could run as a service. Its
+  billing/webhook logic is real and tested, but `apps/web` no longer depends on it -- the reusable
+  Stripe event-mapping piece was moved to `packages/billing-runtime` instead (see
+  `stripeEventToSubscriptionSnapshot`).
+- **`apps/worker`'s queue is durable but not continuously drained.** The `QueueJob` table is
+  Postgres-backed (`apps/worker/src/durable-queue-runtime.ts`), not in-memory, and the claim
+  lifecycle / campaign-runtime / growth-loop job handlers are correct and tested -- but nothing in
+  this repo's deployment keeps `apps/worker` running as a standing process. Instead,
+  `GET /api/internal/queue-drain` (`apps/web/src/lib/queue-drain/drain.ts`) reuses that exact
+  production wiring to drain every tenant's due jobs in one bounded, time-budgeted HTTP call, and
+  is wired to Vercel Cron in `apps/web/vercel.json` (requires `CRON_SECRET`; every-5-minutes cron
+  needs a Vercel Pro plan -- Hobby is limited to daily). Trial-expiry reminder emails
+  (`buildTrialReminderJobs` in `@whisperm/notification-runtime`) are still never scheduled by
+  anything in `apps/web`, so they don't fire even with the drain running.
