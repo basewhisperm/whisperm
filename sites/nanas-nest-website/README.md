@@ -41,26 +41,40 @@ session's scratch space — not part of this deliverable) so that header/footer/
 and JSON-LD stay perfectly consistent across all 18 pages. The output here is plain static
 HTML; nothing needs to be built or compiled to edit or host it.
 
-## Before you launch — replace these placeholders
+## Real contact info wired in
 
-1. **Phone number** — `(202) 555-0173` appears site-wide (header, footer, contact page). It's a
-   fictitious 555 number used as a placeholder. Find/replace it (and the `tel:` link
-   `+12025550173`) with your real number across every `.html` file.
-2. **Email** — `hello@nanasnestcare.com`. Make sure this mailbox exists and is monitored, or
-   replace it with your real address.
-3. **Contact form action** — `contact.html` posts to
+- **Phone**: (443) 600-0583 (`tel:+14436000583`), site-wide.
+- **Email**: nanasnestcare@gmail.com, site-wide.
+- **Google Business Profile**: linked from the footer ("Read Our Google Reviews") on every page,
+  from a callout at the top of `testimonials.html`, and from a "Read Our Google Reviews" button
+  in the home page testimonials section — https://maps.app.goo.gl/6T9wRKmPQMcSRZr78. It's also
+  listed in the `sameAs` array of the `ChildCare` structured data on the home and area pages,
+  which helps Google associate this website with that Business Profile.
+
+  **Note on reviews**: this build environment's network egress blocks Google Maps and Facebook,
+  so I couldn't fetch the Profile's actual star rating, review count, or review text — nothing
+  on the site states a rating/count, and the sample testimonials are explicitly labeled as
+  illustrative, not real quotes (see below), so nothing false is asserted. If you'd like 3–6 real
+  reviews featured as verbatim testimonials, copy them over from the Business Profile (reviewer
+  first name + last initial, as Google displays them, plus their star rating) and I can drop them
+  into `testimonials.html` and the home page in place of the samples.
+
+## Before you launch — remaining placeholders
+
+1. **Contact form action** — `contact.html` posts to
    `https://formspree.io/f/YOUR_FORM_ID`. It also carries `data-netlify="true"` so it works
    out of the box if hosted on Netlify. If you're not using Netlify, sign up for a form backend
    (Formspree, Basin, etc.) and swap in your real endpoint — or wire it to your own API.
-4. **Testimonials** (`testimonials.html`, and the 3 featured on the home page) are
-   **placeholder / sample copy**, written in a realistic style but not real client quotes.
-   Replace them with real, permission-granted feedback before publishing.
-5. **Social link** — `instagram.com/nanasnestcare` is a placeholder handle; point it at your
+2. **Testimonials** (`testimonials.html`, and the 3 featured on the home page) are
+   **placeholder / sample copy**, written in a realistic style but not real client quotes — each
+   is labeled as such on the page. Replace them with real, permission-granted feedback (from
+   Google or direct client outreach) before publishing.
+3. **Social link** — `instagram.com/nanasnestcare` is a placeholder handle; point it at your
    real profile (or remove it).
-6. **Pricing language** in `blog/cost-of-a-night-nurse-dc-maryland-virginia.html` is
+4. **Pricing language** in `blog/cost-of-a-night-nurse-dc-maryland-virginia.html` is
    intentionally general ("mid-double-digit hourly range") rather than a firm quote — update it
    to reflect your actual rates, or keep it general and rely on the contact form for quotes.
-7. **Privacy policy** (`privacy.html`) is a plain-language starting point, not legal advice —
+5. **Privacy policy** (`privacy.html`) is a plain-language starting point, not legal advice —
    have it reviewed by counsel before launch.
 
 ## Deploying
@@ -100,9 +114,9 @@ files and `sitemap.xml`/`robots.txt`.
 ## After launch
 
 - Submit `sitemap.xml` in Google Search Console and Bing Webmaster Tools.
-- Claim/verify a **Google Business Profile** for Nana's Nest (service-area business, no public
-  address) — this matters at least as much as on-site SEO for "night nurse near me"-style local
-  searches.
+- The Google Business Profile is already linked from the site; make sure its listed phone
+  ((443) 600-0583) and service area match this site exactly, and add nanasnestcare.com as its
+  website URL if it isn't already — that link is a two-way local-SEO signal.
 - Keep the NAP (name/phone/service-area wording) identical here and on any directory or profile
   you list the business on (Google Business Profile, Yelp, Doula Match, etc.) — consistency is a
   local-SEO ranking factor.
