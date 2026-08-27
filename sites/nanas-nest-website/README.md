@@ -86,10 +86,15 @@ Any static host works — no server, database, or build step required:
 - **Any other static host** (S3+CloudFront, GitHub Pages, etc.): upload the contents of this
   folder as-is.
 
-Point `nanasnestcare.com` (and `www.nanasnestcare.com`, redirected to the apex) at your host via
-DNS. All canonical URLs, Open Graph tags, and `sitemap.xml`/`robots.txt` assume the apex domain
-`https://nanasnestcare.com` — if you deploy on `www` instead, do a find/replace across the HTML
-files and `sitemap.xml`/`robots.txt`.
+This site is deployed on Vercel with **`www.nanasnestcare.com` as the Production domain** and
+the apex (`nanasnestcare.com`) 308-redirecting to it. All canonical URLs, Open Graph tags, and
+`sitemap.xml`/`robots.txt` are set to match: `https://www.nanasnestcare.com`. If you ever flip
+Vercel so the apex is Production instead, do a find/replace of `www.nanasnestcare.com` →
+`nanasnestcare.com` across the HTML files and `sitemap.xml`/`robots.txt` to match.
+
+DNS is on Cloudflare: the apex has an `A` record to Vercel's IP, and `www` has a `CNAME` to
+Vercel's assigned target — both **DNS only** (not proxied through Cloudflare), which Vercel
+requires to issue certificates and route traffic correctly.
 
 ## SEO approach
 
