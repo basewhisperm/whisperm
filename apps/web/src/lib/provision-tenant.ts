@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 
 import { Prisma } from "@prisma/client";
+import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
 
 import { prisma } from "@/lib/prisma";
+import { SELLER_ACQUISITION_FEATURE } from "@/lib/tenant-feature-keys";
 
 const DEFAULT_PIPELINE_NAME = "Default Pipeline";
 
@@ -12,6 +14,16 @@ const DEFAULT_PIPELINE_STAGES = [
   { name: "Proposal", position: 3, color: "#7C3AED" },
   { name: "Engagement", position: 4, color: "#16A34A" },
   { name: "Renewal", position: 5, color: "#F59E0B" },
+] as const;
+
+const MARKETPLACE_ACQUISITION_PIPELINE_NAME = "Marketplace Acquisition";
+const MARKETPLACE_ACQUISITION_PIPELINE_STAGES = [
+  { name: "Captured", position: 1, color: "#64748B" },
+  { name: "Invited", position: 2, color: "#2563EB" },
+  { name: "Claim Started", position: 3, color: "#7C3AED" },
+  { name: "Claimed", position: 4, color: "#0891B2" },
+  { name: "Converted", position: 5, color: "#16A34A" },
+  { name: "Expired", position: 6, color: "#DC2626" },
 ] as const;
 
 const TRIAL_DURATION_DAYS = 14;
@@ -65,6 +77,11 @@ export interface WorkspaceProvisioningTransactionClient {
       data: readonly { tenantId: string; pipelineId: string; name: string; position: number; color: string }[];
     }): Promise<unknown>;
   };
+  tenantFeature: {
+    create(args: {
+      data: { tenantId: string; featureKey: typeof SELLER_ACQUISITION_FEATURE; enabled: true };
+    }): Promise<unknown>;
+  };
   subscription: {
     create(args: {
       data: {
@@ -88,11 +105,12 @@ export interface WorkspaceProvisioningClient {
 }
 
 /**
- * Creates a brand-new tenant, an OWNER TenantUser, a default CRM pipeline,
- * and a 14-day trial Subscription for a signed-in Clerk user with no
- * existing TenantUser row. This is currently the only path that turns a
- * live sign-up into a workspace -- every other tenant in this system comes
- * from a seed script.
+ * Creates a brand-new tenant, an OWNER TenantUser, the default CRM and
+ * marketplace-acquisition pipelines, the seller-acquisition entitlement,
+ * and a 14-day trial Subscription for a signed-in Clerk user with no existing
+ * TenantUser row. This is currently the only path that turns a live sign-up
+ * into a workspace -- every other tenant in this system comes from a seed
+ * script.
  *
  * Retries with a randomized slug suffix on a slug collision. On an email
  * collision (a concurrent request already provisioned this user), returns
@@ -146,6 +164,33 @@ export async function provisionWorkspaceForUser(
           })),
         });
 
+        const acquisitionPipeline = await tx.pipeline.create({
+          data: {
+            tenantId: tenant.id,
+            name: MARKETPLACE_ACQUISITION_PIPELINE_NAME,
+            isDefault: false,
+            defaultKey: MARKETPLACE_ACQUISITION_PIPELINE_KEY,
+          },
+        });
+
+        await tx.pipelineStage.createMany({
+          data: MARKETPLACE_ACQUISITION_PIPELINE_STAGES.map((stage) => ({
+            tenantId: tenant.id,
+            pipelineId: acquisitionPipeline.id,
+            name: stage.name,
+            position: stage.position,
+            color: stage.color,
+          })),
+        });
+
+        await tx.tenantFeature.create({
+          data: {
+            tenantId: tenant.id,
+            featureKey: SELLER_ACQUISITION_FEATURE,
+            enabled: true,
+          },
+        });
+
         const trialEndsAt = new Date();
         trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_DURATION_DAYS);
 
@@ -169,6 +214,14 @@ export async function provisionWorkspaceForUser(
       const collidedOnSlug = target.some((field) => field.toLowerCase().includes("slug"));
 
       if (collidedOnSlug && attempt < MAX_SLUG_ATTEMPTS - 1) {
+        // PostgreSQL waits for the transaction owning a conflicting unique
+        // index entry to finish before returning P2002. Re-checking here
+        // therefore finds the workspace created by a concurrent first-login
+        // request for this email and prevents a random-slug retry from
+        // creating a second tenant and trial for the same Clerk user.
+        const existing = await client.tenantUser.findFirst({ where: { email, isActive: true } });
+        if (existing) return { tenantId: existing.tenantId, tenantUserId: existing.id };
+
         continue;
       }
 
