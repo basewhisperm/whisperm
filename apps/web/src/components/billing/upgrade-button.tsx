@@ -2,17 +2,18 @@
 
 import { useState } from "react";
 
-import type { CheckoutPlan } from "@/lib/billing/checkout";
+import type { CheckoutBillingInterval, CheckoutPlan } from "@/lib/billing/checkout";
 
 interface UpgradeButtonProps {
   readonly plan: CheckoutPlan;
   readonly label: string;
+  readonly billingInterval?: CheckoutBillingInterval;
   readonly disabled?: boolean;
 }
 
 type UpgradeState = { status: "idle" } | { status: "loading" } | { status: "error"; message: string };
 
-export function UpgradeButton({ plan, label, disabled }: UpgradeButtonProps) {
+export function UpgradeButton({ plan, label, billingInterval = "MONTHLY", disabled }: UpgradeButtonProps) {
   const [state, setState] = useState<UpgradeState>({ status: "idle" });
 
   async function handleClick() {
@@ -22,7 +23,7 @@ export function UpgradeButton({ plan, label, disabled }: UpgradeButtonProps) {
       const response = await fetch("/api/billing/upgrade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, billingInterval }),
       });
 
       const body = (await response.json()) as

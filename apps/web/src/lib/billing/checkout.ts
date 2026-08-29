@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { PAYSTACK_PRICING_GHS, resolveBillingProvider, type BillingProviderName } from "@whisperm/billing-runtime";
 
 export type CheckoutPlan = "STARTER" | "GROWTH" | "PRO";
+export type CheckoutBillingInterval = "MONTHLY" | "ANNUAL";
 
 export interface CheckoutContext {
   readonly tenantId: string;
@@ -10,21 +11,22 @@ export interface CheckoutContext {
   readonly ownerEmail: string;
   readonly workspaceName: string;
   readonly plan: CheckoutPlan;
+  readonly billingInterval: CheckoutBillingInterval;
 }
 
 export type CheckoutResult =
   | { readonly ok: true; readonly provider: BillingProviderName; readonly checkoutUrl: string }
   | { readonly ok: false; readonly provider: BillingProviderName; readonly code: "PROVIDER_NOT_CONFIGURED"; readonly message: string };
 
-const STRIPE_PRICE_ENV: Record<CheckoutPlan, string> = {
-  STARTER: "STRIPE_PRICE_STARTER",
-  GROWTH: "STRIPE_PRICE_GROWTH",
-  PRO: "STRIPE_PRICE_PRO",
+const STRIPE_PRICE_ENV: Record<CheckoutPlan, Record<CheckoutBillingInterval, string>> = {
+  STARTER: { MONTHLY: "STRIPE_PRICE_STARTER", ANNUAL: "STRIPE_PRICE_STARTER_ANNUAL" },
+  GROWTH: { MONTHLY: "STRIPE_PRICE_GROWTH", ANNUAL: "STRIPE_PRICE_GROWTH_ANNUAL" },
+  PRO: { MONTHLY: "STRIPE_PRICE_PRO", ANNUAL: "STRIPE_PRICE_PRO_ANNUAL" },
 };
 
 async function createStripeCheckout(context: CheckoutContext): Promise<CheckoutResult> {
   const secretKey = process.env.STRIPE_SECRET_KEY;
-  const priceId = process.env[STRIPE_PRICE_ENV[context.plan]];
+  const priceId = process.env[STRIPE_PRICE_ENV[context.plan][context.billingInterval]];
   const successUrl = process.env.BILLING_CHECKOUT_SUCCESS_URL;
   const cancelUrl = process.env.BILLING_CHECKOUT_CANCEL_URL;
 
@@ -46,9 +48,9 @@ async function createStripeCheckout(context: CheckoutContext): Promise<CheckoutR
     success_url: successUrl,
     cancel_url: cancelUrl,
     subscription_data: {
-      metadata: { tenantId: context.tenantId, plan: context.plan },
+      metadata: { tenantId: context.tenantId, plan: context.plan, billingInterval: context.billingInterval },
     },
-    metadata: { tenantId: context.tenantId, plan: context.plan },
+    metadata: { tenantId: context.tenantId, plan: context.plan, billingInterval: context.billingInterval },
   });
 
   if (!session.url) {
@@ -77,7 +79,19 @@ async function createPaystackCheckout(context: CheckoutContext): Promise<Checkou
   }
 
   const pricing = PAYSTACK_PRICING_GHS[context.plan];
-  const planCode = process.env[`PAYSTACK_PLAN_CODE_${context.plan}`] ?? pricing.planCode;
+  const intervalPlanCode = process.env[`PAYSTACK_PLAN_CODE_${context.plan}_${context.billingInterval}`];
+  const planCode = context.billingInterval === "MONTHLY"
+    ? (intervalPlanCode ?? process.env[`PAYSTACK_PLAN_CODE_${context.plan}`] ?? pricing.planCode)
+    : intervalPlanCode;
+
+  if (!planCode) {
+    return {
+      ok: false,
+      provider: "PAYSTACK",
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: `Paystack annual plan ${context.plan} is not configured for this environment.`,
+    };
+  }
 
   const response = await fetch("https://api.paystack.co/transaction/initialize", {
     method: "POST",
@@ -87,11 +101,11 @@ async function createPaystackCheckout(context: CheckoutContext): Promise<Checkou
     },
     body: JSON.stringify({
       email: context.ownerEmail,
-      amount: pricing.amountPesewas,
+      amount: context.billingInterval === "ANNUAL" ? pricing.amountPesewas * 10 : pricing.amountPesewas,
       currency: "GHS",
       plan: planCode,
       callback_url: callbackUrl,
-      metadata: { tenantId: context.tenantId, plan: context.plan },
+      metadata: { tenantId: context.tenantId, plan: context.plan, billingInterval: context.billingInterval },
     }),
   });
 

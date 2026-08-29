@@ -55,6 +55,7 @@ const transpileRoute = (routePath, tempDir) => {
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
     .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
+    .replace(/from "@\/lib\/billing\/plan-usage"/gu, `from "${join(tempDir, 'plan-usage.mjs')}"`)
     .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
     .replaceAll('from "@whisperm/services"', `from "${servicesUrl}"`)
     .replaceAll('from "zod"', `from "${zodUrl}"`);
@@ -81,6 +82,7 @@ const createHarness = async (state) => {
     'export const requireSellerAcquisitionFeatureForApi = async () => (globalThis.__usageRouteState.featureEnabled ? null : featureNotEnabledResponse());',
   ].join('\n'));
   writeFileSync(join(tempDir, 'prisma.mjs'), 'export const prisma = {};\n');
+  writeFileSync(join(tempDir, 'plan-usage.mjs'), 'export const getCurrentPlanUsage = async () => ({ plan: "STARTER", includedBillableActions: 250, usedBillableActions: 2, remainingBillableActions: 248 });\n');
   writeFileSync(join(tempDir, 'repositories.mjs'), [
     'export const createPrismaRepositories = () => ({ acquisitionUsageEvents: globalThis.__usageRouteRepos.acquisitionUsageEvents });',
   ].join('\n'));
@@ -166,6 +168,9 @@ test('returns the real per-tenant summary, never another tenant\'s totals', asyn
     assert.equal(qualified.quantity, 2);
     assert.equal(qualified.billableQuantity, 1);
     assert.equal(body.data.billableTotalQuantity, 2);
+    assert.equal(body.data.plan, 'STARTER');
+    assert.equal(body.data.includedBillableActions, 250);
+    assert.equal(body.data.remainingBillableActions, 248);
   } finally {
     harness.cleanup();
   }

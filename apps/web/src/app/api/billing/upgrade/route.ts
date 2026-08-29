@@ -2,13 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
-import { initiateCheckout, type CheckoutPlan } from "@/lib/billing/checkout";
+import { initiateCheckout, type CheckoutBillingInterval, type CheckoutPlan } from "@/lib/billing/checkout";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 
 const errorResponse = (status: number, code: string, message: string) =>
   NextResponse.json({ ok: false, error: { code, message } }, { status });
 
 const VALID_PLANS: readonly CheckoutPlan[] = ["STARTER", "GROWTH", "PRO"];
+const VALID_INTERVALS: readonly CheckoutBillingInterval[] = ["MONTHLY", "ANNUAL"];
 
 /**
  * Starts a hosted checkout session for the signed-in user's tenant. This
@@ -31,6 +32,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof plan !== "string" || !VALID_PLANS.includes(plan as CheckoutPlan)) {
     return errorResponse(400, "INVALID_PLAN", `plan must be one of ${VALID_PLANS.join(", ")}.`);
   }
+  const billingInterval = (body as { billingInterval?: unknown }).billingInterval ?? "MONTHLY";
+  if (typeof billingInterval !== "string" || !VALID_INTERVALS.includes(billingInterval as CheckoutBillingInterval)) {
+    return errorResponse(400, "INVALID_BILLING_INTERVAL", `billingInterval must be one of ${VALID_INTERVALS.join(", ")}.`);
+  }
 
   const tenantUser = await prisma.tenantUser.findUnique({
     where: { id: context.tenantUserId },
@@ -47,6 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ownerEmail: tenantUser.email,
     workspaceName: context.tenant.name,
     plan: plan as CheckoutPlan,
+    billingInterval: billingInterval as CheckoutBillingInterval,
   });
 
   if (!result.ok) {
