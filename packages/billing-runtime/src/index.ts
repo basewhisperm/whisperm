@@ -779,6 +779,8 @@ export {
   mapStripeStatus,
   stripeSubscriptionStatusSchema,
   stripeSubscriptionToSnapshot,
+  stripeEventToSubscriptionSnapshot,
+  stripeHandledSubscriptionEventTypes,
 } from "./providers/stripe.js";
 export type {
   BillingSubscriptionSnapshot,

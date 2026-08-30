@@ -29,3 +29,12 @@ test("existing protected-feature helpers and their callers are untouched", () =>
   assert.match(tenantFeatures, /export async function isProtectedTenantFeatureEnabled/u);
   assert.match(tenantFeatures, /export async function requireSellerAcquisitionFeatureForApi/u);
 });
+
+test("an active or trialing subscription unlocks SELLER_ACQUISITION without needing a manual TenantFeature grant", () => {
+  assert.match(tenantFeatures, /const SUBSCRIPTION_UNLOCKED_FEATURES = new Set<string>\(\[SELLER_ACQUISITION_FEATURE\]\);/u);
+  assert.match(tenantFeatures, /SUBSCRIPTION_UNLOCKED_FEATURES\.has\(featureKey\) && \(await hasActiveOrTrialingSubscription\(tenantId\)\)/u);
+});
+
+test("an explicit TenantFeature grant still enables the feature on its own (ops override for comped/founding tenants)", () => {
+  assert.match(tenantFeatures, /if \(feature\?\.enabled === true\) \{\s*return \{ ok: true, enabled: true \};\s*\}/u);
+});

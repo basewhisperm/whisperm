@@ -9,6 +9,7 @@ import {
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { AcquisitionUsageMeteringService } from "@whisperm/services";
+import { getCurrentPlanUsage } from "@/lib/billing/plan-usage";
 
 const errorResponse = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 
@@ -48,10 +49,15 @@ export async function GET(request: NextRequest) {
   if (!parsed.success) return errorResponse("periodStart and periodEnd must be valid ISO 8601 timestamps with periodStart on or before periodEnd.", 400);
 
   try {
-    const summary = await usageMeteringService().getUsageSummary({ tenantId: tenant.id }, {
-      periodStart: new Date(parsed.data.periodStart),
-      periodEnd: new Date(parsed.data.periodEnd),
-    });
+    const requestedPeriodStart = new Date(parsed.data.periodStart);
+    const requestedPeriodEnd = new Date(parsed.data.periodEnd);
+    const [summary, planUsage] = await Promise.all([
+      usageMeteringService().getUsageSummary({ tenantId: tenant.id }, {
+        periodStart: requestedPeriodStart,
+        periodEnd: requestedPeriodEnd,
+      }),
+      getCurrentPlanUsage(tenant.id, now),
+    ]);
     return NextResponse.json({
       ok: true,
       data: {
@@ -59,6 +65,9 @@ export async function GET(request: NextRequest) {
         periodEnd: summary.periodEnd,
         totals: summary.totals.map((total) => ({ eventType: total.eventType, quantity: total.quantity, billableQuantity: total.billableQuantity })),
         billableTotalQuantity: summary.billableTotalQuantity,
+        plan: planUsage.plan,
+        includedBillableActions: planUsage.includedBillableActions,
+        remainingBillableActions: planUsage.remainingBillableActions,
         generatedAt: now.toISOString(),
       },
     });

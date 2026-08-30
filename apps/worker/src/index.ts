@@ -2,8 +2,8 @@ import { pathToFileURL } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
 import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, createInvitationRuntimeJobQueue, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, marketplaceInviteQueueName, marketplaceInviteSendJobType, marketplaceInviteSendPayloadSchema, marketplaceClaimLifecycleQueueName, marketplaceClaimReminderJobType, marketplaceClaimExpireJobType, marketplaceClaimIntelligenceJobType, claimLifecycleJobPayloadSchema, growthLoopQueueName, growthLoopJobType, growthLoopJobPayloadSchema, type ClaimInvitationChannel, type ClaimLifecycleScheduleJob, type ClaimReminderDeliveryOutcome, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
-import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
-import { PrismaQueueRuntime, runDurableQueuePollLoop } from "./durable-queue-runtime.js";
+import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient, type QueueJobRepository } from "@whisperm/repositories";
+import { PrismaQueueRuntime, runDurableQueuePollLoop, claimAndProcessOneDurableQueueJob } from "./durable-queue-runtime.js";
 import { ProviderDeliveryError, buildSellerInvitationNotificationPorts, createConsoleMessagingProviderLogger, createMessagingProviderRegistryFromEnv, type MessagingProviderRegistry } from "@whisperm/provider-adapters";
 import { z } from "zod";
 import {
@@ -55,6 +55,11 @@ import {
   type InboundEvent,
   type NormalizedInboundEvent,
 } from "@whisperm/types";
+
+// Re-exported so a consumer other than this file's own isMainModule bootstrap (see
+// createProductionWorkerServices below) can build and drain the same durable queue without
+// duplicating this logic.
+export { PrismaQueueRuntime, runDurableQueuePollLoop, claimAndProcessOneDurableQueueJob } from "./durable-queue-runtime.js";
 
 export const packageName = "@whisperm/worker" as const;
 export const workerRuntimeVersion = "0.1.0" as const;
@@ -1632,6 +1637,99 @@ export const createClaimLifecycleServicePort = (
   };
 };
 
+/**
+ * Constructs the real (Prisma-backed) WorkerServices this process's isMainModule bootstrap uses
+ * -- extracted so another caller (apps/web's queue-drain route, which reuses this exact wiring
+ * against its own Prisma client instead of running a second long-lived worker process) can build
+ * an identical WorkerApplication without duplicating this composition. Purely a constructor: no
+ * polling, no process lifecycle here -- see the isMainModule block below and
+ * apps/web/src/lib/queue-drain for the two different ways the result gets driven.
+ */
+export const createProductionWorkerServices = (
+  persistence: PrismaPersistenceClient,
+  env: NodeJS.ProcessEnv = process.env,
+): { readonly services: WorkerServices; readonly queueJobs: QueueJobRepository } => {
+  const claimLifecycle = createClaimLifecycleServicePort(persistence);
+  const sellerInvitation = createSellerInvitationServicePort(persistence, env, {
+    scheduleClaimLifecycle: (context, invitationId) => claimLifecycle.scheduleClaimLifecycle(context, invitationId),
+  });
+  const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
+  const repositories = createPrismaRepositories(persistence);
+  const usageMetering = new AcquisitionUsageMeteringService({ usageEvents: repositories.acquisitionUsageEvents });
+  // ST1-012: this service instance backs only runDueScheduledCampaigns (the "scheduler.tick"
+  // job), which nothing in this repo ever enqueues -- there is no cron/scheduler producer for
+  // it. Deliberately no discoveryQueue/qualificationQueue is wired here: if this dead path is
+  // ever reached, CampaignRuntimeService now fails the execution honestly (see
+  // CAMPAIGN_RUNTIME_DISCOVERY_NOT_CONFIGURED in campaign-runtime.ts) instead of silently
+  // enqueuing into fake `void input` adapters that dropped the job on the floor.
+  const campaignRuntimeService = new CampaignRuntimeService({
+    campaigns,
+    executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
+    sellerInvitations: new PrismaSellerInvitationRepository(persistence),
+    opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence),
+    usageMetering,
+    // ST1-013M: without this, a worker-driven marketplace.invite.send job that fails
+    // retryably calls recordInvitationResult, which silently drops the scheduled retry
+    // because no queue is configured to enqueue it into -- automatic retries would stop
+    // after the first attempt this process makes. Uses the same canonical producer as
+    // apps/web's routes (packages/services/src/invitation-runtime-job-queue.ts).
+    invitationQueue: createInvitationRuntimeJobQueue(repositories.queueJobs),
+  });
+  const acquisitionGovernanceService = new AcquisitionGovernanceService({
+    governance: repositories.acquisitionGovernance,
+    campaigns: repositories.sellerAcquisitionCampaigns,
+    auditLogs: repositories.auditLogs,
+    usageEvents: repositories.acquisitionUsageEvents,
+  });
+  const acquisitionGovernance = {
+    authorize: (context: { readonly tenantId: string }, input: { readonly capability: AcquisitionGovernanceCapability; readonly campaignId?: string | undefined; readonly provider?: "WHATSAPP" | "SMS" | "EMAIL" | "DISCOVERY" | undefined; readonly hasCapturedData?: boolean | undefined }): Promise<AcquisitionGovernanceDecision> =>
+      acquisitionGovernanceService.authorizeAcquisitionAction({ tenantId: context.tenantId }, input),
+  };
+  const campaignRuntime = {
+    async runDueScheduledCampaigns(context: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[0], input: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[1]) {
+      return campaignRuntimeService.runDueScheduledCampaigns(context, input);
+    },
+    async recordInvitationResult(context: Parameters<typeof campaignRuntimeService.recordInvitationResult>[0], input: Parameters<typeof campaignRuntimeService.recordInvitationResult>[1]) {
+      await campaignRuntimeService.recordInvitationResult(context, input);
+    },
+    async recordDiscoveryResult(context: Parameters<typeof campaignRuntimeService.recordDiscoveryResult>[0], input: Parameters<typeof campaignRuntimeService.recordDiscoveryResult>[1]) {
+      await campaignRuntimeService.recordDiscoveryResult(context, input);
+    },
+    async recordQualificationResult(context: Parameters<typeof campaignRuntimeService.recordQualificationResult>[0], input: Parameters<typeof campaignRuntimeService.recordQualificationResult>[1]) {
+      await campaignRuntimeService.recordQualificationResult(context, input);
+    },
+  };
+
+  return {
+    queueJobs: repositories.queueJobs,
+    services: {
+      ...createBootstrapOnlyWorkerServices(),
+      claimLifecycle,
+      sellerInvitation,
+      campaignRuntime,
+      marketplaceDiscovery: createMarketplaceDiscoveryExecutionPort({ campaigns, discovery: new MarketplaceDiscoveryService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence), usageMetering }) }),
+      marketplaceQualification: createMarketplaceQualificationExecutionPort({ qualification: new MarketplaceQualificationExecutionService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence), businessGrowthOpportunities: new BusinessGrowthOpportunityService({ opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence) }) }) }),
+      growthLoop: createGrowthLoopServicePort(persistence),
+      acquisitionGovernance,
+    },
+  };
+};
+
+/**
+ * Queue/job-type names with a real (non-stub) service port wired by createProductionWorkerServices
+ * above. Polling any other registered queue would claim a pre-existing QueueJob row and
+ * immediately fail it as "service port is not configured" instead of leaving it for a correctly
+ * wired consumer.
+ */
+export const PRODUCTION_CONFIGURED_WORKER_NAMES: ReadonlySet<string> = new Set([
+  "claim-lifecycle-worker",
+  "marketplace-invite-worker",
+  "marketplace-discovery-worker",
+  "marketplace-qualification-worker",
+  "growth-loop-worker",
+  "scheduler-worker",
+]);
+
 export const createWorkerApplication = (dependencies: WorkerApplicationDependencies): WorkerApplication => new WorkerApplication(dependencies);
 
 export const runWorkerFromEnv = async (dependencies: Omit<WorkerApplicationDependencies, "config">): Promise<WorkerApplication> => {
@@ -1660,56 +1758,6 @@ if (isMainModule()) {
     const config = createWorkerBootstrapConfigFromEnv();
     const prisma = new PrismaClient();
     const persistence = prisma as unknown as PrismaPersistenceClient;
-    const claimLifecycle = createClaimLifecycleServicePort(persistence);
-    const sellerInvitation = createSellerInvitationServicePort(persistence, process.env, {
-      scheduleClaimLifecycle: (context, invitationId) => claimLifecycle.scheduleClaimLifecycle(context, invitationId),
-    });
-    const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
-    const repositories = createPrismaRepositories(persistence);
-    const usageMetering = new AcquisitionUsageMeteringService({ usageEvents: repositories.acquisitionUsageEvents });
-    // ST1-012: this service instance backs only runDueScheduledCampaigns (the "scheduler.tick"
-    // job), which nothing in this repo ever enqueues -- there is no cron/scheduler producer for
-    // it. Deliberately no discoveryQueue/qualificationQueue is wired here: if this dead path is
-    // ever reached, CampaignRuntimeService now fails the execution honestly (see
-    // CAMPAIGN_RUNTIME_DISCOVERY_NOT_CONFIGURED in campaign-runtime.ts) instead of silently
-    // enqueuing into fake `void input` adapters that dropped the job on the floor.
-    const campaignRuntimeService = new CampaignRuntimeService({
-      campaigns,
-      executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
-      sellerInvitations: new PrismaSellerInvitationRepository(persistence),
-      opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence),
-      usageMetering,
-      // ST1-013M: without this, a worker-driven marketplace.invite.send job that fails
-      // retryably calls recordInvitationResult, which silently drops the scheduled retry
-      // because no queue is configured to enqueue it into -- automatic retries would stop
-      // after the first attempt this process makes. Uses the same canonical producer as
-      // apps/web's routes (packages/services/src/invitation-runtime-job-queue.ts).
-      invitationQueue: createInvitationRuntimeJobQueue(repositories.queueJobs),
-    });
-    const acquisitionGovernanceService = new AcquisitionGovernanceService({
-      governance: repositories.acquisitionGovernance,
-      campaigns: repositories.sellerAcquisitionCampaigns,
-      auditLogs: repositories.auditLogs,
-      usageEvents: repositories.acquisitionUsageEvents,
-    });
-    const acquisitionGovernance = {
-      authorize: (context: { readonly tenantId: string }, input: { readonly capability: AcquisitionGovernanceCapability; readonly campaignId?: string | undefined; readonly provider?: "WHATSAPP" | "SMS" | "EMAIL" | "DISCOVERY" | undefined; readonly hasCapturedData?: boolean | undefined }): Promise<AcquisitionGovernanceDecision> =>
-        acquisitionGovernanceService.authorizeAcquisitionAction({ tenantId: context.tenantId }, input),
-    };
-    const campaignRuntime = {
-      async runDueScheduledCampaigns(context: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[0], input: Parameters<typeof campaignRuntimeService.runDueScheduledCampaigns>[1]) {
-        return campaignRuntimeService.runDueScheduledCampaigns(context, input);
-      },
-      async recordInvitationResult(context: Parameters<typeof campaignRuntimeService.recordInvitationResult>[0], input: Parameters<typeof campaignRuntimeService.recordInvitationResult>[1]) {
-        await campaignRuntimeService.recordInvitationResult(context, input);
-      },
-      async recordDiscoveryResult(context: Parameters<typeof campaignRuntimeService.recordDiscoveryResult>[0], input: Parameters<typeof campaignRuntimeService.recordDiscoveryResult>[1]) {
-        await campaignRuntimeService.recordDiscoveryResult(context, input);
-      },
-      async recordQualificationResult(context: Parameters<typeof campaignRuntimeService.recordQualificationResult>[0], input: Parameters<typeof campaignRuntimeService.recordQualificationResult>[1]) {
-        await campaignRuntimeService.recordQualificationResult(context, input);
-      },
-    };
     // ST1-013M: PrismaQueueRuntime + runDurableQueuePollLoop replace the previous
     // InMemoryQueueRuntime bootstrap, which registered job handlers but never polled or consumed
     // any durable queue. This process now actually drains the QueueJob table for every
@@ -1720,7 +1768,7 @@ if (isMainModule()) {
     // CampaignRuntimeInvitationExecutor); this loop is what makes the *retry* and *scheduled*
     // paths (invitation retry backoff, claim reminders, growth loop evaluation) actually run
     // instead of only ever creating a QueueJob row nothing reads.
-    const queueJobs = repositories.queueJobs;
+    const { services, queueJobs } = createProductionWorkerServices(persistence, process.env);
     logger.info("worker durable queue runtime starting", {
       tenantId: config.tenantId,
       workerId: config.workerId,
@@ -1729,41 +1777,24 @@ if (isMainModule()) {
     const app = await runWorkerFromEnv({
       ...createBootstrapOnlyWorkerDependencies(config),
       queues: new PrismaQueueRuntime({ queueJobs }),
-      services: {
-        ...createBootstrapOnlyWorkerServices(),
-        claimLifecycle,
-        sellerInvitation,
-        campaignRuntime,
-        marketplaceDiscovery: createMarketplaceDiscoveryExecutionPort({ campaigns, discovery: new MarketplaceDiscoveryService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence), usageMetering }) }),
-        marketplaceQualification: createMarketplaceQualificationExecutionPort({ qualification: new MarketplaceQualificationExecutionService({ discoveryRepo: new PrismaMarketplaceDiscoveryRepository(persistence), businessGrowthOpportunities: new BusinessGrowthOpportunityService({ opportunities: new PrismaBusinessGrowthOpportunityRepository(persistence) }) }) }),
-        growthLoop: createGrowthLoopServicePort(persistence),
-        acquisitionGovernance,
-      },
+      services,
     });
 
     let stopped = false;
     process.once("SIGINT", () => { stopped = true; });
     process.once("SIGTERM", () => { stopped = true; });
 
-    // ST1-013M: only poll queues whose handler has a real service port configured above --
-    // event-ingestion, score-recomputation, notification, crm-conversion, revenue-attribution,
-    // render-conversion-retry, and publish are registered (createWorkerDefinitions registers a
-    // handler for every queue) but have no configured port in this bootstrap (their `services.*`
-    // dependency is either the always-throwing stub from createBootstrapOnlyWorkerServices, or
-    // simply never wired here). Polling them would claim any pre-existing QueueJob row for those
-    // queues and immediately fail it as "service port is not configured" instead of leaving it
-    // for a correctly-wired worker.
-    const configuredWorkerNames = new Set([
-      "claim-lifecycle-worker",
-      "marketplace-invite-worker",
-      "marketplace-discovery-worker",
-      "marketplace-qualification-worker",
-      "growth-loop-worker",
-      "scheduler-worker",
-    ]);
+    // ST1-013M: only poll queues whose handler has a real service port configured above (see
+    // PRODUCTION_CONFIGURED_WORKER_NAMES) -- event-ingestion, score-recomputation, notification,
+    // crm-conversion, revenue-attribution, render-conversion-retry, and publish are registered
+    // (createWorkerDefinitions registers a handler for every queue) but have no configured port in
+    // this bootstrap (their `services.*` dependency is either the always-throwing stub from
+    // createBootstrapOnlyWorkerServices, or simply never wired here). Polling them would claim any
+    // pre-existing QueueJob row for those queues and immediately fail it as "service port is not
+    // configured" instead of leaving it for a correctly-wired worker.
     const durableQueueNames = [...new Set(
       app.getRegisteredWorkers()
-        .filter((definition) => configuredWorkerNames.has(definition.name))
+        .filter((definition) => PRODUCTION_CONFIGURED_WORKER_NAMES.has(definition.name))
         .map((definition) => definition.queue.queueName),
     )];
     logger.info("worker durable queue poll loop starting", {

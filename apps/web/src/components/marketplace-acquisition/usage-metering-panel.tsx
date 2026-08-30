@@ -15,6 +15,9 @@ interface UsageSummary {
   readonly periodEnd: string;
   readonly totals: readonly UsageEventTotal[];
   readonly billableTotalQuantity: number;
+  readonly plan: "STARTER" | "GROWTH" | "PRO";
+  readonly includedBillableActions: number;
+  readonly remainingBillableActions: number;
   readonly generatedAt: string;
 }
 
@@ -109,6 +112,7 @@ export function UsageMeteringPanel() {
   const billableRows = summary.totals.filter((total) => total.billableQuantity > 0);
   const nonBillableRows = summary.totals.filter((total) => total.billableQuantity === 0);
   const isEmpty = summary.totals.length === 0;
+  const usagePercent = Math.min(100, Math.round((summary.billableTotalQuantity / summary.includedBillableActions) * 100));
 
   return (
     <section className="space-y-4 rounded-2xl bg-background p-5" style={{ border: "0.5px solid var(--color-border)" }} aria-label="Usage & Metering">
@@ -118,13 +122,17 @@ export function UsageMeteringPanel() {
           <p className="mt-1 text-xs text-muted-foreground">{formatMonthLabel(summary.periodStart)} · updated {formatTimestamp(summary.generatedAt)}</p>
         </div>
         <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-          {summary.billableTotalQuantity} billable {summary.billableTotalQuantity === 1 ? "unit" : "units"}
+          {summary.plan} · {summary.billableTotalQuantity.toLocaleString()} / {summary.includedBillableActions.toLocaleString()}
         </span>
       </div>
 
       <p className="rounded-xl bg-secondary px-3 py-2 text-xs text-muted-foreground">
-        This is usage metering, not an invoice. Billable totals reflect platform activity recorded this period and have not been finalized or charged.
+        {summary.remainingBillableActions.toLocaleString()} acquisition actions remain in this month&apos;s included allowance.
+        This meter is not an invoice; it reflects recorded platform activity.
       </p>
+      <div aria-label={`${usagePercent}% of monthly acquisition-action allowance used`} className="h-2 overflow-hidden rounded-full bg-secondary">
+        <div className="h-full rounded-full bg-whisper transition-all" style={{ width: `${usagePercent}%` }} />
+      </div>
 
       {isEmpty ? (
         <p className="text-xs text-muted-foreground">

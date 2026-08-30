@@ -15,6 +15,7 @@ import { CampaignRuntimeService } from "@whisperm/services";
 import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
 import { createInvitationRuntimeJobQueue } from "@/lib/marketplace-acquisition/runtime-job-queue";
 import { resolveInvitationEligibility, type InvitationEligibility } from "@/lib/marketplace-acquisition/invitation-eligibility";
+import { getCurrentPlanUsage } from "@/lib/billing/plan-usage";
 
 const bulkInviteRequestSchema = z.object({
   captureIds: z.array(z.string().min(1)).min(1).max(100),
@@ -23,6 +24,22 @@ const bulkInviteRequestSchema = z.object({
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
+
+const planLimitResponse = (input: {
+  readonly plan: string;
+  readonly requested: number;
+  readonly used: number;
+  readonly included: number;
+  readonly remaining: number;
+}) => NextResponse.json({
+  ok: false,
+  error: {
+    code: "PLAN_LIMIT_REACHED",
+    message: `This bulk invitation would exceed the ${input.plan} plan's monthly acquisition-action allowance.`,
+    upgradeUrl: "/billing",
+    details: input,
+  },
+}, { status: 402 });
 
 const runtimeService = () => new CampaignRuntimeService({
   campaigns: new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient),
@@ -75,6 +92,16 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return errorResponse("captureIds and channel are invalid.", 400);
 
   const requestedIds = parsed.data.captureIds;
+  const usage = await getCurrentPlanUsage(tenant.id);
+  if (requestedIds.length > usage.remainingBillableActions) {
+    return planLimitResponse({
+      plan: usage.plan,
+      requested: requestedIds.length,
+      used: usage.usedBillableActions,
+      included: usage.includedBillableActions,
+      remaining: usage.remainingBillableActions,
+    });
+  }
   const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
   const runtime = runtimeService();
   const results: BulkInviteResult[] = [];
