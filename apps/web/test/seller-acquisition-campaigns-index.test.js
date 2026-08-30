@@ -46,6 +46,12 @@ test("campaign action errors never masquerade as campaign load failures", () => 
   assert.doesNotMatch(page, /setError\(/u);
 });
 
+test("campaign modal submits through an accessible form contract", () => {
+  assert.match(page, /<form onSubmit=\{\(event\) => \{ event\.preventDefault\(\); void saveCampaign\(\); \}\}>/u);
+  assert.match(page, /disabled=\{saving\} type="submit"/u);
+  assert.doesNotMatch(page, /onClick=\{\(\) => void saveCampaign\(\)\}/u);
+});
+
 test("campaign refresh and failure retry have distinct labels", () => {
   assert.match(page, /<IconRefresh[^>]+\/>\s*Refresh/u);
   assert.match(page, /Campaigns couldn&apos;t be loaded[\s\S]*<IconRefresh[^>]+\/>\s*Retry/u);

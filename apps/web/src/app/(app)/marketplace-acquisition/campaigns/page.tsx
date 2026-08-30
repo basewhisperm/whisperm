@@ -444,7 +444,8 @@ export default function SellerAcquisitionCampaignsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-midnight/60 p-4">
           <section aria-modal="true" className="w-full max-w-lg rounded-2xl bg-background p-5 shadow-xl" role="dialog">
             <h2 className="text-lg font-semibold text-foreground">{modalMode === "create" ? ACQUISITION_COPY.actions.createCampaign : "Edit Campaign"}</h2>
-            <div className="mt-4 space-y-3">
+            <form onSubmit={(event) => { event.preventDefault(); void saveCampaign(); }}>
+              <div className="mt-4 space-y-3">
               <Field label="Campaign Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
               <Field label="Description" value={form.description} onChange={(value) => setForm({ ...form, description: value })} />
               <Field label="Owner" value={form.ownerId} onChange={(value) => setForm({ ...form, ownerId: value })} />
@@ -478,14 +479,15 @@ export default function SellerAcquisitionCampaignsPage() {
                   {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                 </select>
               </label>
-            </div>
-            {actionError ? <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-medium text-red-700" role="alert">{actionError}</p> : null}
-            <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-xl bg-secondary px-4 py-2 text-sm font-semibold text-foreground" onClick={() => { setActionError(null); setModalMode(null); }} type="button">Cancel</button>
-              <button className="rounded-xl bg-whisper px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={saving} onClick={() => void saveCampaign()} type="button">
-                {saving ? "Saving…" : "Save Campaign"}
-              </button>
-            </div>
+              </div>
+              {actionError ? <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-medium text-red-700" role="alert">{actionError}</p> : null}
+              <div className="mt-5 flex justify-end gap-2">
+                <button className="rounded-xl bg-secondary px-4 py-2 text-sm font-semibold text-foreground" onClick={() => { setActionError(null); setModalMode(null); }} type="button">Cancel</button>
+                <button className="rounded-xl bg-whisper px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={saving} type="submit">
+                  {saving ? "Saving…" : "Save Campaign"}
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}
