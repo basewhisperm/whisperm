@@ -11,11 +11,18 @@ const middleware = read("middleware.ts");
 
 test("Vercel Cron reaches the queue-drain handler without a Clerk session", () => {
   assert.match(middleware, /'\/api\/internal\/queue-drain'/u);
-  assert.match(middleware, /if \(isPublicRoute\(request\)\) return NextResponse\.next\(\);/u);
-  const publicBypassIndex = middleware.indexOf("if (isPublicRoute(request)) return NextResponse.next();");
+  assert.match(middleware, /if \(isClerkBypassRoute\(request\)\) return NextResponse\.next\(\);/u);
+  const publicBypassIndex = middleware.indexOf("if (isClerkBypassRoute(request)) return NextResponse.next();");
   const clerkInvocationIndex = middleware.indexOf("return protectedMiddleware(request, event);");
   assert.ok(publicBypassIndex > 0 && clerkInvocationIndex > publicBypassIndex, "public routes must bypass Clerk before it is invoked");
   assert.match(route, /authorization !== `Bearer \$\{secret\}`/u);
+});
+
+test("browser-facing public routes retain Clerk context for auth() and ClerkProvider", () => {
+  assert.match(middleware, /const isClerkBypassRoute = createRouteMatcher/u);
+  const bypassBlock = middleware.slice(middleware.indexOf("const isClerkBypassRoute"), middleware.indexOf("const protectedMiddleware"));
+  assert.doesNotMatch(bypassBlock, /'\/'|'\/sign-in|'\/sign-up/u);
+  assert.match(middleware, /if \(!isPublicRoute\(request\)\) auth\(\)\.protect\(\);/u);
 });
 
 test("the queue-drain route fails closed with 503 when CRON_SECRET is unconfigured, and 401 on a mismatched secret", () => {
