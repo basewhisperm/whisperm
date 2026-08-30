@@ -28,6 +28,20 @@ test("campaigns index supports V1 campaign operations", () => {
   assert.match(page, /\/api\/marketplace-acquisition\/campaigns/u);
 });
 
+test("campaigns index keeps loading, error, and empty states mutually exclusive", () => {
+  assert.match(page, /!loading && !error/u);
+  assert.match(page, /\) : error \? \(/u);
+  assert.match(page, /Campaigns couldn&apos;t be loaded\./u);
+  assert.match(page, /role="alert"/u);
+  assert.match(page, /setCampaigns\(\[\]\);/u);
+  assert.match(page, /\) : filteredCampaigns\.length === 0 \? \(/u);
+});
+
+test("campaign refresh and failure retry have distinct labels", () => {
+  assert.match(page, /<IconRefresh[^>]+\/>\s*Refresh/u);
+  assert.match(page, /Campaigns couldn&apos;t be loaded[\s\S]*<IconRefresh[^>]+\/>\s*Retry/u);
+});
+
 // ST1-013C: the campaign card's targeting/readiness truth must come from the shared
 // packages/services helpers, not ad hoc inline JSX -- otherwise the card and the workbench can
 // (and did) disagree about whether a campaign's targeting is configured.

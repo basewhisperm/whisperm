@@ -151,6 +151,7 @@ export default function SellerAcquisitionCampaignsPage() {
       const payload = await response.json();
       setCampaigns(payload?.data?.campaigns ?? []);
     } catch (err) {
+      setCampaigns([]);
       setError(err instanceof Error ? err.message : "Campaigns could not be loaded.");
     } finally {
       setLoading(false);
@@ -271,40 +272,40 @@ export default function SellerAcquisitionCampaignsPage() {
         </button>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-4" aria-label="Campaign KPI summary">
-        {stats.map((stat) => (
-          <div key={stat.label} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
-            <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
-          </div>
-        ))}
-      </section>
+      {!loading && !error ? (
+        <>
+          <section className="grid gap-3 md:grid-cols-4" aria-label="Campaign KPI summary">
+            {stats.map((stat) => (
+              <div key={stat.label} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
+              </div>
+            ))}
+          </section>
 
-      <section className="grid gap-3 rounded-2xl bg-background p-4 md:grid-cols-[1fr_220px_auto]" style={{ border: "0.5px solid var(--color-border)" }}>
-        <input
-          aria-label="Search campaigns"
-          className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search campaigns"
-          value={search}
-        />
-        <select
-          aria-label="Filter campaigns by status"
-          className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-          onChange={(event) => setStatusFilter(event.target.value as "ALL" | CampaignStatus)}
-          value={statusFilter}
-        >
-          <option value="ALL">All statuses</option>
-          {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-        </select>
-        <button className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground" onClick={() => void loadCampaigns()} type="button">
-          <IconRefresh aria-hidden="true" className="size-4" stroke={1.8} />
-          Retry
-        </button>
-      </section>
-
-      {error ? (
-        <div className="rounded-2xl bg-red-50 p-4 text-sm font-medium text-red-700">{error}</div>
+          <section className="grid gap-3 rounded-2xl bg-background p-4 md:grid-cols-[1fr_220px_auto]" style={{ border: "0.5px solid var(--color-border)" }}>
+            <input
+              aria-label="Search campaigns"
+              className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search campaigns"
+              value={search}
+            />
+            <select
+              aria-label="Filter campaigns by status"
+              className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+              onChange={(event) => setStatusFilter(event.target.value as "ALL" | CampaignStatus)}
+              value={statusFilter}
+            >
+              <option value="ALL">All statuses</option>
+              {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+            <button className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground" onClick={() => void loadCampaigns()} type="button">
+              <IconRefresh aria-hidden="true" className="size-4" stroke={1.8} />
+              Refresh
+            </button>
+          </section>
+        </>
       ) : null}
 
       {loading ? (
@@ -312,6 +313,15 @@ export default function SellerAcquisitionCampaignsPage() {
           {[0, 1, 2, 3].map((item) => (
             <div key={item} className="h-44 animate-pulse rounded-2xl bg-secondary" />
           ))}
+        </section>
+      ) : error ? (
+        <section className="rounded-2xl bg-red-50 px-6 py-10 text-center" role="alert">
+          <h2 className="text-base font-semibold text-red-800">Campaigns couldn&apos;t be loaded.</h2>
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-red-700">{error}</p>
+          <button className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-red-700 px-4 text-sm font-semibold text-white" onClick={() => void loadCampaigns()} type="button">
+            <IconRefresh aria-hidden="true" className="size-4" stroke={1.8} />
+            Retry
+          </button>
         </section>
       ) : filteredCampaigns.length === 0 ? (
         <section className="flex flex-col items-center justify-center rounded-2xl bg-background px-6 py-16 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
