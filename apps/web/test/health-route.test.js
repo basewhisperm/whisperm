@@ -23,4 +23,5 @@ test("health route returns 503 (not 200) when the database check fails", () => {
 
 test("health route is excluded from Clerk auth in middleware.ts (must be reachable unauthenticated)", () => {
   assert.match(middleware, /'\/api\/health'/u);
+  assert.match(middleware, /if \(isPublicRoute\(request\)\) return NextResponse\.next\(\);/u);
 });
