@@ -134,7 +134,8 @@ function formPayload(form: CampaignFormState) {
 export default function SellerAcquisitionCampaignsPage() {
   const [campaigns, setCampaigns] = useState<readonly SellerAcquisitionCampaign[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | CampaignStatus>("ALL");
   const [modalMode, setModalMode] = useState<"create" | "edit" | null>(null);
@@ -144,7 +145,7 @@ export default function SellerAcquisitionCampaignsPage() {
 
   async function loadCampaigns() {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       const response = await fetch(campaignApiPath(), { cache: "no-store" });
       if (!response.ok) throw new Error(await readError(response));
@@ -152,7 +153,7 @@ export default function SellerAcquisitionCampaignsPage() {
       setCampaigns(payload?.data?.campaigns ?? []);
     } catch (err) {
       setCampaigns([]);
-      setError(err instanceof Error ? err.message : "Campaigns could not be loaded.");
+      setLoadError(err instanceof Error ? err.message : "Campaigns could not be loaded.");
     } finally {
       setLoading(false);
     }
@@ -183,12 +184,14 @@ export default function SellerAcquisitionCampaignsPage() {
   ] as const;
 
   function openCreate() {
+    setActionError(null);
     setEditingCampaign(null);
     setForm(EMPTY_FORM);
     setModalMode("create");
   }
 
   function openEdit(campaign: SellerAcquisitionCampaign) {
+    setActionError(null);
     setEditingCampaign(campaign);
     setForm({
       name: campaign.name,
@@ -212,12 +215,12 @@ export default function SellerAcquisitionCampaignsPage() {
 
   async function saveCampaign() {
     if (!form.name.trim()) {
-      setError("Campaign name is required.");
+      setActionError("Campaign name is required.");
       return;
     }
 
     setSaving(true);
-    setError(null);
+    setActionError(null);
     try {
       const isEdit = modalMode === "edit" && editingCampaign !== null;
       const response = await fetch(campaignApiPath(isEdit ? editingCampaign.id : undefined), {
@@ -231,7 +234,7 @@ export default function SellerAcquisitionCampaignsPage() {
       setEditingCampaign(null);
       setForm(EMPTY_FORM);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Campaign could not be saved.");
+      setActionError(err instanceof Error ? err.message : "Campaign could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -239,14 +242,14 @@ export default function SellerAcquisitionCampaignsPage() {
 
   async function archiveCampaign(campaign: SellerAcquisitionCampaign) {
     if (!window.confirm(`Archive ${campaign.name}?`)) return;
-    setError(null);
+    setActionError(null);
     const response = await fetch(campaignApiPath(campaign.id), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "ARCHIVED" }),
     });
     if (!response.ok) {
-      setError(await readError(response));
+      setActionError(await readError(response));
       return;
     }
     await loadCampaigns();
@@ -272,7 +275,7 @@ export default function SellerAcquisitionCampaignsPage() {
         </button>
       </section>
 
-      {!loading && !error ? (
+      {!loading && !loadError ? (
         <>
           <section className="grid gap-3 md:grid-cols-4" aria-label="Campaign KPI summary">
             {stats.map((stat) => (
@@ -308,16 +311,20 @@ export default function SellerAcquisitionCampaignsPage() {
         </>
       ) : null}
 
+      {actionError && !modalMode ? (
+        <div className="rounded-2xl bg-red-50 p-4 text-sm font-medium text-red-700" role="alert">{actionError}</div>
+      ) : null}
+
       {loading ? (
         <section className="grid gap-4 lg:grid-cols-2">
           {[0, 1, 2, 3].map((item) => (
             <div key={item} className="h-44 animate-pulse rounded-2xl bg-secondary" />
           ))}
         </section>
-      ) : error ? (
+      ) : loadError ? (
         <section className="rounded-2xl bg-red-50 px-6 py-10 text-center" role="alert">
           <h2 className="text-base font-semibold text-red-800">Campaigns couldn&apos;t be loaded.</h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-red-700">{error}</p>
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-red-700">{loadError}</p>
           <button className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-red-700 px-4 text-sm font-semibold text-white" onClick={() => void loadCampaigns()} type="button">
             <IconRefresh aria-hidden="true" className="size-4" stroke={1.8} />
             Retry
@@ -472,8 +479,9 @@ export default function SellerAcquisitionCampaignsPage() {
                 </select>
               </label>
             </div>
+            {actionError ? <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-medium text-red-700" role="alert">{actionError}</p> : null}
             <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-xl bg-secondary px-4 py-2 text-sm font-semibold text-foreground" onClick={() => setModalMode(null)} type="button">Cancel</button>
+              <button className="rounded-xl bg-secondary px-4 py-2 text-sm font-semibold text-foreground" onClick={() => { setActionError(null); setModalMode(null); }} type="button">Cancel</button>
               <button className="rounded-xl bg-whisper px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={saving} onClick={() => void saveCampaign()} type="button">
                 {saving ? "Saving…" : "Save Campaign"}
               </button>

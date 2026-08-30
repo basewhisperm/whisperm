@@ -29,12 +29,21 @@ test("campaigns index supports V1 campaign operations", () => {
 });
 
 test("campaigns index keeps loading, error, and empty states mutually exclusive", () => {
-  assert.match(page, /!loading && !error/u);
-  assert.match(page, /\) : error \? \(/u);
+  assert.match(page, /!loading && !loadError/u);
+  assert.match(page, /\) : loadError \? \(/u);
   assert.match(page, /Campaigns couldn&apos;t be loaded\./u);
   assert.match(page, /role="alert"/u);
   assert.match(page, /setCampaigns\(\[\]\);/u);
   assert.match(page, /\) : filteredCampaigns\.length === 0 \? \(/u);
+});
+
+test("campaign action errors never masquerade as campaign load failures", () => {
+  assert.match(page, /const \[loadError, setLoadError\]/u);
+  assert.match(page, /const \[actionError, setActionError\]/u);
+  assert.match(page, /setActionError\("Campaign name is required\."\)/u);
+  assert.match(page, /actionError && !modalMode/u);
+  assert.match(page, /\{actionError \? <p[^>]+role="alert"/u);
+  assert.doesNotMatch(page, /setError\(/u);
 });
 
 test("campaign refresh and failure retry have distinct labels", () => {
