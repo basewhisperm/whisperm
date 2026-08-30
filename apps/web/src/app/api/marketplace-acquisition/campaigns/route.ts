@@ -21,6 +21,20 @@ const persistenceErrorResponse = (error: unknown) => {
   return errorResponse(candidate.message, candidate.status);
 };
 
+const logCampaignCreateError = (request: NextRequest, error: unknown) => {
+  const candidate = typeof error === "object" && error !== null
+    ? error as { readonly code?: unknown; readonly message?: unknown; readonly name?: unknown; readonly stack?: unknown; readonly status?: unknown }
+    : {};
+  console.error("Campaign creation failed", {
+    requestId: request.headers.get("x-vercel-id") ?? request.headers.get("x-request-id") ?? "unavailable",
+    errorName: typeof candidate.name === "string" ? candidate.name : typeof error,
+    errorCode: typeof candidate.code === "string" ? candidate.code : "unavailable",
+    errorStatus: typeof candidate.status === "number" ? candidate.status : "unavailable",
+    errorMessage: typeof candidate.message === "string" ? candidate.message : "unavailable",
+    errorStack: typeof candidate.stack === "string" ? candidate.stack : "unavailable",
+  });
+};
+
 const campaignScheduleSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().min(1).nullable().optional(),
@@ -102,6 +116,7 @@ export async function POST(request: NextRequest) {
     const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
     return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
   } catch (error) {
+    logCampaignCreateError(request, error);
     const persistenceResponse = persistenceErrorResponse(error);
     if (persistenceResponse) return persistenceResponse;
     return errorResponse("Campaign could not be created. Please try again.", 500);
