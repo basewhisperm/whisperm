@@ -4,11 +4,36 @@ import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { PersistenceError, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { SellerAcquisitionCampaignService, campaignTargetingConfigSchema, mergeCampaignTargetingMetadata } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
+
+const persistenceErrorResponse = (error: unknown) => {
+  if (error instanceof PersistenceError) return errorResponse(error.message, error.status);
+  if (typeof error !== "object" || error === null) return null;
+
+  const candidate = error as { readonly code?: unknown; readonly message?: unknown; readonly status?: unknown };
+  if (typeof candidate.code !== "string" || !candidate.code.startsWith("PERSISTENCE_")) return null;
+  if (typeof candidate.message !== "string" || typeof candidate.status !== "number") return null;
+  if (!Number.isInteger(candidate.status) || candidate.status < 400 || candidate.status > 599) return null;
+  return errorResponse(candidate.message, candidate.status);
+};
+
+const logCampaignCreateError = (request: NextRequest, error: unknown) => {
+  const candidate = typeof error === "object" && error !== null
+    ? error as { readonly code?: unknown; readonly message?: unknown; readonly name?: unknown; readonly stack?: unknown; readonly status?: unknown }
+    : {};
+  console.error("Campaign creation failed", {
+    requestId: request.headers.get("x-vercel-id") ?? request.headers.get("x-request-id") ?? "unavailable",
+    errorName: typeof candidate.name === "string" ? candidate.name : typeof error,
+    errorCode: typeof candidate.code === "string" ? candidate.code : "unavailable",
+    errorStatus: typeof candidate.status === "number" ? candidate.status : "unavailable",
+    errorMessage: typeof candidate.message === "string" ? candidate.message : "unavailable",
+    errorStack: typeof candidate.stack === "string" ? candidate.stack : "unavailable",
+  });
+};
 
 const campaignScheduleSchema = z.object({
   name: z.string().min(1).optional(),
@@ -20,7 +45,9 @@ const campaignScheduleSchema = z.object({
   scheduleCadence: z.enum(["HOURLY", "DAILY", "WEEKLY"]).nullable().optional(),
   scheduleTimezone: z.string().min(1).nullable().optional(),
   nextRunAt: z.string().datetime().nullable().optional(),
-  targeting: campaignTargetingConfigSchema.nullable().optional(),
+  // Validate imported service schemas separately. The web app uses Zod 4 while
+  // @whisperm/services currently ships Zod 3 schema instances.
+  targeting: z.unknown().nullable().optional(),
 }).strict();
 
 const normalizeCampaignInput = (body: unknown) => {
@@ -31,7 +58,12 @@ const normalizeCampaignInput = (body: unknown) => {
     return { success: false as const, error: { issues: [{ message: "Schedule cadence is required when scheduling is enabled." }] } };
   }
   const { targeting, ...campaignData } = data;
-  return { success: true as const, data: { ...campaignData, ...(targeting === undefined ? {} : { metadata: mergeCampaignTargetingMetadata(undefined, targeting === null ? null : campaignTargetingConfigSchema.parse(targeting)) }), scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
+  const parsedTargeting = targeting === undefined || targeting === null ? null : campaignTargetingConfigSchema.safeParse(targeting);
+  if (parsedTargeting !== null && !parsedTargeting.success) {
+    return { success: false as const, error: { issues: [{ message: parsedTargeting.error.issues[0]?.message ?? "Invalid campaign targeting." }] } };
+  }
+  const normalizedTargeting = targeting === null ? null : parsedTargeting?.data;
+  return { success: true as const, data: { ...campaignData, ...(targeting === undefined ? {} : { metadata: mergeCampaignTargetingMetadata(undefined, normalizedTargeting ?? null) }), scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
 };
 
 const parseLimit = (value: string | null): number | undefined => {
@@ -84,9 +116,16 @@ export async function POST(request: NextRequest) {
     body = {};
   }
 
-  const parsed = normalizeCampaignInput(body);
-  if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid campaign request.", 400);
+  try {
+    const parsed = normalizeCampaignInput(body);
+    if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid campaign request.", 400);
 
-  const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
-  return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
+    const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
+    return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
+  } catch (error) {
+    logCampaignCreateError(request, error);
+    const persistenceResponse = persistenceErrorResponse(error);
+    if (persistenceResponse) return persistenceResponse;
+    return errorResponse("Campaign could not be created. Please try again.", 500);
+  }
 }

@@ -8,6 +8,9 @@ const isPublicRoute = createRouteMatcher([
   // they cannot present a Clerk session, so this route must stay public. It never returns
   // tenant data, only process/database liveness.
   '/api/health',
+  // Vercel Cron has no Clerk session. The handler authenticates the scheduler with
+  // CRON_SECRET and fails closed before touching queue state.
+  '/api/internal/queue-drain',
   '/api/marketplace-acquisition/notifications/webhook',
   // ST1-011: the seller claim portal is reached by sellers clicking a WhatsApp/SMS link,
   // so it must be reachable without a WhisperM session. The route lives at /claim/[token]

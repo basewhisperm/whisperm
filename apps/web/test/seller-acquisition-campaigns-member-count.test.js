@@ -22,6 +22,15 @@ test("campaigns list/create route enriches every returned campaign with a real m
   assert.match(listRoute, /memberCount: 0/u);
 });
 
+test("campaign creation returns structured API errors when persistence fails", () => {
+  assert.match(listRoute, /error instanceof PersistenceError/u);
+  assert.match(listRoute, /candidate\.code\.startsWith\("PERSISTENCE_"\)/u);
+  assert.match(listRoute, /const persistenceResponse = persistenceErrorResponse\(error\)/u);
+  assert.match(listRoute, /logCampaignCreateError\(request, error\)/u);
+  assert.match(listRoute, /request\.headers\.get\("x-vercel-id"\)/u);
+  assert.match(listRoute, /Campaign could not be created\. Please try again\./u);
+});
+
 test("campaign detail get/patch routes enrich the returned campaign with a real memberCount", () => {
   assert.match(detailRoute, /const memberCount = await service\.countMembers\(\{ tenantId: tenant\.id \}, campaign\.id\);/u);
   assert.match(detailRoute, /data: \{ campaign: \{ \.\.\.campaign, memberCount \} \}/u);

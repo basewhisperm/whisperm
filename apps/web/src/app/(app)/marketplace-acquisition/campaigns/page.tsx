@@ -134,7 +134,8 @@ function formPayload(form: CampaignFormState) {
 export default function SellerAcquisitionCampaignsPage() {
   const [campaigns, setCampaigns] = useState<readonly SellerAcquisitionCampaign[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | CampaignStatus>("ALL");
   const [modalMode, setModalMode] = useState<"create" | "edit" | null>(null);
@@ -144,14 +145,15 @@ export default function SellerAcquisitionCampaignsPage() {
 
   async function loadCampaigns() {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       const response = await fetch(campaignApiPath(), { cache: "no-store" });
       if (!response.ok) throw new Error(await readError(response));
       const payload = await response.json();
       setCampaigns(payload?.data?.campaigns ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Campaigns could not be loaded.");
+      setCampaigns([]);
+      setLoadError(err instanceof Error ? err.message : "Campaigns could not be loaded.");
     } finally {
       setLoading(false);
     }
@@ -182,12 +184,14 @@ export default function SellerAcquisitionCampaignsPage() {
   ] as const;
 
   function openCreate() {
+    setActionError(null);
     setEditingCampaign(null);
     setForm(EMPTY_FORM);
     setModalMode("create");
   }
 
   function openEdit(campaign: SellerAcquisitionCampaign) {
+    setActionError(null);
     setEditingCampaign(campaign);
     setForm({
       name: campaign.name,
@@ -211,12 +215,12 @@ export default function SellerAcquisitionCampaignsPage() {
 
   async function saveCampaign() {
     if (!form.name.trim()) {
-      setError("Campaign name is required.");
+      setActionError("Campaign name is required.");
       return;
     }
 
     setSaving(true);
-    setError(null);
+    setActionError(null);
     try {
       const isEdit = modalMode === "edit" && editingCampaign !== null;
       const response = await fetch(campaignApiPath(isEdit ? editingCampaign.id : undefined), {
@@ -230,7 +234,7 @@ export default function SellerAcquisitionCampaignsPage() {
       setEditingCampaign(null);
       setForm(EMPTY_FORM);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Campaign could not be saved.");
+      setActionError(err instanceof Error ? err.message : "Campaign could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -238,14 +242,14 @@ export default function SellerAcquisitionCampaignsPage() {
 
   async function archiveCampaign(campaign: SellerAcquisitionCampaign) {
     if (!window.confirm(`Archive ${campaign.name}?`)) return;
-    setError(null);
+    setActionError(null);
     const response = await fetch(campaignApiPath(campaign.id), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "ARCHIVED" }),
     });
     if (!response.ok) {
-      setError(await readError(response));
+      setActionError(await readError(response));
       return;
     }
     await loadCampaigns();
@@ -271,40 +275,44 @@ export default function SellerAcquisitionCampaignsPage() {
         </button>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-4" aria-label="Campaign KPI summary">
-        {stats.map((stat) => (
-          <div key={stat.label} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
-            <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
-          </div>
-        ))}
-      </section>
+      {!loading && !loadError ? (
+        <>
+          <section className="grid gap-3 md:grid-cols-4" aria-label="Campaign KPI summary">
+            {stats.map((stat) => (
+              <div key={stat.label} className="rounded-2xl bg-background p-4" style={{ border: "0.5px solid var(--color-border)" }}>
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{stat.label}</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
+              </div>
+            ))}
+          </section>
 
-      <section className="grid gap-3 rounded-2xl bg-background p-4 md:grid-cols-[1fr_220px_auto]" style={{ border: "0.5px solid var(--color-border)" }}>
-        <input
-          aria-label="Search campaigns"
-          className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search campaigns"
-          value={search}
-        />
-        <select
-          aria-label="Filter campaigns by status"
-          className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-          onChange={(event) => setStatusFilter(event.target.value as "ALL" | CampaignStatus)}
-          value={statusFilter}
-        >
-          <option value="ALL">All statuses</option>
-          {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-        </select>
-        <button className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground" onClick={() => void loadCampaigns()} type="button">
-          <IconRefresh aria-hidden="true" className="size-4" stroke={1.8} />
-          Retry
-        </button>
-      </section>
+          <section className="grid gap-3 rounded-2xl bg-background p-4 md:grid-cols-[1fr_220px_auto]" style={{ border: "0.5px solid var(--color-border)" }}>
+            <input
+              aria-label="Search campaigns"
+              className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search campaigns"
+              value={search}
+            />
+            <select
+              aria-label="Filter campaigns by status"
+              className="h-10 rounded-xl bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
+              onChange={(event) => setStatusFilter(event.target.value as "ALL" | CampaignStatus)}
+              value={statusFilter}
+            >
+              <option value="ALL">All statuses</option>
+              {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+            <button className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground" onClick={() => void loadCampaigns()} type="button">
+              <IconRefresh aria-hidden="true" className="size-4" stroke={1.8} />
+              Refresh
+            </button>
+          </section>
+        </>
+      ) : null}
 
-      {error ? (
-        <div className="rounded-2xl bg-red-50 p-4 text-sm font-medium text-red-700">{error}</div>
+      {actionError && !modalMode ? (
+        <div className="rounded-2xl bg-red-50 p-4 text-sm font-medium text-red-700" role="alert">{actionError}</div>
       ) : null}
 
       {loading ? (
@@ -312,6 +320,15 @@ export default function SellerAcquisitionCampaignsPage() {
           {[0, 1, 2, 3].map((item) => (
             <div key={item} className="h-44 animate-pulse rounded-2xl bg-secondary" />
           ))}
+        </section>
+      ) : loadError ? (
+        <section className="rounded-2xl bg-red-50 px-6 py-10 text-center" role="alert">
+          <h2 className="text-base font-semibold text-red-800">Campaigns couldn&apos;t be loaded.</h2>
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-red-700">{loadError}</p>
+          <button className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-red-700 px-4 text-sm font-semibold text-white" onClick={() => void loadCampaigns()} type="button">
+            <IconRefresh aria-hidden="true" className="size-4" stroke={1.8} />
+            Retry
+          </button>
         </section>
       ) : filteredCampaigns.length === 0 ? (
         <section className="flex flex-col items-center justify-center rounded-2xl bg-background px-6 py-16 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
@@ -427,7 +444,8 @@ export default function SellerAcquisitionCampaignsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-midnight/60 p-4">
           <section aria-modal="true" className="w-full max-w-lg rounded-2xl bg-background p-5 shadow-xl" role="dialog">
             <h2 className="text-lg font-semibold text-foreground">{modalMode === "create" ? ACQUISITION_COPY.actions.createCampaign : "Edit Campaign"}</h2>
-            <div className="mt-4 space-y-3">
+            <form onSubmit={(event) => { event.preventDefault(); void saveCampaign(); }}>
+              <div className="mt-4 space-y-3">
               <Field label="Campaign Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
               <Field label="Description" value={form.description} onChange={(value) => setForm({ ...form, description: value })} />
               <Field label="Owner" value={form.ownerId} onChange={(value) => setForm({ ...form, ownerId: value })} />
@@ -461,13 +479,15 @@ export default function SellerAcquisitionCampaignsPage() {
                   {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                 </select>
               </label>
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-xl bg-secondary px-4 py-2 text-sm font-semibold text-foreground" onClick={() => setModalMode(null)} type="button">Cancel</button>
-              <button className="rounded-xl bg-whisper px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={saving} onClick={() => void saveCampaign()} type="button">
-                {saving ? "Saving…" : "Save Campaign"}
-              </button>
-            </div>
+              </div>
+              {actionError ? <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-medium text-red-700" role="alert">{actionError}</p> : null}
+              <div className="mt-5 flex justify-end gap-2">
+                <button className="rounded-xl bg-secondary px-4 py-2 text-sm font-semibold text-foreground" onClick={() => { setActionError(null); setModalMode(null); }} type="button">Cancel</button>
+                <button className="rounded-xl bg-whisper px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={saving} type="submit">
+                  {saving ? "Saving…" : "Save Campaign"}
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}

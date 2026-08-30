@@ -28,6 +28,35 @@ test("campaigns index supports V1 campaign operations", () => {
   assert.match(page, /\/api\/marketplace-acquisition\/campaigns/u);
 });
 
+test("campaigns index keeps loading, error, and empty states mutually exclusive", () => {
+  assert.match(page, /!loading && !loadError/u);
+  assert.match(page, /\) : loadError \? \(/u);
+  assert.match(page, /Campaigns couldn&apos;t be loaded\./u);
+  assert.match(page, /role="alert"/u);
+  assert.match(page, /setCampaigns\(\[\]\);/u);
+  assert.match(page, /\) : filteredCampaigns\.length === 0 \? \(/u);
+});
+
+test("campaign action errors never masquerade as campaign load failures", () => {
+  assert.match(page, /const \[loadError, setLoadError\]/u);
+  assert.match(page, /const \[actionError, setActionError\]/u);
+  assert.match(page, /setActionError\("Campaign name is required\."\)/u);
+  assert.match(page, /actionError && !modalMode/u);
+  assert.match(page, /\{actionError \? <p[^>]+role="alert"/u);
+  assert.doesNotMatch(page, /setError\(/u);
+});
+
+test("campaign modal submits through an accessible form contract", () => {
+  assert.match(page, /<form onSubmit=\{\(event\) => \{ event\.preventDefault\(\); void saveCampaign\(\); \}\}>/u);
+  assert.match(page, /disabled=\{saving\} type="submit"/u);
+  assert.doesNotMatch(page, /onClick=\{\(\) => void saveCampaign\(\)\}/u);
+});
+
+test("campaign refresh and failure retry have distinct labels", () => {
+  assert.match(page, /<IconRefresh[^>]+\/>\s*Refresh/u);
+  assert.match(page, /Campaigns couldn&apos;t be loaded[\s\S]*<IconRefresh[^>]+\/>\s*Retry/u);
+});
+
 // ST1-013C: the campaign card's targeting/readiness truth must come from the shared
 // packages/services helpers, not ad hoc inline JSX -- otherwise the card and the workbench can
 // (and did) disagree about whether a campaign's targeting is configured.
