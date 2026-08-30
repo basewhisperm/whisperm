@@ -24,7 +24,8 @@ test("campaigns list/create route enriches every returned campaign with a real m
 
 test("campaign creation returns structured API errors when persistence fails", () => {
   assert.match(listRoute, /error instanceof PersistenceError/u);
-  assert.match(listRoute, /errorResponse\(error\.message, error\.status\)/u);
+  assert.match(listRoute, /candidate\.code\.startsWith\("PERSISTENCE_"\)/u);
+  assert.match(listRoute, /const persistenceResponse = persistenceErrorResponse\(error\)/u);
   assert.match(listRoute, /Campaign could not be created\. Please try again\./u);
 });
 

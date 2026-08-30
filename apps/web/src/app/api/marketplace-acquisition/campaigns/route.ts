@@ -10,6 +10,17 @@ import { SellerAcquisitionCampaignService, campaignTargetingConfigSchema, mergeC
 const errorResponse = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
 
+const persistenceErrorResponse = (error: unknown) => {
+  if (error instanceof PersistenceError) return errorResponse(error.message, error.status);
+  if (typeof error !== "object" || error === null) return null;
+
+  const candidate = error as { readonly code?: unknown; readonly message?: unknown; readonly status?: unknown };
+  if (typeof candidate.code !== "string" || !candidate.code.startsWith("PERSISTENCE_")) return null;
+  if (typeof candidate.message !== "string" || typeof candidate.status !== "number") return null;
+  if (!Number.isInteger(candidate.status) || candidate.status < 400 || candidate.status > 599) return null;
+  return errorResponse(candidate.message, candidate.status);
+};
+
 const campaignScheduleSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().min(1).nullable().optional(),
@@ -91,7 +102,8 @@ export async function POST(request: NextRequest) {
     const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
     return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
   } catch (error) {
-    if (error instanceof PersistenceError) return errorResponse(error.message, error.status);
+    const persistenceResponse = persistenceErrorResponse(error);
+    if (persistenceResponse) return persistenceResponse;
     return errorResponse("Campaign could not be created. Please try again.", 500);
   }
 }
