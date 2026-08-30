@@ -48,6 +48,27 @@ test("the discovery run trigger route authorizes DISCOVERY before running discov
   assert.ok(authorizeIndex > 0 && executeIndex > 0 && authorizeIndex < executeIndex, "authorization must run before discovery executes");
 });
 
+test("the discovery route resolves a tenant marketplace source instead of accepting an internal source ID", () => {
+  assert.match(discoveryRunsRoute, /prisma\.marketplaceSource\.upsert/u);
+  assert.match(discoveryRunsRoute, /tenantId_key/u);
+  assert.doesNotMatch(discoveryRunsRoute, /marketplaceSourceId\?: string/u);
+  assert.match(discoveryRunsRoute, /marketplaceSourceId: source\.id/u);
+});
+
+test("the discovery route verifies campaign ownership and active state before provisioning a source", () => {
+  const campaignIndex = discoveryRunsRoute.indexOf("prisma.sellerAcquisitionCampaign.findFirst");
+  const sourceIndex = discoveryRunsRoute.indexOf("prisma.marketplaceSource.upsert");
+  assert.ok(campaignIndex > 0 && sourceIndex > campaignIndex, "campaign verification must precede source mutation");
+  assert.match(discoveryRunsRoute, /where: \{ tenantId: tenant\.id, id: campaignId \}/u);
+  assert.match(discoveryRunsRoute, /campaign\.status !== "ACTIVE"/u);
+});
+
+test("the discovery route enforces canonical governance allowances without phantom TenantFeature credit columns", () => {
+  assert.match(discoveryRunsRoute, /remainingDiscoveryAllowance\(decision\.limits\)/u);
+  assert.match(discoveryRunsRoute, /discoveryCreditsRemaining: allowance/u);
+  assert.doesNotMatch(discoveryRunsRoute, /discoveryCreditsUsed|DISCOVERY_CREDITS_DEFAULT|\$executeRaw/u);
+});
+
 test("the discovery run trigger route still gates GET reads behind the feature flag only, never governance", () => {
   const getBody = discoveryRunsRoute.slice(discoveryRunsRoute.indexOf("export async function GET"), discoveryRunsRoute.indexOf("export async function POST"));
   assert.doesNotMatch(getBody, /authorizeAcquisitionActionForApi/u);

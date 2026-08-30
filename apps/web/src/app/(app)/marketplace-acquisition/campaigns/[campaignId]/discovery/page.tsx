@@ -220,7 +220,6 @@ function ManualSeedModal({
   readonly onSuccess: () => void;
 }) {
   const [text, setText] = useState("");
-  const [sourceId, setSourceId] = useState("");
   const [sourceKey, setSourceKey] = useState("jiji");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,8 +227,6 @@ function ManualSeedModal({
   const submit = async () => {
     const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
     if (lines.length === 0) { setError("Enter at least one listing URL."); return; }
-    if (!sourceId) { setError("Enter the marketplace source ID."); return; }
-
     setBusy(true);
     setError(null);
     try {
@@ -237,7 +234,7 @@ function ManualSeedModal({
       const res = await fetch(`/api/marketplace-acquisition/campaigns/${campaignId}/discovery/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ marketplaceSourceId: sourceId, marketplaceSourceKey: sourceKey, mode: "MANUAL_SEED", entries }),
+        body: JSON.stringify({ marketplaceSourceKey: sourceKey, mode: "MANUAL_SEED", entries }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(payload?.error?.message ?? "Discovery run failed.");
@@ -260,18 +257,6 @@ function ManualSeedModal({
         </div>
 
         <div className="space-y-3">
-          <div>
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Marketplace Source ID
-            </label>
-            <input
-              className="mt-1 w-full rounded-xl bg-secondary px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-pulse"
-              placeholder="UUID of the marketplace source"
-              value={sourceId}
-              onChange={(e) => setSourceId(e.target.value)}
-            />
-          </div>
-
           <div>
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Marketplace Key
