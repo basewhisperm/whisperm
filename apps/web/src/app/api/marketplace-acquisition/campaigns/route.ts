@@ -4,7 +4,7 @@ import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { PersistenceError, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { SellerAcquisitionCampaignService, campaignTargetingConfigSchema, mergeCampaignTargetingMetadata } from "@whisperm/services";
 
 const errorResponse = (message: string, status: number) =>
@@ -87,6 +87,11 @@ export async function POST(request: NextRequest) {
   const parsed = normalizeCampaignInput(body);
   if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid campaign request.", 400);
 
-  const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
-  return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
+  try {
+    const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
+    return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
+  } catch (error) {
+    if (error instanceof PersistenceError) return errorResponse(error.message, error.status);
+    return errorResponse("Campaign could not be created. Please try again.", 500);
+  }
 }
