@@ -92,9 +92,13 @@ export class PrismaAcquisitionGovernanceRepository implements AcquisitionGoverna
       this.tenantFeatures.findUnique({ where: { tenantId_featureKey: { tenantId: context.tenantId, featureKey: DISCOVERY_FEATURE_KEY } } }),
       this.subscriptions.findFirst({ where: { tenantId: context.tenantId }, orderBy: { createdAt: "desc" } }),
     ]);
+    const planIncludesDiscovery = subscription !== null && ["STARTER", "GROWTH", "PRO"].includes(subscription.plan);
     return {
       featureEnabled: feature?.enabled === true,
-      discoveryFeatureEnabled: discoveryFeature?.enabled === true,
+      // All commercial plans have an explicit discovery allowance in the
+      // governance policy. A TenantFeature row remains an ops override, but
+      // a missing row must not make a paid/trialing plan unreachable.
+      discoveryFeatureEnabled: discoveryFeature?.enabled ?? planIncludesDiscovery,
       planName: subscription?.plan ?? null,
       subscriptionStatus: subscription?.status ?? null,
     };

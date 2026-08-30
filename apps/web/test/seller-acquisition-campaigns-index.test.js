@@ -96,3 +96,9 @@ test("run discovery CTAs link to the campaign discovery route, not the workbench
   assert.match(page, /href=\{discoveryHref\}>\s*Run Discovery\s*<\/Link>/u);
   assert.match(page, /const nextActionHref = workflowStage === "READY_FOR_DISCOVERY" \? discoveryHref : workbenchHref;/u);
 });
+
+test("ready draft campaigns ask the user to activate before discovery", () => {
+  assert.match(page, /const needsActivation = workflowStage === "READY_FOR_DISCOVERY" && campaign\.status !== "ACTIVE";/u);
+  assert.match(page, /needsActivation \? "Activate Campaign" : nextAction\.label/u);
+  assert.match(page, /workflowStage === "CONFIGURE_TARGETING" \|\| needsActivation/u);
+});

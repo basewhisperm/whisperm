@@ -27,7 +27,7 @@ export const PLAN_POLICIES = {
     priceUsd: { MONTHLY: 29, ANNUAL: 290 },
     includedBillableActions: 250,
     quotas: ["250 acquisition actions / month", "1 pipeline", "2 team members"],
-    features: ["Seller capture", "Individual and bulk invitations"],
+    features: ["Seller capture", "Up to 200 seller discoveries / month", "Individual and bulk invitations"],
   },
   GROWTH: {
     plan: "GROWTH",
@@ -37,7 +37,7 @@ export const PLAN_POLICIES = {
     priceUsd: { MONTHLY: 99, ANNUAL: 990 },
     includedBillableActions: 1_500,
     quotas: ["1,500 acquisition actions / month", "5 pipelines", "5 team members"],
-    features: ["Reports", "Health scores", "Campaign automation"],
+    features: ["Up to 2,000 seller discoveries / month", "Reports", "Health scores", "Campaign automation"],
   },
   PRO: {
     plan: "PRO",
@@ -47,7 +47,7 @@ export const PLAN_POLICIES = {
     priceUsd: { MONTHLY: 299, ANNUAL: 2_990 },
     includedBillableActions: 6_000,
     quotas: ["6,000 acquisition actions / month", "Unlimited pipelines", "15 team members"],
-    features: ["Advanced reporting", "Growth recommendations", "API access", "Priority support"],
+    features: ["Unlimited seller discovery", "Advanced reporting", "Growth recommendations", "API access", "Priority support"],
   },
 } as const satisfies Readonly<Record<SubscriptionPlan, PlanPolicy>>;
 

@@ -370,6 +370,7 @@ export default function SellerAcquisitionCampaignsPage() {
                 const workflowStage = resolveCampaignWorkflowStage({ targetingReady: readiness.status === "READY", memberCount });
                 const nextAction = getNextCampaignWorkflowAction(workflowStage);
                 const blockers = getCampaignWorkflowBlockers({ targetingReady: readiness.status === "READY", memberCount });
+                const needsActivation = workflowStage === "READY_FOR_DISCOVERY" && campaign.status !== "ACTIVE";
                 const nextActionHref = workflowStage === "READY_FOR_DISCOVERY" ? discoveryHref : workbenchHref;
 
                 return (
@@ -381,7 +382,7 @@ export default function SellerAcquisitionCampaignsPage() {
                       </div>
                       <div className="rounded-xl bg-secondary p-3">
                         <p className="font-semibold text-foreground">Runtime</p>
-                        <p>{readiness.status === "READY" ? "Ready to run discovery" : readiness.summary}</p>
+                        <p>{readiness.status === "READY" ? (needsActivation ? "Targeting is ready. Activate this campaign to run discovery." : "Ready to run discovery") : readiness.summary}</p>
                       </div>
                       <div className="rounded-xl bg-secondary p-3">
                         <p className="font-semibold text-foreground">Members</p>
@@ -393,7 +394,7 @@ export default function SellerAcquisitionCampaignsPage() {
                       </div>
                       <div className="rounded-xl bg-secondary p-3" data-testid="campaign-workflow-next-action">
                         <p className="font-semibold text-foreground">Next Action</p>
-                        <p>{nextAction.label}</p>
+                        <p>{needsActivation ? "Activate Campaign" : nextAction.label}</p>
                       </div>
                     </div>
 
@@ -406,9 +407,9 @@ export default function SellerAcquisitionCampaignsPage() {
                     ) : null}
 
                     <div className="mt-5 flex flex-wrap gap-2">
-                      {workflowStage === "CONFIGURE_TARGETING" ? (
+                      {workflowStage === "CONFIGURE_TARGETING" || needsActivation ? (
                         <button className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" onClick={() => openEdit(campaign)} type="button">
-                          {nextAction.label}
+                          {needsActivation ? "Activate Campaign" : nextAction.label}
                         </button>
                       ) : (
                         <Link className="inline-flex h-9 items-center justify-center rounded-xl bg-whisper px-3 text-sm font-semibold text-white" href={nextActionHref}>
