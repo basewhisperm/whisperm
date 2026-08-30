@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server';
 
 const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
@@ -19,11 +20,20 @@ const isPublicRoute = createRouteMatcher([
   '/api/marketplace-acquisition/claims(.*)',
 ]);
 
-export default clerkMiddleware((auth, request) => {
-  if (!isPublicRoute(request)) {
-    auth().protect();
-  }
+const protectedMiddleware = clerkMiddleware((auth) => {
+  auth().protect();
 });
+
+/**
+ * Public machine and seller routes must bypass Clerk entirely. Marking them
+ * public only inside clerkMiddleware still initializes Clerk for the request;
+ * an unavailable Clerk runtime then crashes before the route handler can
+ * validate CRON_SECRET or return health state.
+ */
+export default function middleware(request: NextRequest, event: NextFetchEvent) {
+  if (isPublicRoute(request)) return NextResponse.next();
+  return protectedMiddleware(request, event);
+}
 
 export const config = {
   matcher: [
