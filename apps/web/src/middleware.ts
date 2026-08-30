@@ -20,8 +20,20 @@ const isPublicRoute = createRouteMatcher([
   '/api/marketplace-acquisition/claims(.*)',
 ]);
 
-const protectedMiddleware = clerkMiddleware((auth) => {
-  auth().protect();
+// These routes authenticate with a machine secret or a public claim token and
+// must remain reachable even when Clerk itself is unavailable. Browser-facing
+// public routes still pass through Clerk so server auth() and ClerkProvider
+// receive the request context they require.
+const isClerkBypassRoute = createRouteMatcher([
+  '/api/health',
+  '/api/internal/queue-drain',
+  '/api/marketplace-acquisition/notifications/webhook',
+  '/claim(.*)',
+  '/api/marketplace-acquisition/claims(.*)',
+]);
+
+const protectedMiddleware = clerkMiddleware((auth, request) => {
+  if (!isPublicRoute(request)) auth().protect();
 });
 
 /**
@@ -31,7 +43,7 @@ const protectedMiddleware = clerkMiddleware((auth) => {
  * validate CRON_SECRET or return health state.
  */
 export default function middleware(request: NextRequest, event: NextFetchEvent) {
-  if (isPublicRoute(request)) return NextResponse.next();
+  if (isClerkBypassRoute(request)) return NextResponse.next();
   return protectedMiddleware(request, event);
 }
 
