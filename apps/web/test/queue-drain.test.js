@@ -7,6 +7,12 @@ const read = (path) => readFileSync(`${root}src/${path}`, "utf8");
 
 const drain = read("lib/queue-drain/drain.ts");
 const route = read("app/api/internal/queue-drain/route.ts");
+const middleware = read("middleware.ts");
+
+test("Vercel Cron reaches the queue-drain handler without a Clerk session", () => {
+  assert.match(middleware, /'\/api\/internal\/queue-drain'/u);
+  assert.match(route, /authorization !== `Bearer \$\{secret\}`/u);
+});
 
 test("the queue-drain route fails closed with 503 when CRON_SECRET is unconfigured, and 401 on a mismatched secret", () => {
   assert.match(route, /if \(!secret\) \{\s*return NextResponse\.json\(\{ ok: false, error: "CRON_SECRET_NOT_CONFIGURED" \}, \{ status: 503 \}\);/u);
