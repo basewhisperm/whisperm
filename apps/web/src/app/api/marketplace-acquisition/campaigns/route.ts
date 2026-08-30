@@ -35,6 +35,20 @@ const logCampaignCreateError = (request: NextRequest, error: unknown) => {
   });
 };
 
+const campaignCreateFailureMessage = (error: unknown) => {
+  if (process.env.VERCEL_ENV !== "preview") return "Campaign could not be created. Please try again.";
+  if (typeof error !== "object" || error === null) return `Campaign could not be created [${typeof error}].`;
+
+  const candidate = error as { readonly code?: unknown; readonly name?: unknown };
+  const name = typeof candidate.name === "string" && /^[A-Za-z][A-Za-z0-9]*$/u.test(candidate.name)
+    ? candidate.name
+    : "UnknownError";
+  const code = typeof candidate.code === "string" && /^[A-Z0-9_]+$/u.test(candidate.code)
+    ? `:${candidate.code}`
+    : "";
+  return `Campaign could not be created [${name}${code}].`;
+};
+
 const campaignScheduleSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().min(1).nullable().optional(),
@@ -119,6 +133,6 @@ export async function POST(request: NextRequest) {
     logCampaignCreateError(request, error);
     const persistenceResponse = persistenceErrorResponse(error);
     if (persistenceResponse) return persistenceResponse;
-    return errorResponse("Campaign could not be created. Please try again.", 500);
+    return errorResponse(campaignCreateFailureMessage(error), 500);
   }
 }
