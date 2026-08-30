@@ -46,7 +46,15 @@ const campaignCreateFailureMessage = (error: unknown) => {
   const code = typeof candidate.code === "string" && /^[A-Z0-9_]+$/u.test(candidate.code)
     ? `:${candidate.code}`
     : "";
-  return `Campaign could not be created [${name}${code}].`;
+  const rawMessage = "message" in candidate && typeof candidate.message === "string" ? candidate.message : "";
+  const safeMessage = rawMessage
+    .replace(/(?:postgres(?:ql)?|mysql):\/\/\S+/giu, "[REDACTED_DATABASE_URL]")
+    .replace(/https?:\/\/\S+/giu, "[REDACTED_URL]")
+    .replace(/\b(?:password|secret|token|api[_-]?key)\s*[=:]\s*\S+/giu, "$1=[REDACTED]")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 240);
+  return `Campaign could not be created [${name}${code}]${safeMessage ? `: ${safeMessage}` : "."}`;
 };
 
 const campaignScheduleSchema = z.object({

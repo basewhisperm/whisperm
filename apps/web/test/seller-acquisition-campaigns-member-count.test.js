@@ -29,6 +29,8 @@ test("campaign creation returns structured API errors when persistence fails", (
   assert.match(listRoute, /logCampaignCreateError\(request, error\)/u);
   assert.match(listRoute, /request\.headers\.get\("x-vercel-id"\)/u);
   assert.match(listRoute, /process\.env\.VERCEL_ENV !== "preview"/u);
+  assert.match(listRoute, /REDACTED_DATABASE_URL/u);
+  assert.match(listRoute, /\.slice\(0, 240\)/u);
   assert.match(listRoute, /campaignCreateFailureMessage\(error\)/u);
 });
 
