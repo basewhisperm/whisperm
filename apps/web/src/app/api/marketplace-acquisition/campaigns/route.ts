@@ -84,10 +84,10 @@ export async function POST(request: NextRequest) {
     body = {};
   }
 
-  const parsed = normalizeCampaignInput(body);
-  if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid campaign request.", 400);
-
   try {
+    const parsed = normalizeCampaignInput(body);
+    if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid campaign request.", 400);
+
     const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
     return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
   } catch (error) {
