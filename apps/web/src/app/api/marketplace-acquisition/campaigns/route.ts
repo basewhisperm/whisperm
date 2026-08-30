@@ -50,7 +50,7 @@ const campaignCreateFailureMessage = (error: unknown) => {
   const safeMessage = rawMessage
     .replace(/(?:postgres(?:ql)?|mysql):\/\/\S+/giu, "[REDACTED_DATABASE_URL]")
     .replace(/https?:\/\/\S+/giu, "[REDACTED_URL]")
-    .replace(/\b(?:password|secret|token|api[_-]?key)\s*[=:]\s*\S+/giu, "$1=[REDACTED]")
+    .replace(/\b(?:password|secret|token|api[_-]?key)\s*[=:]\s*\S+/giu, "credential=[REDACTED]")
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, 240);
@@ -67,7 +67,9 @@ const campaignScheduleSchema = z.object({
   scheduleCadence: z.enum(["HOURLY", "DAILY", "WEEKLY"]).nullable().optional(),
   scheduleTimezone: z.string().min(1).nullable().optional(),
   nextRunAt: z.string().datetime().nullable().optional(),
-  targeting: campaignTargetingConfigSchema.nullable().optional(),
+  // Validate imported service schemas separately. The web app uses Zod 4 while
+  // @whisperm/services currently ships Zod 3 schema instances.
+  targeting: z.unknown().nullable().optional(),
 }).strict();
 
 const normalizeCampaignInput = (body: unknown) => {
@@ -78,7 +80,12 @@ const normalizeCampaignInput = (body: unknown) => {
     return { success: false as const, error: { issues: [{ message: "Schedule cadence is required when scheduling is enabled." }] } };
   }
   const { targeting, ...campaignData } = data;
-  return { success: true as const, data: { ...campaignData, ...(targeting === undefined ? {} : { metadata: mergeCampaignTargetingMetadata(undefined, targeting === null ? null : campaignTargetingConfigSchema.parse(targeting)) }), scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
+  const parsedTargeting = targeting === undefined || targeting === null ? null : campaignTargetingConfigSchema.safeParse(targeting);
+  if (parsedTargeting !== null && !parsedTargeting.success) {
+    return { success: false as const, error: { issues: [{ message: parsedTargeting.error.issues[0]?.message ?? "Invalid campaign targeting." }] } };
+  }
+  const normalizedTargeting = targeting === null ? null : parsedTargeting?.data;
+  return { success: true as const, data: { ...campaignData, ...(targeting === undefined ? {} : { metadata: mergeCampaignTargetingMetadata(undefined, normalizedTargeting ?? null) }), scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
 };
 
 const parseLimit = (value: string | null): number | undefined => {

@@ -20,7 +20,9 @@ const campaignScheduleSchema = z.object({
   scheduleCadence: z.enum(["HOURLY", "DAILY", "WEEKLY"]).nullable().optional(),
   scheduleTimezone: z.string().min(1).nullable().optional(),
   nextRunAt: z.string().datetime().nullable().optional(),
-  targeting: campaignTargetingConfigSchema.nullable().optional(),
+  // Validate imported service schemas separately. The web app uses Zod 4 while
+  // @whisperm/services currently ships Zod 3 schema instances.
+  targeting: z.unknown().nullable().optional(),
 }).strict();
 
 const normalizeCampaignInput = (body: unknown) => {
@@ -31,7 +33,12 @@ const normalizeCampaignInput = (body: unknown) => {
     return { success: false as const, error: { issues: [{ message: "Schedule cadence is required when scheduling is enabled." }] } };
   }
   const { targeting, ...campaignData } = data;
-  return { success: true as const, data: { ...campaignData, ...(targeting === undefined ? {} : { metadata: mergeCampaignTargetingMetadata(undefined, targeting === null ? null : campaignTargetingConfigSchema.parse(targeting)) }), scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
+  const parsedTargeting = targeting === undefined || targeting === null ? null : campaignTargetingConfigSchema.safeParse(targeting);
+  if (parsedTargeting !== null && !parsedTargeting.success) {
+    return { success: false as const, error: { issues: [{ message: parsedTargeting.error.issues[0]?.message ?? "Invalid campaign targeting." }] } };
+  }
+  const normalizedTargeting = targeting === null ? null : parsedTargeting?.data;
+  return { success: true as const, targeting: normalizedTargeting, data: { ...campaignData, ...(targeting === undefined ? {} : { metadata: mergeCampaignTargetingMetadata(undefined, normalizedTargeting ?? null) }), scheduleTimezone: data.scheduleTimezone ?? (data.scheduleEnabled === true ? "UTC" : data.scheduleTimezone) } };
 };
 
 interface RouteContext {
@@ -94,7 +101,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const existingCampaign = input.archive === true || parsed === null ? null : await service.findById({ tenantId: tenant.id }, context.params.campaignId);
   if (input.archive !== true && parsed !== null && existingCampaign === null) return errorResponse("Seller acquisition campaign not found.", 404);
   const updateData = parsed !== null && "metadata" in parsed.data && existingCampaign !== null
-    ? { ...parsed.data, metadata: mergeCampaignTargetingMetadata(existingCampaign.metadata, (body as { readonly targeting?: unknown }).targeting === null ? null : campaignTargetingConfigSchema.parse((body as { readonly targeting?: unknown }).targeting)) }
+    ? { ...parsed.data, metadata: mergeCampaignTargetingMetadata(existingCampaign.metadata, parsed.targeting ?? null) }
     : parsed?.data;
   const campaign = input.archive === true || parsed === null
     ? await service.archive({ tenantId: tenant.id }, context.params.campaignId)
