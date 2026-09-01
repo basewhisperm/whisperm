@@ -127,3 +127,22 @@ test('provider failures are classified without exposing provider logic to runtim
   assert.equal(result.metrics.failureCategory, 'RATE_LIMITED');
   assert.equal(result.metrics.retryable, true);
 });
+
+test('worker maps canonical campaign targeting and resolves its marketplace source id', async () => {
+  const repo = new MemoryDiscoveryRepo();
+  const campaignRepo = new CampaignRepo({ targeting: { marketplaceSourceKey: 'JIJI', keyword: 'cleaning supplies', location: 'Accra', executionLimit: 2, exclusionTerms: [] } });
+  const calls = [];
+  const provider = { providerKey: 'jiji-provider', marketplaceSource: 'JIJI', async discover(request) { calls.push(request); return { providerKey: this.providerKey, marketplaceSource: this.marketplaceSource, results: [] }; } };
+  const worker = new DiscoveryExecutionWorker({
+    campaigns: campaignRepo,
+    discoveryService: new MarketplaceDiscoveryService({ discoveryRepo: repo }),
+    providers: [provider],
+    async resolveMarketplaceSourceId(input) { assert.deepEqual(input, { tenantId: 'tenant-1', marketplaceSourceKey: 'JIJI' }); return 'source-resolved'; },
+  });
+  const result = await worker.execute(workerInput);
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(calls[0].search.query, 'cleaning supplies');
+  assert.equal(calls[0].search.location, 'Accra');
+  assert.equal(calls[0].limits.limit, 2);
+  assert.equal(repo.runs[0].marketplaceSourceId, 'source-resolved');
+});

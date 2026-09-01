@@ -35,3 +35,10 @@ Disable is idempotent: it sets `enabled=false` without deleting the tenant featu
 - **Seller Capture** is not shown as a separate nav item.
 - Core CRM navigation remains present in both states.
 - Public claim-token routes remain reachable independently of authenticated tenant add-on visibility.
+
+## Automatic discovery operations
+
+- `Run Automatic Discovery` executes synchronously through the campaign runtime route and the JIJI public-search provider in the web deployment.
+- The provider uses a fixed `https://jiji.com.gh` origin, a bounded campaign execution limit (maximum 500), and a 15-second request timeout.
+- Manual URL import remains available separately for recovery or curated sourcing.
+- A failed provider request produces a failed runtime execution and a non-2xx API response. Operators should inspect the execution error code before retrying; rate limits and transient upstream failures are retryable, while unsupported source configuration is not.

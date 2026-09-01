@@ -9,3 +9,9 @@ test("manual discovery asks for a marketplace, not an internal source UUID", () 
   assert.match(page, /Marketplace Key/u);
   assert.match(page, /marketplaceSourceKey: sourceKey/u);
 });
+
+test("campaign targeting can start automatic discovery while manual URLs remain optional", () => {
+  assert.match(page, /Run Automatic Discovery/u);
+  assert.match(page, /\/runtime\/executions/u);
+  assert.match(page, /Manual URLs/u);
+});

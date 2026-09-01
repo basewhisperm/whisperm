@@ -3,8 +3,10 @@ import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
-import { PersistenceError, PrismaCampaignRuntimeExecutionRepository, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
-import { CampaignRuntimeService } from "@whisperm/services";
+import { createPrismaRepositories, PersistenceError, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, type PrismaPersistenceClient } from "@whisperm/repositories";
+import { CampaignRuntimeService, DiscoveryExecutionWorker, MarketplaceDiscoveryService } from "@whisperm/services";
+import { JijiDiscoveryProvider } from "@whisperm/provider-adapters";
+import { createAcquisitionUsageMetering } from "@/lib/marketplace-acquisition/acquisition-services";
 import { z } from "zod";
 
 const requestSchema = z.object({ trigger: z.enum(["MANUAL", "SCHEDULED", "SYSTEM"]).optional() }).strict().default({});
@@ -16,10 +18,40 @@ interface RouteContext {
   readonly params: { readonly campaignId: string };
 }
 
-const runtimeService = () => new CampaignRuntimeService({
-  campaigns: new PrismaSellerAcquisitionCampaignRepository(prisma as unknown as PrismaPersistenceClient),
-  executions: new PrismaCampaignRuntimeExecutionRepository(prisma as unknown as PrismaPersistenceClient),
-});
+const MARKETPLACE_SOURCES: Readonly<Record<string, { readonly key: string; readonly name: string; readonly sourceUrl: string }>> = {
+  jiji: { key: "jiji", name: "Jiji", sourceUrl: "https://jiji.com.gh" },
+};
+
+const runtimeService = () => {
+  const persistence = prisma as unknown as PrismaPersistenceClient;
+  const campaigns = new PrismaSellerAcquisitionCampaignRepository(persistence);
+  const discoveryRepo = new PrismaMarketplaceDiscoveryRepository(persistence);
+  const discoveryService = new MarketplaceDiscoveryService({
+    discoveryRepo,
+    usageMetering: createAcquisitionUsageMetering(createPrismaRepositories(persistence)),
+  });
+  const worker = new DiscoveryExecutionWorker({
+    campaigns,
+    discoveryService,
+    providers: [new JijiDiscoveryProvider()],
+    resolveMarketplaceSourceId: async ({ tenantId, marketplaceSourceKey }) => {
+      const definition = MARKETPLACE_SOURCES[marketplaceSourceKey.trim().toLowerCase()];
+      if (definition === undefined) throw new Error(`Unsupported marketplace source ${marketplaceSourceKey}`);
+      const source = await prisma.marketplaceSource.upsert({
+        where: { tenantId_key: { tenantId, key: definition.key } },
+        create: { tenantId, key: definition.key, name: definition.name, sourceUrl: definition.sourceUrl, isActive: true },
+        update: { name: definition.name, sourceUrl: definition.sourceUrl, isActive: true },
+        select: { id: true },
+      });
+      return source.id;
+    },
+  });
+  return new CampaignRuntimeService({
+    campaigns,
+    executions: new PrismaCampaignRuntimeExecutionRepository(persistence),
+    worker,
+  });
+};
 
 export async function GET(request: NextRequest, context: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
@@ -65,13 +97,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { tenantId: tenant.id },
       { campaignId: context.params.campaignId, trigger: parsed.data.trigger ?? "MANUAL" },
     );
-    // ST1-012: no production discoveryQueue/worker is wired for autonomous discovery, so
-    // startCampaignExecution reports FAILED with an explicit "not configured" code instead of a
-    // false COMPLETED. Surface that honestly rather than returning 201 for unprocessed work.
     if (execution.status === "FAILED") {
       return NextResponse.json(
         { ok: false, error: { message: execution.errorMessage ?? "Campaign runtime execution is not supported.", code: execution.errorCode ?? "CAMPAIGN_RUNTIME_WORKER_FAILED" } },
-        { status: execution.errorCode === "CAMPAIGN_RUNTIME_DISCOVERY_NOT_CONFIGURED" ? 501 : 502 },
+        { status: 502 },
       );
     }
     return NextResponse.json({ data: { execution } }, { status: 201 });

@@ -11,7 +11,7 @@ import {
 import { MarketplaceDiscoveryService, type ManualSeedEntry } from "./discovery-service.js";
 
 const discoveryExecutionConfigSchema = z.object({
-  marketplaceSourceId: z.string().min(1),
+  marketplaceSourceId: z.string().min(1).optional(),
   marketplaceSourceKey: z.string().min(1),
   providerKey: z.string().min(1).optional(),
   limit: z.number().int().min(1).max(500).default(100),
@@ -32,13 +32,32 @@ export interface DiscoveryExecutionWorkerDependencies {
   readonly campaigns: SellerAcquisitionCampaignRepository;
   readonly discoveryService: MarketplaceDiscoveryService;
   readonly providers: readonly DiscoveryProvider[];
+  readonly resolveMarketplaceSourceId?: (input: { readonly tenantId: string; readonly marketplaceSourceKey: string }) => Promise<string>;
 }
 
 const recordValue = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null && key in value ? (value as Readonly<Record<string, unknown>>)[key] : undefined;
 
 const campaignDiscoveryConfig = (metadata: Readonly<Record<string, unknown>> | null | undefined): DiscoveryExecutionConfig => {
-  const raw = recordValue(metadata, "discoveryExecution") ?? recordValue(metadata, "discovery") ?? {};
+  const targeting = recordValue(metadata, "targeting");
+  const targetingRecord = typeof targeting === "object" && targeting !== null ? targeting as Readonly<Record<string, unknown>> : undefined;
+  const raw = recordValue(metadata, "discoveryExecution") ?? recordValue(metadata, "discovery") ?? (targetingRecord === undefined ? {} : {
+    marketplaceSourceId: targetingRecord.marketplaceSourceId,
+    marketplaceSourceKey: targetingRecord.marketplaceSourceKey ?? targetingRecord.marketplaceSourceId,
+    limit: targetingRecord.executionLimit,
+    discoveryCreditsRemaining: targetingRecord.executionLimit,
+    search: {
+      query: targetingRecord.keyword,
+      category: targetingRecord.category,
+      location: targetingRecord.location,
+      filters: {
+        priceMin: targetingRecord.priceMin,
+        priceMax: targetingRecord.priceMax,
+        sellerType: targetingRecord.sellerType,
+        exclusionTerms: targetingRecord.exclusionTerms,
+      },
+    },
+  });
   return discoveryExecutionConfigSchema.parse(raw);
 };
 
@@ -117,6 +136,16 @@ export class DiscoveryExecutionWorker implements CampaignRuntimeWorker {
         return { status: "FAILED", errorCode: "DISCOVERY_CAMPAIGN_NOT_FOUND", errorMessage: "Seller acquisition campaign not found", metrics: { discoveryStatus: "FAILED" } };
       }
       const config = campaignDiscoveryConfig(campaign.metadata);
+      const marketplaceSourceId = config.marketplaceSourceId ?? await this.deps.resolveMarketplaceSourceId?.({ tenantId: input.tenantId, marketplaceSourceKey: config.marketplaceSourceKey });
+      if (marketplaceSourceId === undefined) {
+        throw new DiscoveryProviderError({
+          code: "DISCOVERY_SOURCE_NOT_CONFIGURED",
+          message: `Marketplace source ${config.marketplaceSourceKey} is not configured`,
+          category: "AUTHENTICATION_CONFIGURATION_FAILURE",
+          retryable: false,
+          marketplaceSource: config.marketplaceSourceKey,
+        });
+      }
       const provider = this.resolver.resolve(config.providerKey ?? config.marketplaceSourceKey);
       const providerResponse = await provider.discover({
         tenant: { tenantId: input.tenantId, correlationId: input.correlation?.correlationId },
@@ -130,7 +159,7 @@ export class DiscoveryExecutionWorker implements CampaignRuntimeWorker {
         { tenantId: input.tenantId, actorId: "campaign-runtime" },
         {
           campaignId: input.campaignId,
-          marketplaceSourceId: config.marketplaceSourceId,
+          marketplaceSourceId,
           marketplaceSourceKey: config.marketplaceSourceKey,
           mode: config.marketplaceSourceKey === "JIJI" ? "JIJI_SITEMAP" : config.marketplaceSourceKey === "TONATON" ? "TONATON_SITEMAP" : "MANUAL_SEED",
           entries,

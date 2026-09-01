@@ -325,6 +325,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [showSeedModal, setShowSeedModal] = useState(false);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // ST1-006: canonical qualification/CRM-conversion/invite-eligibility outcome per promoted seller,
@@ -356,6 +357,30 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
   }, [campaignId, statusFilter]);
 
   useEffect(() => { void loadData(); }, [loadData]);
+
+  const handleAutomaticDiscovery = async () => {
+    setRuntimeBusy(true);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const res = await fetch(`/api/marketplace-acquisition/campaigns/${campaignId}/runtime/executions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trigger: "MANUAL" }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        const message = (payload as { error?: { message?: unknown } } | null)?.error?.message;
+        throw new Error(typeof message === "string" && message.length > 0 ? message : "Automatic discovery failed.");
+      }
+      setSuccessMessage("Automatic discovery completed from the campaign targeting.");
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Automatic discovery failed.");
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
 
   const handlePromote = async (sellerId: string) => {
     setActionBusy(true);
@@ -451,11 +476,19 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
           </button>
           <button
             onClick={() => setShowSeedModal(true)}
+            className="h-9 flex items-center gap-2 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground"
+            type="button"
+          >
+            Manual URLs
+          </button>
+          <button
+            onClick={() => void handleAutomaticDiscovery()}
+            disabled={runtimeBusy}
             className="h-9 flex items-center gap-2 rounded-xl bg-whisper px-4 text-sm font-semibold text-white"
             type="button"
           >
-            <IconPlus className="size-4" />
-            New Discovery Run
+            {runtimeBusy ? <IconLoader2 className="size-4 animate-spin" /> : <IconPlus className="size-4" />}
+            {runtimeBusy ? "Running…" : "Run Automatic Discovery"}
           </button>
         </div>
       </div>

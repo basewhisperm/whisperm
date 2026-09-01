@@ -102,3 +102,10 @@ Seller invitation requires a phone-qualified acquisition contact. Conversion req
 - URL capture without a phone is explicitly unqualified and blocked. Callers must treat `PHONE_REQUIRED` / `REVEAL_PHONE` responses as requiring phone reveal before qualification, invitation, conversion, or completion.
 - `COMPLETE_ACQUISITION` is a supported Marketplace Sellers command-center action and posts to the capture completion route after seller and inventory conversions are successful.
 - No-phone capture cannot be treated as qualified, even when email or other marketplace identity fields are present.
+
+## Campaign-targeted discovery
+
+- The primary discovery action uses the active campaign's canonical targeting metadata (marketplace, keyword/category, location, exclusions, and execution limit).
+- JIJI discovery is implemented through the governed provider adapter and the canonical Campaign Runtime execution route; results are persisted through `MarketplaceDiscoveryService` with tenant context.
+- Manual URL seeding remains an explicit secondary import path and must not be presented as automatic discovery.
+- Provider failure, timeout, rate limiting, unsupported marketplaces, and empty result sets must be reported honestly; they must never be represented as successful seller capture.
