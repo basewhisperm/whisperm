@@ -28,6 +28,18 @@ test("campaigns index supports V1 campaign operations", () => {
   assert.match(page, /\/api\/marketplace-acquisition\/campaigns/u);
 });
 
+test("campaign creation does not ask customers to enter an internal owner UUID", () => {
+  assert.doesNotMatch(page, /<Field label="Owner"/u);
+  assert.doesNotMatch(page, /ownerId: form\.ownerId/u);
+});
+
+test("campaign modal remains usable on short screens and exposes save errors", () => {
+  assert.match(page, /max-h-\[calc\(100vh-2rem\)\]/u);
+  assert.match(page, /overflow-y-auto/u);
+  assert.match(page, /role="alert"/u);
+  assert.match(page, /\{saving \? "Saving…" : "Save Campaign"\}/u);
+});
+
 test("campaigns index keeps loading, error, and empty states mutually exclusive", () => {
   assert.match(page, /!loading && !loadError/u);
   assert.match(page, /\) : loadError \? \(/u);

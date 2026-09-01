@@ -39,7 +39,7 @@ const campaignScheduleSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().min(1).nullable().optional(),
   status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "ARCHIVED"]).optional(),
-  ownerId: z.string().min(1).nullable().optional(),
+  ownerId: z.string().uuid().nullable().optional(),
   goalSellerCount: z.number().int().positive().nullable().optional(),
   scheduleEnabled: z.boolean().optional(),
   scheduleCadence: z.enum(["HOURLY", "DAILY", "WEEKLY"]).nullable().optional(),
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
   const tenantContext = await getTenantContextForCurrentUser();
   if (!tenantContext) return errorResponse("Unauthorized", 401);
 
-  const { tenant } = tenantContext;
+  const { tenant, tenantUserId } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
@@ -120,7 +120,10 @@ export async function POST(request: NextRequest) {
     const parsed = normalizeCampaignInput(body);
     if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? "Invalid campaign request.", 400);
 
-    const campaign = await campaignService().create({ tenantId: tenant.id }, parsed.data as never);
+    const campaign = await campaignService().create(
+      { tenantId: tenant.id },
+      { ...parsed.data, ownerId: parsed.data.ownerId ?? tenantUserId } as never,
+    );
     return NextResponse.json({ ok: true, data: { campaign: { ...campaign, memberCount: 0 } } }, { status: 201 });
   } catch (error) {
     logCampaignCreateError(request, error);

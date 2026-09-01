@@ -47,7 +47,6 @@ interface CampaignTargetingState {
 interface CampaignFormState {
   name: string;
   description: string;
-  ownerId: string;
   goalSellerCount: string;
   status: CampaignStatus;
   scheduleEnabled: boolean;
@@ -65,7 +64,6 @@ interface CampaignFormState {
 const EMPTY_FORM: CampaignFormState = {
   name: "",
   description: "",
-  ownerId: "",
   goalSellerCount: "",
   status: "DRAFT",
   scheduleEnabled: false,
@@ -113,7 +111,6 @@ function formPayload(form: CampaignFormState) {
   return {
     name: form.name.trim(),
     description: form.description.trim() || null,
-    ownerId: form.ownerId.trim() || null,
     goalSellerCount: form.goalSellerCount.trim() ? Number.parseInt(form.goalSellerCount, 10) : null,
     status: form.status,
     scheduleEnabled: form.scheduleEnabled,
@@ -196,7 +193,6 @@ export default function SellerAcquisitionCampaignsPage() {
     setForm({
       name: campaign.name,
       description: campaign.description ?? "",
-      ownerId: campaign.ownerId ?? "",
       goalSellerCount: campaign.goalSellerCount == null ? "" : String(campaign.goalSellerCount),
       status: campaign.status,
       scheduleEnabled: campaign.scheduleEnabled === true,
@@ -443,13 +439,12 @@ export default function SellerAcquisitionCampaignsPage() {
 
       {modalMode ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-midnight/60 p-4">
-          <section aria-modal="true" className="w-full max-w-lg rounded-2xl bg-background p-5 shadow-xl" role="dialog">
+          <section aria-modal="true" className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-background p-5 shadow-xl" role="dialog">
             <h2 className="text-lg font-semibold text-foreground">{modalMode === "create" ? ACQUISITION_COPY.actions.createCampaign : "Edit Campaign"}</h2>
             <form onSubmit={(event) => { event.preventDefault(); void saveCampaign(); }}>
               <div className="mt-4 space-y-3">
-              <Field label="Campaign Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
+              <Field label="Campaign Name" required value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
               <Field label="Description" value={form.description} onChange={(value) => setForm({ ...form, description: value })} />
-              <Field label="Owner" value={form.ownerId} onChange={(value) => setForm({ ...form, ownerId: value })} />
               <Field label="Goal" inputMode="numeric" value={form.goalSellerCount} onChange={(value) => setForm({ ...form, goalSellerCount: value })} />
               <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <input checked={form.scheduleEnabled} onChange={(event) => setForm({ ...form, scheduleEnabled: event.target.checked })} type="checkbox" />
@@ -496,7 +491,7 @@ export default function SellerAcquisitionCampaignsPage() {
   );
 }
 
-function Field({ label, value, onChange, inputMode, placeholder }: { readonly label: string; readonly value: string; readonly onChange: (value: string) => void; readonly inputMode?: "numeric"; readonly placeholder?: string }) {
+function Field({ label, value, onChange, inputMode, placeholder, required = false }: { readonly label: string; readonly value: string; readonly onChange: (value: string) => void; readonly inputMode?: "numeric"; readonly placeholder?: string; readonly required?: boolean }) {
   return (
     <label className="block text-sm font-medium text-muted-foreground">
       {label}
@@ -505,6 +500,7 @@ function Field({ label, value, onChange, inputMode, placeholder }: { readonly la
         inputMode={inputMode}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
+        required={required}
         value={value}
       />
     </label>
