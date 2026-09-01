@@ -733,7 +733,6 @@ export { RenderSellerHttpConnector, RenderSellerConnectorError, createRenderSell
 export type { RenderSellerConnector, RenderSellerPayload, CreateRenderSellerInput, CreateRenderSellerResult } from "./render-seller.js";
 
 export * from "./discovery.js";
-export * from "./discovery/jiji-provider.js";
 export * from "./registry.js";
 export { ProviderDeliveryError } from "./provider-delivery-error.js";
 export type { ProviderDeliveryErrorInput, ProviderDeliverySafeDiagnostic } from "./provider-delivery-error.js";

@@ -41,6 +41,23 @@ test('bookmarklet opens authenticated intake with one encoded payload', () => {
   assert.match(bookmarklet, new RegExp(`const MAX=${MARKETPLACE_CAPTURE_MAX_PAYLOAD_BYTES}`, 'u'));
 });
 
+test('bookmarklet preserves a campaign-scoped intake query when appending its payload', () => {
+  const bookmarklet = createMarketplaceCaptureBookmarklet({
+    intakeUrl: 'https://app.whisperm.test/marketplace-acquisition/capture/intake?campaignId=campaign-1',
+  });
+  assert.match(bookmarklet, /INTAKE\.includes\("\?"\)\?"&":"\?"/u);
+  assert.match(bookmarklet, /campaignId=campaign-1/u);
+});
+
+test('grid intake submits listing URLs without exposing internal marketplace source IDs', () => {
+  const source = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/capture/intake/page.tsx', import.meta.url), 'utf8');
+  assert.match(source, /listingUrl: l\.listingUrl/u);
+  assert.match(source, /marketplaceSourceKey: discoverySourceKey\(payload\)/u);
+  assert.match(source, /campaigns\?status=ACTIVE/u);
+  assert.doesNotMatch(source, /customSourceId|Marketplace Source ID|UUID of the marketplace source/u);
+  assert.match(source, /if \(!res\.ok\) throw new Error/u);
+});
+
 test('bookmarklet source omits private browser state and full page HTML collection', () => {
   const bookmarklet = createMarketplaceCaptureBookmarklet({
     intakeUrl: 'https://app.whisperm.test/marketplace-acquisition/capture/intake',

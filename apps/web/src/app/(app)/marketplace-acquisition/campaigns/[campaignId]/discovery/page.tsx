@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { IconCheck, IconLoader2, IconPlus, IconRefresh, IconSend, IconX } from "@tabler/icons-react";
 import {
   buildPromoteRequestInit,
@@ -325,7 +326,6 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [showSeedModal, setShowSeedModal] = useState(false);
-  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // ST1-006: canonical qualification/CRM-conversion/invite-eligibility outcome per promoted seller,
@@ -357,30 +357,6 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
   }, [campaignId, statusFilter]);
 
   useEffect(() => { void loadData(); }, [loadData]);
-
-  const handleAutomaticDiscovery = async () => {
-    setRuntimeBusy(true);
-    setError(null);
-    setSuccessMessage(null);
-    try {
-      const res = await fetch(`/api/marketplace-acquisition/campaigns/${campaignId}/runtime/executions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trigger: "MANUAL" }),
-      });
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) {
-        const message = (payload as { error?: { message?: unknown } } | null)?.error?.message;
-        throw new Error(typeof message === "string" && message.length > 0 ? message : "Automatic discovery failed.");
-      }
-      setSuccessMessage("Automatic discovery completed from the campaign targeting.");
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Automatic discovery failed.");
-    } finally {
-      setRuntimeBusy(false);
-    }
-  };
 
   const handlePromote = async (sellerId: string) => {
     setActionBusy(true);
@@ -479,17 +455,15 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
             className="h-9 flex items-center gap-2 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground"
             type="button"
           >
-            Manual URLs
+            <IconPlus className="size-4" />
+            Paste URLs
           </button>
-          <button
-            onClick={() => void handleAutomaticDiscovery()}
-            disabled={runtimeBusy}
+          <Link
             className="h-9 flex items-center gap-2 rounded-xl bg-whisper px-4 text-sm font-semibold text-white"
-            type="button"
+            href={`/marketplace-acquisition/capture?campaignId=${encodeURIComponent(campaignId)}`}
           >
-            {runtimeBusy ? <IconLoader2 className="size-4 animate-spin" /> : <IconPlus className="size-4" />}
-            {runtimeBusy ? "Running…" : "Run Automatic Discovery"}
-          </button>
+            Capture Marketplace Page
+          </Link>
         </div>
       </div>
 
@@ -527,7 +501,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
           ) : runs.length === 0 ? (
             <div className="rounded-2xl bg-background p-6 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
               <p className="text-sm text-muted-foreground">No discovery runs yet.</p>
-              <p className="text-xs text-muted-foreground mt-1">Start a run to find sellers automatically.</p>
+              <p className="text-xs text-muted-foreground mt-1">Use the bookmarklet on a signed-in marketplace results page, or paste listing URLs.</p>
             </div>
           ) : (
             runs.map((run) => (
@@ -603,7 +577,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
               <p className="text-sm text-muted-foreground">No {statusFilter === "ALL" ? "reviewable" : statusFilter.toLowerCase()} sellers.</p>
               {statusFilter === "QUALIFIED" ? (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Start a discovery run to find and qualify sellers.
+                  Capture a marketplace results page or paste listing URLs to find and qualify sellers.
                 </p>
               ) : null}
             </div>

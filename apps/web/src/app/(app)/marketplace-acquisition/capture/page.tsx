@@ -11,8 +11,10 @@ function getAppBaseUrl(): string {
   return `${protocol}://${host}`;
 }
 
-export default function MarketplaceCapturePage() {
-  const intakeUrl = `${getAppBaseUrl()}/marketplace-acquisition/capture/intake`;
+export default function MarketplaceCapturePage({ searchParams }: { readonly searchParams: { readonly campaignId?: string } }) {
+  const intake = new URL("/marketplace-acquisition/capture/intake", getAppBaseUrl());
+  if (searchParams.campaignId) intake.searchParams.set("campaignId", searchParams.campaignId);
+  const intakeUrl = intake.toString();
   const bookmarkletHref = createMarketplaceCaptureBookmarklet({ intakeUrl });
 
   return (
@@ -21,7 +23,7 @@ export default function MarketplaceCapturePage() {
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Marketplace acquisition</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Capture Seller inside Marketplace Sellers</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Drag this bookmarklet to your browser bookmarks bar or copy the link. While viewing a single public marketplace listing,
+          Drag this bookmarklet to your browser bookmarks bar or copy the link. While viewing a marketplace listing or search-results page,
           click it to capture lightweight public metadata into WhispeRM. Reveal the seller phone/mobile number before capture:
           Mobile number is required for qualification, and WhatsApp will be attempted first.
         </p>
@@ -57,11 +59,11 @@ export default function MarketplaceCapturePage() {
         <div className="rounded-2xl bg-background p-5" style={{ border: "0.5px solid hsl(var(--border))" }}>
           <h2 className="text-sm font-semibold text-foreground">Operator instructions</h2>
           <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6 text-muted-foreground">
-            <li>Open one public marketplace listing page in your browser.</li>
+            <li>Open a marketplace listing, seller profile, category, or search-results page in your signed-in browser.</li>
             <li>Reveal the seller phone/mobile number before capture so WhatsApp can be attempted first.</li>
             <li>Click the “Render Seller Capture” bookmark.</li>
             <li>Review the captured fields on the authenticated WhispeRM intake page.</li>
-            <li>Bulk seller portfolio capture can include multiple listings visible on the current seller/profile page.</li>
+            <li>Search-results and seller-profile pages can feed multiple visible listings into the selected active campaign.</li>
           </ol>
         </div>
 

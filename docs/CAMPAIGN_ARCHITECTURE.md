@@ -19,10 +19,9 @@ Post-discovery changes introduced a grid/category page intake path that can bran
   - `sellersFound`
   - `sellersQualified`
   - `sellersRejected`
-- Current UX weakness:
-  - `marketplaceSourceId` is still a raw UUID input.
-- Future slice requirement:
-  - Replace the raw `marketplaceSourceId` input with a campaign/source selector or campaign default source.
+- Marketplace source is derived from the validated bookmarklet payload and normalized to a supported source key; internal source UUIDs are never exposed to operators.
+- Only active campaigns are selectable because the discovery write boundary rejects draft campaigns.
+- Every seeded entry retains its listing URL and visible metadata before tenant-scoped qualification and deduplication.
 
 ## Campaign Runtime Flow
 
@@ -30,6 +29,8 @@ Current campaign runtime flow now includes both direct campaign capture and grid
 
 ```text
 Campaign
+→ Operator opens a marketplace page in an authenticated browser session
+→ WhispeRM bookmarklet extracts visible public listing snapshots
 → Grid/category page detected
 → Portfolio listings extracted
 → GridPageDiscoveryForm
@@ -57,7 +58,7 @@ The grid/category branch is campaign-scoped once a `campaignId` is selected or s
 - **Method:** `POST`
 - **Purpose:** Creates campaign-scoped discovery runs from seeded listing entries.
 - **Campaign-scoped?** Yes.
-- **Notes:** Used by `GridPageDiscoveryForm` with `MANUAL_SEED` mode. The route receives `marketplaceSourceId`, `marketplaceSourceKey`, `mode`, and `entries`, then returns discovery run counters including `sellersFound`, `sellersQualified`, and `sellersRejected`.
+- **Notes:** Used by `GridPageDiscoveryForm` with `MANUAL_SEED` mode. The route resolves the marketplace source from `marketplaceSourceKey`; clients never supply an internal source UUID. Entries include the canonical listing URL and visible listing metadata.
 
 ## Campaign Child Objects
 

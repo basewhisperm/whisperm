@@ -103,9 +103,9 @@ Seller invitation requires a phone-qualified acquisition contact. Conversion req
 - `COMPLETE_ACQUISITION` is a supported Marketplace Sellers command-center action and posts to the capture completion route after seller and inventory conversions are successful.
 - No-phone capture cannot be treated as qualified, even when email or other marketplace identity fields are present.
 
-## Campaign-targeted discovery
+## Authenticated marketplace discovery intake
 
-- The primary discovery action uses the active campaign's canonical targeting metadata (marketplace, keyword/category, location, exclusions, and execution limit).
-- JIJI discovery is implemented through the governed provider adapter and the canonical Campaign Runtime execution route; results are persisted through `MarketplaceDiscoveryService` with tenant context.
-- Manual URL seeding remains an explicit secondary import path and must not be presented as automatic discovery.
-- Provider failure, timeout, rate limiting, unsupported marketplaces, and empty result sets must be reported honestly; they must never be represented as successful seller capture.
+- Marketplace sites that reject server-side discovery are ingested through the existing user-initiated bookmarklet on the operator's authenticated browser page.
+- The bookmarklet extracts only visible public listing snapshots and hands them to the authenticated WhispeRM intake route. It must not read or transmit marketplace credentials, cookies, storage, full HTML, CAPTCHA responses, or browser fingerprints.
+- Grid/search capture preserves campaign ownership, canonical listing URLs, visible listing metadata, tenant isolation, deduplication, qualification, and discovery usage controls.
+- Manual URL entry remains a separate recovery path. Neither path may be labeled as autonomous server-side discovery.

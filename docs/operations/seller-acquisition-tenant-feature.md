@@ -36,9 +36,9 @@ Disable is idempotent: it sets `enabled=false` without deleting the tenant featu
 - Core CRM navigation remains present in both states.
 - Public claim-token routes remain reachable independently of authenticated tenant add-on visibility.
 
-## Automatic discovery operations
+## Bookmarklet discovery operations
 
-- `Run Automatic Discovery` executes synchronously through the campaign runtime route and the JIJI public-search provider in the web deployment.
-- The provider uses a fixed `https://jiji.com.gh` origin, a bounded campaign execution limit (maximum 500), and a 15-second request timeout.
-- Manual URL import remains available separately for recovery or curated sourcing.
-- A failed provider request produces a failed runtime execution and a non-2xx API response. Operators should inspect the execution error code before retrying; rate limits and transient upstream failures are retryable, while unsupported source configuration is not.
+- From a campaign Discovery page, `Capture Marketplace Page` opens a campaign-scoped bookmarklet setup link.
+- The operator installs the bookmarklet once, opens a marketplace listing/search/profile page in their own signed-in browser, and invokes it to send visible listing snapshots to WhispeRM intake.
+- Grid intake lists active campaigns only, derives the supported marketplace source key from the payload, and submits listing URLs through the canonical discovery-run endpoint.
+- If an upstream marketplace presents a CAPTCHA or access restriction, the bookmarklet does not bypass it. The operator completes ordinary site access before initiating capture.
