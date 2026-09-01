@@ -8,10 +8,13 @@ import {
   extractMarketplaceCapturePayload,
 } from '../src/lib/marketplace-capture/bookmarklet.js';
 
-const node = ({ textContent = '', attributes = {} } = {}) => ({
+const node = ({ textContent = '', attributes = {}, click = () => {}, matches = () => false } = {}) => ({
   textContent,
   getAttribute(name) { return attributes[name] ?? null; },
   scrollIntoView() {},
+  focus() {},
+  click,
+  matches,
   dispatchEvent() {},
 });
 
@@ -172,6 +175,54 @@ test('generated bookmarklet uses canonical extractor output for the same documen
   delete directPayload.capturedAt;
 
   assert.deepEqual(capturedPayload, directPayload);
+});
+
+test('bookmarklet native-clicks a Jiji contact control and waits for the revealed phone', () => {
+  let contactText = 'Show contact';
+  let nativeClicks = 0;
+  const contactButton = {
+    get textContent() { return contactText; },
+    getAttribute() { return null; },
+    scrollIntoView() {},
+    focus() {},
+    click() {
+      nativeClicks += 1;
+      contactText = 'Call seller 0540320112';
+    },
+    matches(selector) { return selector.includes('contact'); },
+    dispatchEvent() {},
+  };
+  const document = createMockDocument({
+    selectorAll: {
+      'button,[role="button"],a.js-show-contact,a.qa-show-contact,a.cy-show-contact,button[class*="phone" i],button[class*="contact" i],[data-testid*="phone" i],[data-testid*="contact" i]': [contactButton],
+      '[data-testid*="contact" i]': [contactButton],
+    },
+  });
+  const opened = [];
+  const source = createMarketplaceCaptureBookmarklet({
+    intakeUrl: 'https://app.whisperm.test/marketplace-acquisition/capture/intake',
+  }).replace(/^javascript:/u, '');
+
+  vm.runInNewContext(source, {
+    document,
+    location: listingUrl,
+    navigator: { userAgent: 'bookmarklet-agent' },
+    TextEncoder,
+    URL,
+    JSON,
+    Date,
+    encodeURIComponent,
+    MouseEvent: function MouseEvent() {},
+    window: { open(url) { opened.push(url); } },
+    alert(message) { throw new Error(message); },
+    confirm() { return true; },
+    setTimeout(callback) { callback(); },
+  });
+
+  assert.equal(nativeClicks, 1);
+  assert.equal(opened.length, 1);
+  const payload = JSON.parse(decodeURIComponent(new URL(opened[0]).searchParams.get('payload')));
+  assert.equal(payload.phone, '0540320112');
 });
 
 test('extractor captures phone from revealed contact button text', () => {
