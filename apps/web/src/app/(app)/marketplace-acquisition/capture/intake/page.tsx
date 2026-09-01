@@ -88,6 +88,14 @@ function CaptureResult({ data }: { readonly data: Record<string, unknown> | unde
 
 interface CampaignOption { readonly id: string; readonly name: string; }
 
+const discoverySourceKey = (payload: MarketplaceCapturePayload): string => {
+  const source = (payload.marketplaceSource || payload.sourceHost).trim().toLowerCase();
+  if (source.includes('jiji')) return 'jiji';
+  if (source.includes('tonaton')) return 'tonaton';
+  if (source.includes('facebook')) return 'facebook';
+  return source;
+};
+
 function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCapturePayload; readonly campaignId?: string }) {
   const initial = useMemo(() => Object.fromEntries(editableFields.map((field) => [field, String(payload[field] ?? "")])), [payload]);
   const [fields, setFields] = useState<Record<string, string>>(initial);
@@ -192,14 +200,12 @@ function GridPageDiscoveryForm({ payload, campaignId: initialCampaignId }: GridP
   const validListings = listings.filter((l) => l.listingUrl && l.listingUrl.trim().length > 0);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(initialCampaignId ?? '');
   const [campaigns, setCampaigns] = useState<readonly { id: string; name: string }[]>([]);
-  const [sourceId] = useState<string>('');
-  const [customSourceId, setCustomSourceId] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ queued: number; qualified: number; rejected: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/marketplace-acquisition/campaigns?status=ACTIVE,DRAFT')
+    fetch('/api/marketplace-acquisition/campaigns?status=ACTIVE')
       .then((r) => r.json())
       .then((p) => {
         const list = (p?.data?.campaigns ?? []) as { id: string; name: string }[];
@@ -209,31 +215,35 @@ function GridPageDiscoveryForm({ payload, campaignId: initialCampaignId }: GridP
   }, [initialCampaignId]);
 
   const runDiscovery = async () => {
-    const srcId = customSourceId.trim();
     if (validListings.length === 0) { setError('No valid listing URLs found on this page.'); return; }
+    if (selectedCampaignId.trim().length === 0) { setError('Select an active campaign.'); return; }
 
     setBusy(true);
     setError(null);
     try {
       const entries = validListings.map((l) => ({
+        listingUrl: l.listingUrl,
+        marketplaceListingId: l.marketplaceListingId,
         title: l.title,
+        description: l.description,
         price: l.price,
         currency: l.currency,
         category: l.category,
         location: l.location,
+        images: l.imageUrls ?? l.images,
       }));
 
       const res = await fetch(`/api/marketplace-acquisition/campaigns/${selectedCampaignId}/discovery/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          marketplaceSourceId: srcId,
-          marketplaceSourceKey: payload.marketplaceSource ?? 'jiji',
+          marketplaceSourceKey: discoverySourceKey(payload),
           mode: 'MANUAL_SEED',
           entries,
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error?.message ?? 'Discovery run failed.');
       const run = data?.data?.run ?? {};
       setResult({ queued: run.sellersFound ?? 0, qualified: run.sellersQualified ?? 0, rejected: run.sellersRejected ?? 0 });
     } catch (err) {
@@ -254,17 +264,12 @@ function GridPageDiscoveryForm({ payload, campaignId: initialCampaignId }: GridP
       </section>
 
       <div className='space-y-3'>
-        <label className='block rounded-xl bg-secondary p-3 text-sm' style={{ border: '0.5px solid hsl(var(--border))' }}>
-          <span className='text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground'>Marketplace Source ID <span className='text-red-600'>*</span></span>
-          <input
-            className='mt-2 w-full rounded-md bg-background px-3 py-2 text-foreground'
-            placeholder='UUID of the marketplace source'
-            value={customSourceId}
-            onChange={(e) => setCustomSourceId(e.target.value)}
-          />
-        </label>
+        <div className='rounded-xl bg-secondary p-3 text-sm' style={{ border: '0.5px solid hsl(var(--border))' }}>
+          <p className='text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground'>Marketplace</p>
+          <p className='mt-2 font-medium text-foreground'>{payload.marketplaceSource ?? payload.sourceHost}</p>
+        </div>
 
-{!initialCampaignId && campaigns.length > 0 ? (
+        {!initialCampaignId && campaigns.length > 0 ? (
           <label className='block rounded-xl bg-secondary p-3 text-sm' style={{ border: '0.5px solid hsl(var(--border))' }}>
             <span className='text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground'>Campaign <span className='text-red-600'>*</span></span>
             <select
@@ -300,7 +305,7 @@ function GridPageDiscoveryForm({ payload, campaignId: initialCampaignId }: GridP
       ) : (
         <button
           className='rounded-full bg-whisper px-5 py-2 text-sm font-semibold text-white disabled:opacity-60'
-          disabled={busy || selectedCampaignId.trim().length === 0 || customSourceId.trim().length === 0}
+          disabled={busy || selectedCampaignId.trim().length === 0}
           onClick={() => void runDiscovery()}
           type='button'
         >

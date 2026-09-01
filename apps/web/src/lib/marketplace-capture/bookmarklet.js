@@ -129,12 +129,19 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
   const sellerName = clean(product?.brand?.name, 255) || selectorText(['[itemprop="seller"]', '.b-seller-block__name', '[rel="author"]', 'a[href*="profile" i]', 'a[href*="seller" i]', '[class*="seller" i]'], 255);
   const sellerProfileUrl = selectorHref(['a[href*="seller" i]', 'a[href*="profile" i]', '[rel="author"]']);
 
+  const seenListings = new Set();
   const portfolioListings = Array.from(doc.querySelectorAll('a[href]')).map((link) => {
-    const listingUrl = selectorHref([link.matches ? '' : '']);
     const hrefValue = clean(link.getAttribute('href') || '', 2000);
     let absoluteUrl = '';
     try { absoluteUrl = new URL(hrefValue, href).toString(); } catch { absoluteUrl = hrefValue; }
-    const title = clean(link.textContent || '', 300);
+    let parsed;
+    try { parsed = new URL(absoluteUrl); } catch { parsed = null; }
+    const title = clean(link.textContent || link.getAttribute('aria-label') || '', 300);
+    const sameMarketplace = parsed?.hostname === hostname;
+    const excluded = parsed !== null && (/\/(?:search|login|register|help|category|categories)(?:\/|$)/iu.test(parsed.pathname) || Boolean(parsed.hash));
+    const likelyListing = parsed !== null && (parsed.pathname.endsWith('.html') || /\/(?:ad|ads|listing|listings|item|product)s?\//iu.test(parsed.pathname));
+    if (!sameMarketplace || excluded || !likelyListing || absoluteUrl === href || seenListings.has(absoluteUrl) || title.length < 3) return null;
+    seenListings.add(absoluteUrl);
     const priceMatch = title.match(/(?:GH₵|GH¢|GHS|₵|USD|\$)\s?[\d,.]+/iu);
     const priceText = clean((priceMatch || [])[0] || '', 120);
     return {
@@ -146,11 +153,11 @@ export function extractMarketplaceCapturePayload(doc, locationLike, userAgent = 
       currency: inferCurrency(priceText) || undefined,
       metadata: { source: 'bookmarklet-link' },
     };
-  }).filter((item) => item.title && item.listingUrl && item.listingUrl !== href).slice(0, 25);
+  }).filter(Boolean).slice(0, 25);
 
   const strategy = product ? 'jsonld' : (meta('og:title') || meta('og:description') ? 'opengraph' : 'fallback');
   const productMicrodataCount = doc.querySelectorAll('[itemtype*="schema.org/Product"]').length;
-  const looksLikeGridPage = productMicrodataCount > 1;
+  const looksLikeGridPage = productMicrodataCount > 1 || portfolioListings.length > 1;
 
   return {
     sourceUrl: href,
@@ -233,13 +240,14 @@ const price=clean((offerCurrency ? offerCurrency + " " : "")+offerPrice,120)||me
   const images=arr(product?.image).concat([meta("og:image"),meta("twitter:image")],Array.from(doc.querySelectorAll('[itemprop="image"], img')).map((img)=>img.getAttribute("content")||img.getAttribute("src"))).map((url)=>{try{return new URL(clean(String(url),2000),href).toString()}catch{return clean(String(url),2000)}}).filter(Boolean);
   const sellerName=clean(product?.brand?.name,255)||selectorText(['[itemprop="seller"]',".b-seller-block__name",'[rel="author"]','a[href*="profile" i]','a[href*="seller" i]','[class*="seller" i]'],255);
   const sellerProfileUrl=selectorHref(['a[href*="seller" i]','a[href*="profile" i]','[rel="author"]']);
-  const portfolioListings=Array.from(doc.querySelectorAll("a[href]")).map((link)=>{const hrefValue=clean(link.getAttribute("href")||"",2000);let absoluteUrl="";try{absoluteUrl=new URL(hrefValue,href).toString()}catch{absoluteUrl=hrefValue}const title=clean(link.textContent||"",300);const priceMatch=title.match(/(?:GH₵|GH¢|GHS|₵|USD|\$)\s?[\d,.]+/iu);const priceText=clean((priceMatch||[])[0]||"",120);return{listingUrl:absoluteUrl||undefined,marketplaceListingId:deriveMarketplaceListingId(absoluteUrl),title,price:priceText||undefined,priceText:priceText||undefined,currency:inferCurrency(priceText)||undefined,metadata:{source:"bookmarklet-link"}}}).filter((item)=>item.title&&item.listingUrl&&item.listingUrl!==href).slice(0,25);
+  const seenListings=new Set();
+  const portfolioListings=Array.from(doc.querySelectorAll("a[href]")).map((link)=>{const hrefValue=clean(link.getAttribute("href")||"",2000);let absoluteUrl="";try{absoluteUrl=new URL(hrefValue,href).toString()}catch{absoluteUrl=hrefValue}let parsed=null;try{parsed=new URL(absoluteUrl)}catch{}const title=clean(link.textContent||link.getAttribute("aria-label")||"",300);const sameMarketplace=parsed&&parsed.hostname===hostname;const excluded=parsed&&(/\/(?:search|login|register|help|category|categories)(?:\/|$)/iu.test(parsed.pathname)||parsed.hash);const likelyListing=parsed&&(parsed.pathname.endsWith(".html")||/\/(?:ad|ads|listing|listings|item|product)s?\//iu.test(parsed.pathname));if(!sameMarketplace||excluded||!likelyListing||absoluteUrl===href||seenListings.has(absoluteUrl)||title.length<3)return null;seenListings.add(absoluteUrl);const priceMatch=title.match(/(?:GH₵|GH¢|GHS|₵|USD|\$)\s?[\d,.]+/iu);const priceText=clean((priceMatch||[])[0]||"",120);return{listingUrl:absoluteUrl,marketplaceListingId:deriveMarketplaceListingId(absoluteUrl),title,price:priceText||undefined,priceText:priceText||undefined,currency:inferCurrency(priceText)||undefined,metadata:{source:"bookmarklet-link"}}}).filter(Boolean).slice(0,25);
   const strategy=product?"jsonld":(meta("og:title")||meta("og:description")?"opengraph":"fallback");
   const productMicrodataCount=doc.querySelectorAll('[itemtype*="schema.org/Product"]').length;
-  return{sourceUrl:href,sourceHost:hostname,listingUrl:href,marketplaceSource:detectMarketplaceSource(href),sourceMarketplace:detectMarketplaceSource(href),marketplaceListingId:deriveMarketplaceListingId(href),title:clean(product?.name,300)||meta("og:title")||clean(doc.title,300),description:clean(product?.description,1000)||meta("og:description")||meta("description"),priceText:price,price,currency,images:Array.from(new Set(images)).slice(0,6),imageUrls:Array.from(new Set(images)).slice(0,6),category:clean(product?.category,255)||meta("product:category")||selectorText(['[itemprop="category"]','[class*="category" i]'],255),sellerName,rawSellerText:sellerName||undefined,sellerProfileUrl,marketplaceIdentifier:phone||sellerProfileUrl||sellerName||undefined,phone:phone||undefined,email:email||undefined,location:selectorText(['[itemprop="address"]','[class*="location" i]','[data-testid*="location" i]'],255)||undefined,capturedAt:new Date().toISOString(),pageUrl:href,userAgent:clean(userAgent,1024)||undefined,rawExtract:{strategy},portfolioListings,looksLikeGridPage:productMicrodataCount>1};
+  return{sourceUrl:href,sourceHost:hostname,listingUrl:href,marketplaceSource:detectMarketplaceSource(href),sourceMarketplace:detectMarketplaceSource(href),marketplaceListingId:deriveMarketplaceListingId(href),title:clean(product?.name,300)||meta("og:title")||clean(doc.title,300),description:clean(product?.description,1000)||meta("og:description")||meta("description"),priceText:price,price,currency,images:Array.from(new Set(images)).slice(0,6),imageUrls:Array.from(new Set(images)).slice(0,6),category:clean(product?.category,255)||meta("product:category")||selectorText(['[itemprop="category"]','[class*="category" i]'],255),sellerName,rawSellerText:sellerName||undefined,sellerProfileUrl,marketplaceIdentifier:phone||sellerProfileUrl||sellerName||undefined,phone:phone||undefined,email:email||undefined,location:selectorText(['[itemprop="address"]','[class*="location" i]','[data-testid*="location" i]'],255)||undefined,capturedAt:new Date().toISOString(),pageUrl:href,userAgent:clean(userAgent,1024)||undefined,rawExtract:{strategy},portfolioListings,looksLikeGridPage:productMicrodataCount>1||portfolioListings.length>1};
 };
 const reveal=()=>{const nodes=Array.from(document.querySelectorAll('button,[role="button"],a.js-show-contact,a.qa-show-contact,a.cy-show-contact,button[class*="phone" i],button[class*="contact" i],[data-testid*="phone" i],[data-testid*="contact" i]'));const targets=nodes.filter((e)=>{const href=(e.getAttribute&&e.getAttribute("href")||"").toLowerCase();if(href.startsWith("tel:")||href.includes("wa.me")||href.includes("whatsapp"))return false;return /show\s+contact|show\s+phone|reveal\s+phone|phone|contact/i.test((e.textContent||"").trim())||e.matches('a.js-show-contact,a.qa-show-contact,a.cy-show-contact,button[class*="phone" i],button[class*="contact" i],[data-testid*="phone" i],[data-testid*="contact" i]')}).slice(0,3);for(const c of targets){try{c.scrollIntoView({block:"center"});["mouseover","mousedown","mouseup","click"].forEach((t)=>c.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window})))}catch{}}};
-const finish=()=>{const payload=extractMarketplaceCapturePayload(document,location,(navigator&&navigator.userAgent)||"");const json=JSON.stringify(payload);if(new TextEncoder().encode(json).length>MAX){alert("WhispeRM capture is too large. Capture a single public listing page and try again.");return}if(payload.looksLikeGridPage&&!confirm("This looks like a search results page, not a single listing. Capture anyway?"))return;window.open(INTAKE+"?payload="+encodeURIComponent(json),"_blank","noopener,noreferrer")};
+const finish=()=>{const payload=extractMarketplaceCapturePayload(document,location,(navigator&&navigator.userAgent)||"");const json=JSON.stringify(payload);if(new TextEncoder().encode(json).length>MAX){alert("WhispeRM capture is too large. Narrow the visible marketplace results and try again.");return}if(payload.looksLikeGridPage&&!confirm("Capture the visible marketplace listings into WhispeRM discovery?"))return;const separator=INTAKE.includes("?")?"&":"?";window.open(INTAKE+separator+"payload="+encodeURIComponent(json),"_blank","noopener,noreferrer")};
 reveal();
 setTimeout(finish,2500);
 `.replace("__INTAKE_URL__", intakeUrlLiteral);

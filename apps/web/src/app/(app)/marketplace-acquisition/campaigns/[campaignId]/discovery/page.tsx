@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { IconCheck, IconLoader2, IconPlus, IconRefresh, IconSend, IconX } from "@tabler/icons-react";
 import {
   buildPromoteRequestInit,
@@ -451,12 +452,18 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
           </button>
           <button
             onClick={() => setShowSeedModal(true)}
-            className="h-9 flex items-center gap-2 rounded-xl bg-whisper px-4 text-sm font-semibold text-white"
+            className="h-9 flex items-center gap-2 rounded-xl bg-secondary px-4 text-sm font-semibold text-foreground"
             type="button"
           >
             <IconPlus className="size-4" />
-            New Discovery Run
+            Paste URLs
           </button>
+          <Link
+            className="h-9 flex items-center gap-2 rounded-xl bg-whisper px-4 text-sm font-semibold text-white"
+            href={`/marketplace-acquisition/capture?campaignId=${encodeURIComponent(campaignId)}`}
+          >
+            Capture Marketplace Page
+          </Link>
         </div>
       </div>
 
@@ -494,7 +501,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
           ) : runs.length === 0 ? (
             <div className="rounded-2xl bg-background p-6 text-center" style={{ border: "0.5px solid var(--color-border)" }}>
               <p className="text-sm text-muted-foreground">No discovery runs yet.</p>
-              <p className="text-xs text-muted-foreground mt-1">Start a run to find sellers automatically.</p>
+              <p className="text-xs text-muted-foreground mt-1">Use the bookmarklet on a signed-in marketplace results page, or paste listing URLs.</p>
             </div>
           ) : (
             runs.map((run) => (
@@ -570,7 +577,7 @@ export default function DiscoveryPage({ params }: DiscoveryPageProps) {
               <p className="text-sm text-muted-foreground">No {statusFilter === "ALL" ? "reviewable" : statusFilter.toLowerCase()} sellers.</p>
               {statusFilter === "QUALIFIED" ? (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Start a discovery run to find and qualify sellers.
+                  Capture a marketplace results page or paste listing URLs to find and qualify sellers.
                 </p>
               ) : null}
             </div>

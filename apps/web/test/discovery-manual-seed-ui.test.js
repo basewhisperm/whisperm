@@ -9,3 +9,10 @@ test("manual discovery asks for a marketplace, not an internal source UUID", () 
   assert.match(page, /Marketplace Key/u);
   assert.match(page, /marketplaceSourceKey: sourceKey/u);
 });
+
+test("campaign discovery routes authenticated marketplace collection through the bookmarklet", () => {
+  assert.match(page, /Capture Marketplace Page/u);
+  assert.match(page, /marketplace-acquisition\/capture\?campaignId=/u);
+  assert.match(page, /Paste URLs/u);
+  assert.doesNotMatch(page, /Run Automatic Discovery/u);
+});

@@ -113,6 +113,23 @@ test('extractor flags likely grid pages based on product microdata count', () =>
   assert.equal(extractMarketplaceCapturePayload(listingDocument, listingUrl, 'test-agent').looksLikeGridPage, false);
 });
 
+test('extractor detects a Jiji results page from unique visible listing links', () => {
+  const document = createMockDocument({
+    selectorAll: {
+      'a[href]': [
+        node({ textContent: 'Cleaning machine GH₵ 4,000', attributes: { href: '/accra/cleaning-equipment/cleaning-machine-one.html' } }),
+        node({ textContent: 'Industrial vacuum GH₵ 2,500', attributes: { href: '/accra/cleaning-equipment/industrial-vacuum-two.html' } }),
+        node({ textContent: 'Search', attributes: { href: '/search?query=cleaning' } }),
+      ],
+    },
+  });
+
+  const payload = extractMarketplaceCapturePayload(document, new URL('https://jiji.com.gh/accra/search?query=cleaning'), 'test-agent');
+  assert.equal(payload.looksLikeGridPage, true);
+  assert.equal(payload.portfolioListings.length, 2);
+  assert.equal(payload.portfolioListings[0].listingUrl, 'https://jiji.com.gh/accra/cleaning-equipment/cleaning-machine-one.html');
+});
+
 test('generated bookmarklet uses canonical extractor output for the same document', () => {
   const document = createMockDocument({
     title: 'Mazda CX-5',
@@ -218,4 +235,3 @@ test('phone extraction captures compact Ghana mobile numbers revealed in Jiji bo
 
   assert.equal(payload.phone, '0540320112');
 });
-

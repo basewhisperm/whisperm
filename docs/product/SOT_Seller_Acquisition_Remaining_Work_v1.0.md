@@ -102,3 +102,10 @@ Seller invitation requires a phone-qualified acquisition contact. Conversion req
 - URL capture without a phone is explicitly unqualified and blocked. Callers must treat `PHONE_REQUIRED` / `REVEAL_PHONE` responses as requiring phone reveal before qualification, invitation, conversion, or completion.
 - `COMPLETE_ACQUISITION` is a supported Marketplace Sellers command-center action and posts to the capture completion route after seller and inventory conversions are successful.
 - No-phone capture cannot be treated as qualified, even when email or other marketplace identity fields are present.
+
+## Authenticated marketplace discovery intake
+
+- Marketplace sites that reject server-side discovery are ingested through the existing user-initiated bookmarklet on the operator's authenticated browser page.
+- The bookmarklet extracts only visible public listing snapshots and hands them to the authenticated WhispeRM intake route. It must not read or transmit marketplace credentials, cookies, storage, full HTML, CAPTCHA responses, or browser fingerprints.
+- Grid/search capture preserves campaign ownership, canonical listing URLs, visible listing metadata, tenant isolation, deduplication, qualification, and discovery usage controls.
+- Manual URL entry remains a separate recovery path. Neither path may be labeled as autonomous server-side discovery.

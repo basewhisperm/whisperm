@@ -35,3 +35,10 @@ Disable is idempotent: it sets `enabled=false` without deleting the tenant featu
 - **Seller Capture** is not shown as a separate nav item.
 - Core CRM navigation remains present in both states.
 - Public claim-token routes remain reachable independently of authenticated tenant add-on visibility.
+
+## Bookmarklet discovery operations
+
+- From a campaign Discovery page, `Capture Marketplace Page` opens a campaign-scoped bookmarklet setup link.
+- The operator installs the bookmarklet once, opens a marketplace listing/search/profile page in their own signed-in browser, and invokes it to send visible listing snapshots to WhispeRM intake.
+- Grid intake lists active campaigns only, derives the supported marketplace source key from the payload, and submits listing URLs through the canonical discovery-run endpoint.
+- If an upstream marketplace presents a CAPTCHA or access restriction, the bookmarklet does not bypass it. The operator completes ordinary site access before initiating capture.
