@@ -30,12 +30,19 @@ export class ResendEmailProvider implements EmailProvider {
   }
 
   async send(message: EmailMessage): Promise<void> {
-    await this.client.emails.send({
+    const result = await this.client.emails.send({
       from: this.from,
       to: message.to,
       subject: message.subject,
       html: message.html,
     });
+
+    // Resend reports API rejections in the resolved response instead of always
+    // rejecting the promise. Treat those responses as delivery failures so an
+    // invitation is never persisted as SENT when the provider rejected it.
+    if (result.error !== null) {
+      throw new Error(`Resend rejected email: ${result.error.message}`);
+    }
   }
 }
 
