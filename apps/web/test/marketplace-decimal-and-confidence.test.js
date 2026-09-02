@@ -75,6 +75,31 @@ test('marketplace repository normalizes decimal-like values before object walkin
   assert.notEqual(normalized.price, '[object Object]');
 });
 
+test('shared repository normalization converts Prisma decimals before object walking', () => {
+  const source = readRepo('packages/repositories/src/index.ts');
+  const decimalGuard = source.indexOf('typeof (value as { toNumber?: unknown }).toNumber === "function"');
+  const objectWalk = source.indexOf('Object.fromEntries(Object.entries(value).map(([key, nested])');
+  assert.ok(decimalGuard >= 0, 'shared repository must recognize Prisma decimal values');
+  assert.ok(objectWalk > decimalGuard, 'decimal conversion must happen before generic object walking');
+});
+
+test('edit form price helper rejects object stringification and falls back to original price text', () => {
+  const source = readRepo('apps/web/src/lib/marketplace-acquisition/workbench-domain.ts');
+  assert.match(source, /export function editablePriceText/u);
+  assert.match(source, /!rawPrice\.includes\("\[object"\)/u);
+  assert.match(source, /metadataText\(record, "originalPriceText"\) \?\? ""/u);
+
+  const editablePriceText = (rawPrice, originalPriceText) => {
+    if (typeof rawPrice === 'number') return String(rawPrice);
+    if (typeof rawPrice === 'string' && !rawPrice.includes('[object')) return rawPrice;
+    return originalPriceText ?? '';
+  };
+  assert.equal(editablePriceText('250000'), '250000');
+  assert.equal(editablePriceText(250000), '250000');
+  assert.equal(editablePriceText({ s: 1, e: 5, d: [250000] }), '');
+  assert.equal(editablePriceText('[object Object]', 'GH₵ 250,000'), 'GH₵ 250,000');
+});
+
 test('decimal-like schema preprocessor accepts decimal instances without generic object stringification', () => {
   const source = readRepo('packages/repositories/src/marketplace-acquisition.ts');
   assert.match(source, /export const decimalLikeSchema = z\.preprocess/u);
