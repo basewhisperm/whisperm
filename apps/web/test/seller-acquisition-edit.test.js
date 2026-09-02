@@ -119,6 +119,13 @@ test('editExtract accepts an EditExtractContext with actorId and correlation, an
   assert.match(text, /async editExtract\(context: EditExtractContext, captureId: string, raw: unknown\): Promise<EditExtractResult>/u);
 });
 
+test('editExtract narrows rich request context before calling strict tenant repositories', () => {
+  const text = svc('seller-acquisition-edit.ts');
+  assert.match(text, /const tenantScope = \{ tenantId: context\.tenantId \}/u);
+  assert.match(text, /findMarketplaceCaptureById\(tenantScope, captureId\)/u);
+  assert.match(text, /updateMarketplaceCapture\(tenantScope, captureId, captureUpdates\)/u);
+});
+
 test('editExtract only triggers requalification when sellerPhone is edited', () => {
   const text = svc('seller-acquisition-edit.ts');
   assert.match(text, /input\.sellerPhone !== undefined && this\.deps\.requalification !== undefined/u);
