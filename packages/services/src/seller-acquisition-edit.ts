@@ -64,8 +64,9 @@ export class SellerAcquisitionEditService {
 
   async editExtract(context: EditExtractContext, captureId: string, raw: unknown): Promise<EditExtractResult> {
     const input = editExtractInputSchema.parse(raw);
+    const tenantScope = { tenantId: context.tenantId };
 
-    const capture = await this.deps.marketplaceAcquisition.findMarketplaceCaptureById(context, captureId);
+    const capture = await this.deps.marketplaceAcquisition.findMarketplaceCaptureById(tenantScope, captureId);
     if (capture === null) {
       throw Object.assign(new Error("Capture not found"), { status: 404 });
     }
@@ -108,14 +109,14 @@ export class SellerAcquisitionEditService {
     if (input.category !== undefined)    draftUpdates.category = input.category;
 
     if (Object.keys(draftUpdates).length > 0) {
-      const draft = await this.deps.draftInventories.findByMarketplaceCaptureId(context, captureId);
+      const draft = await this.deps.draftInventories.findByMarketplaceCaptureId(tenantScope, captureId);
       if (draft !== null) {
-        await this.deps.draftInventories.update(context, draft.id, draftUpdates);
+        await this.deps.draftInventories.update(tenantScope, draft.id, draftUpdates);
       } else {
         // No DraftInventory row yet (common for newly-captured sellers that
         // have not been invited yet). Create one so inventory fields have a
         // canonical home for the edits.
-        await this.deps.draftInventories.upsertForCapture(context, {
+        await this.deps.draftInventories.upsertForCapture(tenantScope, {
           tenantId: context.tenantId,
           marketplaceCaptureId: captureId,
           title: (input.title ?? capture.title) as string,
@@ -150,7 +151,7 @@ export class SellerAcquisitionEditService {
     if (metaChanged) captureUpdates.metadata = metaUpdates;
 
     if (Object.keys(captureUpdates).length > 0) {
-      await this.deps.marketplaceAcquisition.updateMarketplaceCapture(context, captureId, captureUpdates);
+      await this.deps.marketplaceAcquisition.updateMarketplaceCapture(tenantScope, captureId, captureUpdates);
     }
 
     // --- Requalification: only qualifying-field edits (phone/WhatsApp) re-run the canonical
