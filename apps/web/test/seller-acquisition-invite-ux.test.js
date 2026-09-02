@@ -29,6 +29,8 @@ test("invite panel uses ChannelSelector and preserves invite request contract", 
   assert.match(invitePanel, /<ChannelSelector onChange=\{setChannel\} value=\{channel\} \/>/u);
   assert.match(invitePanel, /body: JSON\.stringify\(\{ preferredChannel: channel \}\)/u);
   assert.match(invitePanel, /invitationResponseFromFetch/u);
+  assert.match(invitePanel, /disabled=\{busy \|\| !selectedAvailability\.eligible\}/u);
+  assert.match(invitePanel, /selectedAvailability\.message/u);
 });
 
 test("InlineInviteButton preserves contract and delegates response parsing to the shared helper", () => {

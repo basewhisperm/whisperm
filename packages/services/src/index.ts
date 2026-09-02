@@ -1384,6 +1384,7 @@ const sellerQualityScore = (input: MarketplaceCaptureServiceInput, listingCount:
 
 const mergedCaptureMetadata = (input: MarketplaceCaptureServiceInput): Readonly<Record<string, unknown>> => exactInput({
   ...(input.metadata ?? {}),
+  originalPriceText: input.priceText ?? (typeof input.price === "string" ? input.price : undefined),
   sellerEmail: sellerEmailForInput(input),
   sellerPhone: sellerPhoneForInput(input),
   sellerLocation: input.sellerLocation ?? input.location ?? undefined,

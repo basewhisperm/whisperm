@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { IconClock, IconNote } from "@tabler/icons-react";
-import { SellerAcquisitionInvitePanel } from "@/components/seller-acquisition/invite-panel";
+import { SellerAcquisitionInvitePanel, type InviteChannelAvailabilityMap } from "@/components/seller-acquisition/invite-panel";
 import { WorkflowProgress } from "@/components/marketplace-acquisition/workflow-progress";
 import { PrismaDealsRepository, PrismaMarketplaceCaptureRepository, PrismaPipelineRepository, type ActivityRecord, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { MARKETPLACE_ACQUISITION_PIPELINE_KEY } from "@whisperm/types";
@@ -17,6 +17,7 @@ import {
 
 import { getTenantForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
+import { resolveInvitationEligibility, type InvitationChannel } from "@/lib/marketplace-acquisition/invitation-eligibility";
 
 const KNOWN_CAPTURE_STATUSES = new Set(["CAPTURED", "INVITED", "CLAIM_STARTED", "CLAIMED", "CONVERTED", "EXPIRED"]);
 const KNOWN_INVITATION_STATUSES = new Set(["PENDING", "SENT", "FAILED", "OPENED", "EXPIRED"]);
@@ -248,6 +249,13 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
   const workflowStage = resolveAcquisitionWorkflowStage(workflowSignals);
   const workflowNextAction = getNextWorkflowAction(workflowStage);
   const workflowBlockers = getWorkflowBlockers(workflowSignals);
+  const inviteChannels: readonly InvitationChannel[] = ["WHATSAPP", "SMS", "EMAIL"];
+  const invitationEligibility = capture === null
+    ? null
+    : Object.fromEntries(await Promise.all(inviteChannels.map(async (channel) => {
+        const eligibility = await resolveInvitationEligibility(prisma, { tenantId: tenant.id, captureId: capture.id, channel });
+        return [channel, eligibility.eligible ? { eligible: true } : { eligible: false, message: eligibility.message }] as const;
+      }))) as InviteChannelAvailabilityMap;
 
   return (
     <div className="space-y-5">
@@ -336,7 +344,12 @@ export default async function MarketplaceAcquisitionDealDetailPage({ params }: P
         </section>
       )}
 
-      {capture !== null && <SellerAcquisitionInvitePanel captureId={capture.id} />}
+      {capture !== null && invitationEligibility !== null && (
+        <SellerAcquisitionInvitePanel
+          captureId={capture.id}
+          channelAvailability={invitationEligibility}
+        />
+      )}
 
       <ActivityTimeline activities={detail.activity} />
     </div>

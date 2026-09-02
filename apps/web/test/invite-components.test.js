@@ -99,6 +99,11 @@ const statusText = (tree) => {
 };
 
 const findButton = (tree) => findAll(tree, (node) => node.type === "button")[0];
+const allChannelsAvailable = {
+  WHATSAPP: { eligible: true },
+  SMS: { eligible: true },
+  EMAIL: { eligible: true },
+};
 
 const withMockFetch = async (response, run) => {
   const originalFetch = globalThis.fetch;
@@ -145,7 +150,7 @@ const scenarios = [
 ];
 
 for (const [fileName, exportName, propsFor] of [
-  ["invite-panel.tsx", "SellerAcquisitionInvitePanel", () => ({ captureId: "capture-1" })],
+  ["invite-panel.tsx", "SellerAcquisitionInvitePanel", () => ({ captureId: "capture-1", channelAvailability: allChannelsAvailable })],
   ["inline-invite-button.tsx", "InlineInviteButton", () => ({ captureId: "capture-1" })],
 ]) {
   for (const scenario of scenarios) {
@@ -173,7 +178,7 @@ test("SellerAcquisitionInvitePanel never shows the false-failure message after a
     await withMockFetch(
       new Response(JSON.stringify({ ok: true, data: { executionId: "execution-1", status: "ACCEPTED" } }), { status: 202 }),
       async () => {
-        const props = { captureId: "capture-1" };
+        const props = { captureId: "capture-1", channelAvailability: allChannelsAvailable };
         let tree = component.render(props);
         const button = findButton(tree);
         await button.props.onClick();
@@ -181,6 +186,24 @@ test("SellerAcquisitionInvitePanel never shows the false-failure message after a
         assert.doesNotMatch(statusText(tree), /Seller invitation failed/u);
       },
     );
+  } finally {
+    component.cleanup();
+  }
+});
+
+test("SellerAcquisitionInvitePanel disables sending and explains an ineligible channel", async () => {
+  const component = await loadComponent("invite-panel.tsx", "SellerAcquisitionInvitePanel");
+  try {
+    const props = {
+      captureId: "capture-1",
+      channelAvailability: {
+        ...allChannelsAvailable,
+        WHATSAPP: { eligible: false, message: "Invitation provider is not configured." },
+      },
+    };
+    const tree = component.render(props);
+    assert.equal(findButton(tree).props.disabled, true);
+    assert.match(statusText(tree), /provider is not configured/u);
   } finally {
     component.cleanup();
   }

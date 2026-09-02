@@ -4,11 +4,22 @@ import { useState } from "react";
 import { ChannelSelector, type SellerAcquisitionInviteChannel } from "./channel-selector";
 import { invitationResponseFromFetch } from "@/lib/seller-acquisition/invitation-response";
 
-export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId: string }) {
+export interface InviteChannelAvailability {
+  readonly eligible: boolean;
+  readonly message?: string | undefined;
+}
+
+export type InviteChannelAvailabilityMap = Readonly<Record<SellerAcquisitionInviteChannel, InviteChannelAvailability>>;
+
+export function SellerAcquisitionInvitePanel({ captureId, channelAvailability }: {
+  readonly captureId: string;
+  readonly channelAvailability: InviteChannelAvailabilityMap;
+}) {
   const [channel, setChannel] = useState<SellerAcquisitionInviteChannel>("WHATSAPP");
   const [status, setStatus] = useState("");
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const selectedAvailability = channelAvailability[channel];
 
   async function sendInvite() {
     setBusy(true);
@@ -62,7 +73,7 @@ export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId
           <button
             data-testid="invite-send-button"
             className="inline-flex h-10 items-center justify-center rounded-xl bg-whisper px-4 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={busy}
+            disabled={busy || !selectedAvailability.eligible}
             onClick={sendInvite}
             type="button"
           >
@@ -72,6 +83,10 @@ export function SellerAcquisitionInvitePanel({ captureId }: { readonly captureId
             After sending, the seller can claim the listing and draft inventory.
           </p>
         </div>
+
+        {!selectedAvailability.eligible && selectedAvailability.message !== undefined && (
+          <p className="mt-4 text-sm font-medium text-amber-700" role="status">{selectedAvailability.message}</p>
+        )}
 
         {status !== "" && (
           <p data-testid="invite-status" data-failed={failed} className={failed ? "mt-4 text-sm font-medium text-red-700" : "mt-4 text-sm font-medium text-foreground"} role="status">
