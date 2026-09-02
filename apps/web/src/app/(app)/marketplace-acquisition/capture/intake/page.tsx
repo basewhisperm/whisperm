@@ -102,17 +102,24 @@ function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCap
   const [state, setState] = useState<SubmitState>({ status: "idle" });
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(campaignId ?? "");
   const [campaigns, setCampaigns] = useState<readonly CampaignOption[]>([]);
+  const [campaignsLoaded, setCampaignsLoaded] = useState(campaignId !== undefined);
+  const [campaignLoadError, setCampaignLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (campaignId) return; // already set from URL
-    fetch("/api/marketplace-acquisition/campaigns?status=ACTIVE,DRAFT")
-      .then((r) => r.json())
+    fetch("/api/marketplace-acquisition/campaigns?status=ACTIVE")
+      .then(async (response) => {
+        const json = await response.json();
+        if (!response.ok || json?.ok === false) throw new Error(json?.error?.message ?? "Active campaigns could not be loaded.");
+        return json;
+      })
       .then((payload) => {
         const list = (payload?.data?.campaigns ?? []) as CampaignOption[];
         setCampaigns(list);
         if (list.length === 1 && list[0] !== undefined) setSelectedCampaignId(list[0].id);
       })
-      .catch(() => {});
+      .catch((error) => setCampaignLoadError(error instanceof Error ? error.message : "Active campaigns could not be loaded."))
+      .finally(() => setCampaignsLoaded(true));
   }, [campaignId]);
 
   const update = (name: string, value: string) => setFields((current) => ({ ...current, [name]: value }));
@@ -179,9 +186,18 @@ function CaptureForm({ payload, campaignId }: { readonly payload: MarketplaceCap
         </label>
       ) : null}
 
+      {!campaignId && !campaignsLoaded ? <p className="text-sm text-muted-foreground">Loading active campaigns…</p> : null}
+      {!campaignId && campaignsLoaded && campaigns.length === 0 ? (
+        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+          {campaignLoadError ?? "No active campaign is available. Activate a campaign before capturing this seller."}
+        </p>
+      ) : null}
+
       <button data-testid="intake-submit" className="rounded-full bg-whisper px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={state.status === "submitting" || selectedCampaignId.trim().length === 0} onClick={submit} type="button">
         {state.status === "submitting" ? "Capturing seller…" : "Capture Seller"}
       </button>
+
+      {selectedCampaignId.trim().length === 0 && campaigns.length > 1 ? <p className="text-sm text-muted-foreground">Select an active campaign to enable capture.</p> : null}
 
       {state.status === "success" && <CaptureResult data={state.data} />}
       {state.status === "error" && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{state.error}</p>}
