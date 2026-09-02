@@ -4,7 +4,7 @@ import { createSellerInvitationServicePort } from "./seller-invitation-port.js";
 import { AcquisitionGovernanceService, AcquisitionUsageMeteringService, CampaignRuntimeService, MarketplaceDiscoveryService, MarketplaceQualificationExecutionService, BusinessGrowthOpportunityService, MarketplaceClaimLifecycleService, createInvitationRuntimeJobQueue, campaignTargetingConfigSchema, crmConversionJobType, crmConversionQueueName, revenueAttributionJobType, revenueAttributionQueueName, marketplaceInviteQueueName, marketplaceInviteSendJobType, marketplaceInviteSendPayloadSchema, marketplaceClaimLifecycleQueueName, marketplaceClaimReminderJobType, marketplaceClaimExpireJobType, marketplaceClaimIntelligenceJobType, claimLifecycleJobPayloadSchema, growthLoopQueueName, growthLoopJobType, growthLoopJobPayloadSchema, type ClaimInvitationChannel, type ClaimLifecycleScheduleJob, type ClaimReminderDeliveryOutcome, type MarketplaceClaimTokenRecord, type AcquisitionGovernanceCapability, type AcquisitionGovernanceDecision } from "@whisperm/services";
 import { createPrismaRepositories, PrismaBusinessGrowthOpportunityRepository, PrismaCampaignRuntimeExecutionRepository, PrismaMarketplaceDiscoveryRepository, PrismaSellerAcquisitionCampaignRepository, PrismaSellerInvitationRepository, type SellerAcquisitionCampaignRepository, type PrismaPersistenceClient, type QueueJobRepository } from "@whisperm/repositories";
 import { PrismaQueueRuntime, runDurableQueuePollLoop, claimAndProcessOneDurableQueueJob } from "./durable-queue-runtime.js";
-import { ProviderDeliveryError, buildSellerInvitationNotificationPorts, createConsoleMessagingProviderLogger, createMessagingProviderRegistryFromEnv, type MessagingProviderRegistry } from "@whisperm/provider-adapters";
+import { ProviderDeliveryError, buildSellerInvitationNotificationPorts, checkInvitationProviderHealth, createConsoleMessagingProviderLogger, createMessagingProviderRegistryFromEnv, type MessagingProviderRegistry } from "@whisperm/provider-adapters";
 import { z } from "zod";
 import {
   buildDeadLetterContract,
@@ -1680,6 +1680,7 @@ export const createProductionWorkerServices = (
     campaigns: repositories.sellerAcquisitionCampaigns,
     auditLogs: repositories.auditLogs,
     usageEvents: repositories.acquisitionUsageEvents,
+    sharedInvitationProviderReady: (channel) => checkInvitationProviderHealth({ channel, registry: createMessagingProviderRegistryFromEnv({ env }) }).ok,
   });
   const acquisitionGovernance = {
     authorize: (context: { readonly tenantId: string }, input: { readonly capability: AcquisitionGovernanceCapability; readonly campaignId?: string | undefined; readonly provider?: "WHATSAPP" | "SMS" | "EMAIL" | "DISCOVERY" | undefined; readonly hasCapturedData?: boolean | undefined }): Promise<AcquisitionGovernanceDecision> =>

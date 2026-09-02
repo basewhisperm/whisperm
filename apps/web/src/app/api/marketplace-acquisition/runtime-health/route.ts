@@ -9,6 +9,7 @@ import {
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { AcquisitionRuntimeHealthService } from "@whisperm/services";
+import { sharedInvitationProviderReady } from "@/lib/marketplace-acquisition/shared-provider-readiness";
 
 const errorResponse = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 
@@ -25,6 +26,7 @@ const runtimeHealthService = () => {
     deals: repositories.deals,
     claimTokens: repositories.marketplaceClaimTokens,
     marketplaceCaptures: repositories.marketplaceCaptures,
+    sharedInvitationProviderReady,
   });
 };
 

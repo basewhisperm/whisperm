@@ -141,6 +141,8 @@ export interface AcquisitionGovernanceDependencies {
    * existing deployments without metering wired up keep working.
    */
   readonly usageEvents?: Pick<AcquisitionUsageEventRepository, "summarizeByTenantAndPeriod"> | undefined;
+  /** V1 uses one operator-owned WABA. When supplied, this canonical runtime check supersedes legacy tenant provider rows. */
+  readonly sharedInvitationProviderReady?: ((channel: "WHATSAPP" | "SMS" | "EMAIL") => boolean) | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -319,13 +321,14 @@ export class AcquisitionGovernanceService {
   }
 
   private async loadState(scope: TenantScoped, now: Date): Promise<TenantGovernanceState> {
-    const [status, whatsappConfigured, discoveryConfigured, monthUsage, dayUsage] = await Promise.all([
+    const [status, legacyWhatsappConfigured, discoveryConfigured, monthUsage, dayUsage] = await Promise.all([
       this.deps.governance.getTenantStatus(scope),
       this.deps.governance.hasActiveProvider(scope, "WHATSAPP"),
       this.deps.governance.hasActiveDiscoverySource(scope),
       this.usageCountsSince(scope, startOfUtcMonth(now), now),
       this.usageCountsSince(scope, startOfUtcDay(now), now),
     ]);
+    const whatsappConfigured = this.deps.sharedInvitationProviderReady?.("WHATSAPP") ?? legacyWhatsappConfigured;
 
     const planLimits = planLimitsFor(status.planName);
     const discoveryMonthly = buildLimit("discovery.monthly", monthUsage.discoveryRuns, planLimits.monthlyDiscovery, "MONTH");

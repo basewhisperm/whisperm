@@ -10,6 +10,7 @@ import {
   type AcquisitionGovernanceAuthorizationInput,
   type AcquisitionGovernanceDecision,
 } from "@whisperm/services";
+import { sharedInvitationProviderReady } from "@/lib/marketplace-acquisition/shared-provider-readiness";
 
 // CS-022: single construction point for the governance service so API routes
 // and worker job handlers never build their own ad hoc checks -- they all
@@ -22,6 +23,7 @@ export const acquisitionGovernanceService = (): AcquisitionGovernanceService => 
     campaigns: repositories.sellerAcquisitionCampaigns,
     auditLogs: repositories.auditLogs,
     usageEvents: repositories.acquisitionUsageEvents,
+    sharedInvitationProviderReady,
   });
 };
 

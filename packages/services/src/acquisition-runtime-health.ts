@@ -109,6 +109,8 @@ export interface AcquisitionRuntimeHealthDependencies {
   readonly deals?: Pick<DealsRepository, "findById"> | undefined;
   readonly claimTokens?: Pick<MarketplaceClaimTokenRepository, "listClaimTokensByMarketplaceCaptureIds"> | undefined;
   readonly marketplaceCaptures?: Pick<MarketplaceCaptureRepository, "findByIds"> | undefined;
+  /** Canonical v1 operator-owned provider readiness. Campaign metadata is retained only as a compatibility fallback. */
+  readonly sharedInvitationProviderReady?: ((channel: "WHATSAPP" | "EMAIL") => boolean) | undefined;
   readonly clock?: (() => Date) | undefined;
 }
 
@@ -500,11 +502,12 @@ export class AcquisitionRuntimeHealthService {
 
   private buildWhatsappProvider(activeCampaigns: readonly SellerAcquisitionCampaignRecord[], executions: readonly CampaignRuntimeExecutionRecord[]): ProviderHealth {
     const required = activeCampaigns.some((campaign) => configuredInvitationChannels(campaign.metadata).includes("WHATSAPP"));
-    const configured = activeCampaigns.some((campaign) => {
+    const legacyConfigured = activeCampaigns.some((campaign) => {
       const metadata = isRecord(campaign.metadata) ? campaign.metadata : {};
       const providers = isRecord(metadata.invitationProviders) ? metadata.invitationProviders : {};
       return stringValue(providers.WHATSAPP) !== undefined;
     });
+    const configured = this.deps.sharedInvitationProviderReady?.("WHATSAPP") ?? legacyConfigured;
     const health = activeCampaigns
       .map((campaign) => (isRecord(campaign.metadata) && isRecord(campaign.metadata.providerHealth) ? stringValue(campaign.metadata.providerHealth.WHATSAPP)?.toUpperCase() : undefined))
       .find((value) => value !== undefined);
@@ -533,11 +536,12 @@ export class AcquisitionRuntimeHealthService {
 
   private buildEmailProvider(activeCampaigns: readonly SellerAcquisitionCampaignRecord[], executions: readonly CampaignRuntimeExecutionRecord[]): ProviderHealth {
     const requiredFallback = activeCampaigns.some((campaign) => stringValue(isRecord(campaign.metadata) ? campaign.metadata.requiredFallbackChannel : undefined) === "EMAIL");
-    const configured = activeCampaigns.some((campaign) => {
+    const legacyConfigured = activeCampaigns.some((campaign) => {
       const metadata = isRecord(campaign.metadata) ? campaign.metadata : {};
       const providers = isRecord(metadata.invitationProviders) ? metadata.invitationProviders : {};
       return stringValue(providers.EMAIL) !== undefined;
     });
+    const configured = this.deps.sharedInvitationProviderReady?.("EMAIL") ?? legacyConfigured;
     const { lastSuccessfulUseAt, lastFailedUseAt } = this.channelUsage(executions, "EMAIL");
 
     let status: RuntimeHealthStatus = "HEALTHY";
