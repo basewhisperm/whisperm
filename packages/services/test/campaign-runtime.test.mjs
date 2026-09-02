@@ -219,6 +219,33 @@ test('executeInvitation reports FAILED (not a false success) when the inline exe
   assert.equal(execution.metrics.invitationExecutionState, 'DEAD_LETTERED');
 });
 
+test('executeInvitation preserves a safe provider rejection returned by the inline executor', async () => {
+  const runtime = new CampaignRuntimeService({
+    campaigns: new MemoryCampaigns([campaign()]),
+    executions: new MemoryExecutions(),
+    invitationExecutor: {
+      async sendInvitation() {
+        return {
+          invitationId: 'invite-email-1',
+          status: 'PENDING',
+          provider: 'EMAIL',
+          errorCode: 'INVITATION_PROVIDER_FAILED',
+          errorMessage: 'Resend rejected email: sender domain is not verified',
+          retryable: false,
+        };
+      },
+    },
+  });
+  const execution = await runtime.executeInvitation(
+    { tenantId: 'tenant-1' },
+    { campaignId: 'campaign-1', opportunityId: 'capture-1', preferredChannel: 'EMAIL' },
+  );
+  assert.equal(execution.status, 'FAILED');
+  assert.equal(execution.errorCode, 'INVITATION_PROVIDER_FAILED');
+  assert.equal(execution.errorMessage, 'Resend rejected email: sender domain is not verified');
+  assert.equal(execution.metrics.invitationId, 'invite-email-1');
+});
+
 test('executeInvitation with an executor does not double-send when a prior invitation was already delivered', async () => {
   const sendCalls = [];
   const sellerInvitations = { async listSellerInvitationsByMarketplaceCaptureId() { return [{ channel: 'WHATSAPP', status: 'SENT', metadata: {} }]; } };
