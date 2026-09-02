@@ -118,7 +118,7 @@ export interface CampaignRuntimeInvitationExecutor {
   sendInvitation(
     context: { readonly tenantId: string; readonly correlation: CorrelationMetadata },
     input: { readonly tenantId: string; readonly captureId: string; readonly channel: "WHATSAPP" | "SMS" | "EMAIL" },
-  ): Promise<{ readonly invitationId: string; readonly status: string; readonly provider?: string | undefined }>;
+  ): Promise<{ readonly invitationId: string; readonly status: string; readonly provider?: string | undefined; readonly errorCode?: string | undefined; readonly errorMessage?: string | undefined; readonly retryable?: boolean | undefined }>;
 }
 
 
@@ -905,6 +905,9 @@ export class CampaignRuntimeService {
         status: result.status,
         channel: input.channel,
         provider: result.provider ?? input.channel,
+        errorCode: result.errorCode,
+        errorMessage: result.errorMessage,
+        retryable: result.retryable,
       });
     } catch (error) {
       return this.recordInvitationResult(context, {

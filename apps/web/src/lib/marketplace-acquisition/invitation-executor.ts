@@ -35,7 +35,26 @@ export const createSellerInvitationExecutor = (
         { tenantId: context.tenantId, actorId: "api", correlation: context.correlation },
         { tenantId: input.tenantId, captureId: input.captureId, preferredChannel: input.channel },
       );
-      return { invitationId: result.invitationId, status: result.status, provider: result.channel };
+      const invitations = result.status === "SENT"
+        ? []
+        : await repositories.sellerInvitations?.listSellerInvitationsByMarketplaceCaptureId(
+          { tenantId: context.tenantId },
+          result.captureId,
+        ) ?? [];
+      const invitation = invitations.find((candidate) => candidate.id === result.invitationId);
+      const failureMessage = typeof invitation?.metadata?.providerFailureMessage === "string"
+        ? invitation.metadata.providerFailureMessage
+        : undefined;
+      return {
+        invitationId: result.invitationId,
+        status: result.status,
+        provider: result.channel,
+        ...(failureMessage === undefined ? {} : {
+          errorCode: "INVITATION_PROVIDER_FAILED",
+          errorMessage: failureMessage,
+          retryable: false,
+        }),
+      };
     },
   };
 };
