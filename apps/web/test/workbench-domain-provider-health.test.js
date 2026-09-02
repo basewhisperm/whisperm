@@ -53,6 +53,14 @@ test('hasEmail reads contact email, then sellerEmail metadata', () => {
   assert.equal(mod.hasEmail(baseRecord()), false);
 });
 
+test('price falls back to the original captured price text without duplicating its currency', () => {
+  const record = baseRecord({
+    capture: { ...baseRecord().capture, price: null, currency: 'GHS', metadata: { originalPriceText: 'GHS 1' } },
+  });
+  assert.equal(mod.price(record), 'GHS 1');
+  assert.equal(mod.hasPrice(record), true);
+});
+
 test('isInvitationProviderReady is true for non-invitation actions regardless of availability', () => {
   const record = baseRecord({ nextAction: 'WAIT_FOR_CLAIM' });
   assert.equal(mod.isInvitationProviderReady(record, noneAvailable), true);

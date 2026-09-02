@@ -39,7 +39,7 @@ const repositories = (state) => ({
     async findByExternalId(scope, externalId) { return [...state.captures.values()].find((c) => c.tenantId === scope.tenantId && c.externalId === externalId) ?? null; },
     async findByDealId(scope, dealId) { return [...state.captures.values()].find((c) => c.tenantId === scope.tenantId && c.dealId === dealId) ?? null; },
     async list(scope) { return { items: [...state.captures.values()].filter((c) => c.tenantId === scope.tenantId) }; },
-    async create(scope, input) { const capture = record({ id: `capture-${state.captures.size + 1}`, tenantId: input.tenantId, contactId: input.contactId ?? null, dealId: null, externalId: input.externalId ?? null, listingUrl: input.listingUrl, title: input.title, status: input.status ?? 'CAPTURED', metadata: input.metadata ?? {} }); state.captures.set(`${scope.tenantId}:${input.listingUrl}`, capture); return capture; },
+    async create(scope, input) { const capture = record({ id: `capture-${state.captures.size + 1}`, tenantId: input.tenantId, contactId: input.contactId ?? null, dealId: null, externalId: input.externalId ?? null, listingUrl: input.listingUrl, title: input.title, price: input.price ?? null, currency: input.currency ?? null, status: input.status ?? 'CAPTURED', metadata: input.metadata ?? {} }); state.captures.set(`${scope.tenantId}:${input.listingUrl}`, capture); return capture; },
     async update(scope, id, input) { const entry = [...state.captures.entries()].find(([, c]) => c.tenantId === scope.tenantId && c.id === id); const updated = { ...entry[1], ...input, updatedAt: now }; state.captures.set(entry[0], updated); return updated; },
   },
   draftInventories: {
@@ -163,6 +163,25 @@ test('capture API returns contactId/dealId and crmConversionStatus CREATED for a
     assert.equal(body.data.crmConversionStatus, 'CREATED');
     assert.equal(state.usageEvents.filter((event) => event.eventType === 'CRM_CONVERSION_CREATED').length, 1);
     assert.equal(state.usageEvents.filter((event) => event.eventType === 'SELLER_QUALIFIED').length, 1);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('capture API preserves a GHS price in both capture and draft inventory records', async () => {
+  const state = makeState();
+  const harness = await createHarness(state);
+  try {
+    const response = await harness.route.POST(makeRequest({ listingUrl: 'https://market.example/listings/price', title: 'Priced listing', priceText: 'GHS 1', currency: 'GHS', sellerPhone: '+15555550124', sellerName: 'Priced Seller' }));
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    const capture = [...state.captures.values()][0];
+    const draft = [...state.drafts.values()][0];
+    assert.equal(capture.price, '1');
+    assert.equal(capture.currency, 'GHS');
+    assert.equal(capture.metadata.originalPriceText, 'GHS 1');
+    assert.equal(draft.price, '1');
+    assert.equal(draft.currency, 'GHS');
   } finally {
     harness.cleanup();
   }

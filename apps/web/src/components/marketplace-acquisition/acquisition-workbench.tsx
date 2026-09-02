@@ -890,7 +890,7 @@ export function AcquisitionWorkbench({
                 <span className="hidden sm:inline">·</span>
                 <span>{bulkEligibleRecords.length} eligible in current view</span>
                 <span className="hidden sm:inline">·</span>
-                <span>{invitationActionsSupported ? "WhatsApp first, SMS fallback" : "Assign this seller to a campaign before sending an invitation."}</span>
+                <span>{invitationActionsSupported ? "WhatsApp first, SMS fallback" : "Open the seller's campaign workbench to send invitations."}</span>
               </div>
               {bulkResultMessage ? <p className="mt-3 rounded-xl bg-secondary p-3 text-xs font-medium text-foreground">{bulkResultMessage}</p> : null}
             </div>
@@ -1309,7 +1309,7 @@ function Workbench({ record, rollupRecords, actionError, invitationActionsSuppor
         <WorkbenchSection title="Why">
           <p className="text-sm leading-6 text-muted-foreground">{nextActionReason(record)}</p>
           {blocked ? <p className="mt-2 text-sm font-semibold text-red-700">Missing phone number blocks invitation.</p> : null}
-          {!invitationActionsSupported && isInvitationAction ? <p className="mt-2 text-sm font-semibold text-amber-700">Assign this seller to a campaign before sending an invitation.</p> : null}
+          {!invitationActionsSupported && isInvitationAction ? <p className="mt-2 text-sm font-semibold text-amber-700">Open the seller&apos;s campaign workbench to send an invitation.</p> : null}
           {invitationActionsSupported && isInvitationAction && !invitationProviderReady ? <p className="mt-2 text-sm font-semibold text-amber-700">Invitation provider is not configured. Missing provider environment variables.</p> : null}
         </WorkbenchSection>
 

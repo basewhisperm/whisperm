@@ -118,7 +118,7 @@ export function title(record: SellerAcquisitionRecord): string {
 }
 
 export function price(record: SellerAcquisitionRecord): string {
-  const rawPrice = record.draftInventory?.price ?? record.capture.price;
+  const rawPrice = record.draftInventory?.price ?? record.capture.price ?? metadataText(record, "originalPriceText");
   if (rawPrice === null || rawPrice === undefined || rawPrice === "") return "Price missing";
   // Safety net for rows captured before the normalizeRecord fix -- those rows
   // may have the literal object-stringification artifact already persisted.
@@ -127,7 +127,10 @@ export function price(record: SellerAcquisitionRecord): string {
   // An empty string is not a valid ISO 4217 code and makes Intl.NumberFormat throw.
   const currency = record.draftInventory?.currency || record.capture.currency || "USD";
   const numericPrice = typeof rawPrice === "number" ? rawPrice : Number(rawPrice);
-  if (!Number.isFinite(numericPrice)) return `${currency} ${String(rawPrice)}`;
+  if (!Number.isFinite(numericPrice)) {
+    const priceText = String(rawPrice).trim();
+    return new RegExp(`^(?:${currency}\\b|GH₵|₵|\\$)`, "iu").test(priceText) ? priceText : `${currency} ${priceText}`;
+  }
   try {
     return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(numericPrice);
   } catch {
@@ -259,7 +262,7 @@ export function rollupPriceSummary(rollup: SellerRollup): string {
 }
 
 export function hasPrice(record: SellerAcquisitionRecord): boolean {
-  const rawPrice = record.draftInventory?.price ?? record.capture.price;
+  const rawPrice = record.draftInventory?.price ?? record.capture.price ?? metadataText(record, "originalPriceText");
   return rawPrice !== null && rawPrice !== undefined && rawPrice !== "" && !(typeof rawPrice === "string" && rawPrice.includes("[object"));
 }
 

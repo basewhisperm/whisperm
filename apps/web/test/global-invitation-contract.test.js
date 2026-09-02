@@ -47,7 +47,8 @@ test("ST1-013I bulk invite represents every requested id and reports partial res
 
 test("ST1-013I global workbench disables invite actions until campaign assignment", () => {
   assert.match(workbench, /const invitationActionsSupported = mode === "campaign"/u);
-  assert.match(workbench, /Assign this seller to a campaign before sending an invitation\./u);
+  assert.match(workbench, /Open the seller(?:'|&apos;)s campaign workbench to send an invitation/u);
+  assert.doesNotMatch(workbench, /Assign this seller to a campaign before sending an invitation\./u);
   assert.match(workbench, /bulkResultMessage/u);
   assert.match(workbench, /failedResults/u);
 });
