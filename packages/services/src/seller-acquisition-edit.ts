@@ -136,6 +136,10 @@ export class SellerAcquisitionEditService {
       typeof capture.metadata === "object" && capture.metadata !== null
         ? { ...(capture.metadata as Record<string, unknown>) }
         : {};
+    const existingPhone =
+      typeof existingMeta.sellerPhone === "string" ? existingMeta.sellerPhone :
+      typeof existingMeta.phone === "string" ? existingMeta.phone : undefined;
+    const phoneChanged = input.sellerPhone !== undefined && input.sellerPhone !== existingPhone;
 
     const metaUpdates: Record<string, unknown> = { ...existingMeta };
     if (input.sellerPhone !== undefined) metaUpdates.sellerPhone = input.sellerPhone;
@@ -157,7 +161,7 @@ export class SellerAcquisitionEditService {
     // --- Requalification: only qualifying-field edits (phone/WhatsApp) re-run the canonical
     // qualification + CRM conversion pipeline. Unrelated edits (title, price, description, ...)
     // must not trigger it.
-    if (input.sellerPhone !== undefined && this.deps.requalification !== undefined) {
+    if (phoneChanged && this.deps.requalification !== undefined) {
       return this.deps.requalification.requalifyMarketplaceCapture(
         {
           tenantId: context.tenantId,
