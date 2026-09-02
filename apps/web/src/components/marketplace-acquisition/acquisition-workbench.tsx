@@ -20,6 +20,7 @@ import {
   badgeTone,
   confidence,
   editablePriceText,
+  email,
   errorMessageFromPayload,
   hasPhone,
   isActionEnabled,
@@ -424,6 +425,7 @@ interface EditFields {
   title:       string;
   sellerName:  string;
   sellerPhone: string;
+  sellerEmail: string;
   priceText:   string;
   currency:    string;
   description: string;
@@ -436,6 +438,7 @@ function editFieldsFromRecord(record: SellerAcquisitionRecord): EditFields {
     title:       title(record),
     sellerName:  record.capture.sellerName ?? sellerName(record),
     sellerPhone: phone(record) ?? "",
+    sellerEmail: email(record) ?? "",
     priceText:   editablePriceText(record),
     currency:    record.draftInventory?.currency ?? record.capture.currency ?? "",
     description: record.draftInventory?.description ?? record.capture.description ?? "",
@@ -448,6 +451,7 @@ const EDIT_FIELD_CONFIG: readonly { key: keyof EditFields; label: string; placeh
   { key: "title",       label: "Title",       placeholder: "Listing title" },
   { key: "sellerName",  label: "Seller name", placeholder: "Seller name" },
   { key: "sellerPhone", label: "Phone",       placeholder: "+233..." },
+  { key: "sellerEmail", label: "Email",       placeholder: "seller@example.com" },
   { key: "priceText",   label: "Price",       placeholder: "GH₵ 250,000" },
   { key: "currency",    label: "Currency",    placeholder: "GHS" },
   { key: "description", label: "Description", placeholder: "Optional description" },
@@ -1185,7 +1189,7 @@ function Workbench({ record, rollupRecords, actionError, invitationActionsSuppor
   const [busy, setBusy] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editFields, setEditFields] = useState<EditFields>({
-    title: "", sellerName: "", sellerPhone: "", priceText: "",
+    title: "", sellerName: "", sellerPhone: "", sellerEmail: "", priceText: "",
     currency: "", description: "", location: "", category: "",
   });
   const [editSaving, setEditSaving] = useState(false);
