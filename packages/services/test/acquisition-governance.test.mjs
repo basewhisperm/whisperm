@@ -65,16 +65,27 @@ const campaign = (overrides = {}) => ({
   ...overrides,
 });
 
-const buildService = ({ governanceOptions = {}, campaigns = [campaign()], auditLogs = new MemoryAuditLogs() } = {}) => {
+const buildService = ({ governanceOptions = {}, campaigns = [campaign()], auditLogs = new MemoryAuditLogs(), sharedInvitationProviderReady } = {}) => {
   const governance = new MemoryGovernanceRepository(governanceOptions);
   const service = new AcquisitionGovernanceService({
     governance,
     campaigns: new MemoryCampaigns(campaigns),
     auditLogs,
+    sharedInvitationProviderReady,
     clock: () => now,
   });
   return { service, governance, auditLogs };
 };
+
+test('v1 shared WABA readiness supersedes legacy tenant provider rows', async () => {
+  const { service } = buildService({
+    governanceOptions: { whatsappConfigured: false },
+    sharedInvitationProviderReady: (channel) => channel === 'WHATSAPP',
+  });
+  const snapshot = await service.getGovernanceSnapshot({ tenantId: 'tenant-1' });
+  assert.equal(snapshot.capabilities.INVITATION.status, 'AVAILABLE');
+  assert.equal(snapshot.warnings.some((warning) => warning.code === 'WHATSAPP_NOT_CONFIGURED'), false);
+});
 
 test('feature disabled denies runtime actions', async () => {
   const { service } = buildService({ governanceOptions: { status: tenantStatus({ featureEnabled: false }) } });

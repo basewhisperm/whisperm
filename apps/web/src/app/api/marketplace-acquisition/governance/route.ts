@@ -7,6 +7,7 @@ import {
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
 import { AcquisitionGovernanceService } from "@whisperm/services";
+import { sharedInvitationProviderReady } from "@/lib/marketplace-acquisition/shared-provider-readiness";
 
 const errorResponse = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 
@@ -24,6 +25,7 @@ const governanceService = () => {
     campaigns: repositories.sellerAcquisitionCampaigns,
     auditLogs: repositories.auditLogs,
     usageEvents: repositories.acquisitionUsageEvents,
+    sharedInvitationProviderReady,
   });
 };
 

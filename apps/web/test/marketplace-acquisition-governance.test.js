@@ -32,6 +32,7 @@ const transpileRoute = (routePath, tempDir) => {
     .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
+    .replace(/from "@\/lib\/marketplace-acquisition\/shared-provider-readiness"/gu, `from "${join(tempDir, 'shared-provider-readiness.mjs')}"`)
     .replaceAll('from "@whisperm/repositories"', `from "${join(tempDir, 'repositories.mjs')}"`)
     .replaceAll('from "@whisperm/services"', `from "${servicesUrl}"`);
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -46,6 +47,7 @@ const createHarness = async (state) => {
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\n');
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__governanceRouteState.tenant;\n');
   writeFileSync(join(tempDir, 'prisma.mjs'), 'export const prisma = {};\n');
+  writeFileSync(join(tempDir, 'shared-provider-readiness.mjs'), 'export const sharedInvitationProviderReady = () => globalThis.__governanceRouteState.whatsappConfigured;\n');
   writeFileSync(join(tempDir, 'repositories.mjs'), [
     'export const createPrismaRepositories = () => ({',
     '  acquisitionGovernance: globalThis.__governanceRouteRepos.governance,',

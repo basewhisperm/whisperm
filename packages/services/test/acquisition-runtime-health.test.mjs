@@ -137,13 +137,25 @@ class MemoryCaptures {
   }
 }
 
-const buildService = ({ campaigns = [campaign()], members = [], executions = [], deals = [], claimTokens = [], captures = [] } = {}) => new AcquisitionRuntimeHealthService({
+const buildService = ({ campaigns = [campaign()], members = [], executions = [], deals = [], claimTokens = [], captures = [], sharedInvitationProviderReady } = {}) => new AcquisitionRuntimeHealthService({
   campaigns: new MemoryCampaigns(campaigns, members),
   executions: new MemoryExecutions(executions),
   deals: new MemoryDeals(deals),
   claimTokens: new MemoryClaimTokens(claimTokens),
   marketplaceCaptures: new MemoryCaptures(captures),
+  sharedInvitationProviderReady,
   clock: () => new Date(now),
+});
+
+test('v1 shared provider readiness supersedes missing campaign provider metadata', async () => {
+  const service = buildService({
+    campaigns: [campaign({ metadata: { invitationChannels: ['WHATSAPP'] } })],
+    sharedInvitationProviderReady: (channel) => channel === 'WHATSAPP',
+  });
+  const snapshot = await service.getRuntimeHealth({ tenantId: 'tenant-1' });
+  const whatsapp = snapshot.providers.find((provider) => provider.provider === 'WHATSAPP');
+  assert.equal(whatsapp.configured, true);
+  assert.equal(whatsapp.status, 'HEALTHY');
 });
 
 test('no campaigns/no runtime data returns UNKNOWN with a useful NO_ACTION recommendation', async () => {
