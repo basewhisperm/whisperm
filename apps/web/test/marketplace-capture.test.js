@@ -58,6 +58,15 @@ test('grid intake submits listing URLs without exposing internal marketplace sou
   assert.match(source, /if \(!res\.ok\) throw new Error/u);
 });
 
+test('single-seller intake loads active campaigns and explains why capture is disabled', () => {
+  const source = readFileSync(new URL('../src/app/(app)/marketplace-acquisition/capture/intake/page.tsx', import.meta.url), 'utf8');
+  assert.match(source, /campaigns\?status=ACTIVE/u);
+  assert.doesNotMatch(source, /campaigns\?status=ACTIVE,DRAFT/u);
+  assert.match(source, /Select an active campaign to enable capture\./u);
+  assert.match(source, /No active campaign is available\./u);
+  assert.match(source, /if \(!response\.ok \|\| json\?\.ok === false\) throw new Error/u);
+});
+
 test('bookmarklet source omits private browser state and full page HTML collection', () => {
   const bookmarklet = createMarketplaceCaptureBookmarklet({
     intakeUrl: 'https://app.whisperm.test/marketplace-acquisition/capture/intake',
