@@ -41,5 +41,6 @@ Disable is idempotent: it sets `enabled=false` without deleting the tenant featu
 - From a campaign Discovery page, `Capture Marketplace Page` opens a campaign-scoped bookmarklet setup link.
 - The operator installs the bookmarklet once, opens a marketplace listing/search/profile page in their own signed-in browser, and invokes it to send visible listing snapshots to WhispeRM intake.
 - On listing pages, the bookmarklet uses the marketplace's visible contact control and waits up to 10 seconds for the phone number to appear before building the intake snapshot.
+- If an installed bookmarklet is not campaign-scoped, single-seller intake loads active campaigns, automatically selects the only active campaign, or asks the operator to choose when several are available.
 - Grid intake lists active campaigns only, derives the supported marketplace source key from the payload, and submits listing URLs through the canonical discovery-run endpoint.
 - If an upstream marketplace presents a CAPTCHA or access restriction, the bookmarklet does not bypass it. The operator completes ordinary site access before initiating capture.
