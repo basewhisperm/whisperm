@@ -56,7 +56,7 @@ test('editExtractInputSchema is exported and enforces at least one field', () =>
 
 test('editExtractInputSchema covers all expected fields', () => {
   const text = svc('seller-acquisition-edit.ts');
-  for (const field of ['title', 'sellerName', 'sellerPhone', 'priceText', 'currency', 'description', 'category', 'location']) {
+  for (const field of ['title', 'sellerName', 'sellerPhone', 'sellerEmail', 'priceText', 'currency', 'description', 'category', 'location']) {
     assert.ok(text.includes(field), `editExtractInputSchema should include field "${field}"`);
   }
 });
@@ -74,9 +74,10 @@ test('SellerAcquisitionEditService writes capture.sellerName for contact fields'
   assert.match(text, /updateMarketplaceCapture/u);
 });
 
-test('SellerAcquisitionEditService writes sellerPhone and location into capture metadata', () => {
+test('SellerAcquisitionEditService writes sellerPhone, sellerEmail, and location into capture metadata', () => {
   const text = svc('seller-acquisition-edit.ts');
   assert.match(text, /sellerPhone/u);
+  assert.match(text, /metaUpdates\.sellerEmail = input\.sellerEmail/u);
   assert.match(text, /metaUpdates/u);
   assert.match(text, /location/u);
 });

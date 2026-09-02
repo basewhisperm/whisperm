@@ -11,6 +11,7 @@ export const editExtractInputSchema = z.object({
   title:       z.string().min(1).max(300).optional(),
   sellerName:  z.string().min(1).max(255).optional(),
   sellerPhone: z.string().min(1).max(64).optional(),
+  sellerEmail: z.string().email().max(320).optional(),
   description: z.string().min(1).max(3000).optional(),
   priceText:   z.string().min(1).max(120).optional(),
   currency:    z.string().length(3).optional(),
@@ -127,7 +128,7 @@ export class SellerAcquisitionEditService {
     // --- MarketplaceCapture: contact + context fields ------------------------
     // sellerName goes into capture.sellerName (used by contact-matching and
     // the sellerName() display function which checks capture.sellerName).
-    // sellerPhone and location go into capture.metadata so they are picked up
+    // sellerPhone, sellerEmail, and location go into capture.metadata so they are picked up
     // by the metadataText() resolver in page.tsx without needing a schema
     // migration for dedicated columns.
     const existingMeta: Record<string, unknown> =
@@ -137,6 +138,7 @@ export class SellerAcquisitionEditService {
 
     const metaUpdates: Record<string, unknown> = { ...existingMeta };
     if (input.sellerPhone !== undefined) metaUpdates.sellerPhone = input.sellerPhone;
+    if (input.sellerEmail !== undefined) metaUpdates.sellerEmail = input.sellerEmail;
     if (input.location !== undefined)    metaUpdates.location    = input.location;
 
     const captureUpdates: Record<string, unknown> = {};
