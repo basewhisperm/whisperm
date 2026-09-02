@@ -1233,10 +1233,11 @@ function Workbench({ record, rollupRecords, actionError, invitationActionsSuppor
     setEditError(null);
     try {
       // Only send fields that have a non-empty value after trimming.
+      const initialFields = editFieldsFromRecord(record);
       const body: Record<string, string> = {};
       for (const { key } of EDIT_FIELD_CONFIG) {
         const val = editFields[key].trim();
-        if (val.length > 0) body[key] = val;
+        if (val.length > 0 && val !== initialFields[key].trim()) body[key] = val;
       }
       if (Object.keys(body).length === 0) {
         setEditError("No changes to save.");

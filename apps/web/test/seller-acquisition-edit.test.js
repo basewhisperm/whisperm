@@ -128,7 +128,8 @@ test('editExtract narrows rich request context before calling strict tenant repo
 
 test('editExtract only triggers requalification when sellerPhone is edited', () => {
   const text = svc('seller-acquisition-edit.ts');
-  assert.match(text, /input\.sellerPhone !== undefined && this\.deps\.requalification !== undefined/u);
+  assert.match(text, /const phoneChanged = input\.sellerPhone !== undefined && input\.sellerPhone !== existingPhone/u);
+  assert.match(text, /phoneChanged && this\.deps\.requalification !== undefined/u);
   assert.match(text, /requalifyMarketplaceCapture/u);
 });
 
@@ -186,6 +187,12 @@ test('page.tsx updates the record locally on save without a full reload', () => 
 test('page.tsx pre-fills edit form from the current record values', () => {
   const text = source('src/components/marketplace-acquisition/acquisition-workbench.tsx');
   assert.match(text, /editFieldsFromRecord/u);
+});
+
+test('page.tsx PATCHes only fields whose values actually changed', () => {
+  const text = source('src/components/marketplace-acquisition/acquisition-workbench.tsx');
+  assert.match(text, /const initialFields = editFieldsFromRecord\(record\)/u);
+  assert.match(text, /val !== initialFields\[key\]\.trim\(\)/u);
 });
 
 test('page.tsx resets edit mode when the selected capture changes', () => {
