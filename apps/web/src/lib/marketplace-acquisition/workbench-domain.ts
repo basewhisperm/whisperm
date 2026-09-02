@@ -138,6 +138,13 @@ export function price(record: SellerAcquisitionRecord): string {
   }
 }
 
+export function editablePriceText(record: SellerAcquisitionRecord): string {
+  const rawPrice = record.draftInventory?.price ?? record.capture.price;
+  if (typeof rawPrice === "number") return String(rawPrice);
+  if (typeof rawPrice === "string" && !rawPrice.includes("[object")) return rawPrice;
+  return metadataText(record, "originalPriceText") ?? "";
+}
+
 export function source(record: SellerAcquisitionRecord): string {
   return record.draftInventory?.marketplaceSource ?? metadataText(record, "marketplace") ?? metadataText(record, "source") ?? record.capture.marketplaceSourceId ?? "Marketplace";
 }

@@ -769,6 +769,9 @@ const dateToIso = (value: unknown): unknown => value instanceof Date ? value.toI
 const normalizeRecord = (value: unknown): unknown => {
   if (value === null || typeof value !== "object") return value;
   if (value instanceof Date) return value.toISOString();
+  if (typeof (value as { toNumber?: unknown }).toNumber === "function") {
+    return (value as { toString(): string }).toString();
+  }
   if (Array.isArray(value)) return value.map(normalizeRecord);
   return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, normalizeRecord(nested)]));
 };
