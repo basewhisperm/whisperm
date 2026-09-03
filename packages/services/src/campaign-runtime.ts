@@ -164,6 +164,23 @@ const invitationBackoffMs = [5 * 60_000, 30 * 60_000, 2 * 60 * 60_000] as const;
 const invitationChannels = ["WHATSAPP", "SMS", "EMAIL"] as const;
 type InvitationChannel = typeof invitationChannels[number];
 
+/**
+ * ST1-013N: single source of truth for "what channel is/was this invitation execution using".
+ * `metrics.selectedChannel` is written once at dispatch time by the optimization strategy and
+ * never overwritten; `metrics.channel` is written only once a send attempt actually completes
+ * (see `recordInvitationResult`). Every reader -- retry, the runtime-health channel-usage
+ * report, and the invite/retry API responses -- must resolve through this function rather than
+ * re-deriving the `metrics.channel ?? metrics.selectedChannel` fallback inline, so the fallback
+ * behavior (and its "never silently default to WhatsApp" guarantee) can't drift between call
+ * sites. See docs/runtime/status-vocabulary.md.
+ */
+export function resolveExecutionChannel(metrics: Readonly<Record<string, unknown>> | null | undefined): InvitationChannel | undefined {
+  const candidate = metrics?.channel ?? metrics?.selectedChannel;
+  return typeof candidate === "string" && invitationChannels.includes(candidate as InvitationChannel)
+    ? (candidate as InvitationChannel)
+    : undefined;
+}
+
 interface InvitationOptimizationStrategy {
   readonly selectedChannel: InvitationChannel;
   readonly selectedProvider: string;
@@ -864,15 +881,9 @@ export class CampaignRuntimeService {
     if (!retryableStates.has(state)) throw new PersistenceError({ code: "PERSISTENCE_CONFLICT", message: "Invitation execution is not retryable", status: 409 });
     const opportunityId = typeof existing.metrics?.opportunityId === "string" ? existing.metrics.opportunityId : undefined;
     if (opportunityId === undefined) throw new PersistenceError({ code: "PERSISTENCE_VALIDATION_FAILED", message: "Invitation execution is missing opportunity context", status: 422 });
-    // ST1-013M: retry must preserve the originally selected channel. `metrics.channel` is only
-    // populated once a send attempt has actually completed (see recordInvitationResult above); an
-    // execution that never reached that point (e.g. it was left RUNNING/DISPATCHED because the
-    // async worker path was never drained -- see docs/runtime/runtime-surface.md) still has the
-    // channel the optimization strategy picked at dispatch time in `metrics.selectedChannel`.
-    // Falling through to that field (matching invitation-execution-response.ts and
-    // acquisition-runtime-health.ts) prevents retry from silently defaulting to WhatsApp.
-    const channelCandidate = existing.metrics?.channel ?? existing.metrics?.selectedChannel;
-    const channel = invitationChannels.includes(String(channelCandidate) as InvitationChannel) ? channelCandidate as "WHATSAPP" | "SMS" | "EMAIL" : undefined;
+    // ST1-013M/N: retry must preserve the originally selected channel, never silently default
+    // to WhatsApp. See resolveExecutionChannel above for the shared fallback contract.
+    const channel = resolveExecutionChannel(existing.metrics);
     const invitationId = typeof existing.metrics?.invitationId === "string" ? existing.metrics.invitationId : undefined;
 
     if (this.deps.invitationExecutor !== undefined) {

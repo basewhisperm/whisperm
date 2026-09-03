@@ -1,11 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { apiFailure, apiSuccess } from "@/app/api/_lib/api-response";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
 import { requireSellerAcquisitionFeatureForApi } from "@/lib/tenant-features";
 import { createPrismaRepositories, type PrismaPersistenceClient } from "@whisperm/repositories";
 import { createWhispeRMServices } from "@whisperm/services";
-
-const errorResponse = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 
 const parseLimit = (value: string | null): number | undefined => {
   if (value === null || value.trim().length === 0) return undefined;
@@ -16,13 +15,17 @@ const parseLimit = (value: string | null): number | undefined => {
 
 export async function GET(request: NextRequest) {
   const tenantContext = await getTenantContextForCurrentUser();
-  if (!tenantContext) return errorResponse("Unauthorized", 401);
+  if (!tenantContext) return apiFailure(401, "UNAUTHORIZED", "Unauthorized");
 
   const { tenant } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
 
-  const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
+  const rawLimit = request.nextUrl.searchParams.get("limit");
+  if (rawLimit !== null && rawLimit.trim().length > 0 && !/^\d+$/u.test(rawLimit.trim())) {
+    return apiFailure(400, "VALIDATION_ERROR", "limit must be a positive integer.");
+  }
+  const limit = parseLimit(rawLimit);
   const cursor = request.nextUrl.searchParams.get("cursor") ?? undefined;
   const campaignId = request.nextUrl.searchParams.get("campaignId")?.trim() || undefined;
 
@@ -36,5 +39,5 @@ export async function GET(request: NextRequest) {
     ? await services.sellerAcquisitionRecords.list({ tenantId: tenant.id }, page)
     : await services.sellerAcquisitionRecords.listByCampaignId({ tenantId: tenant.id }, campaignId, page);
 
-  return NextResponse.json({ ok: true, data: { records: result.records, nextCursor: result.nextCursor } });
+  return apiSuccess({ records: result.records, nextCursor: result.nextCursor });
 }

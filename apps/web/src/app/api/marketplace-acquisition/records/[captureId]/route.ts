@@ -1,5 +1,6 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
 
+import { apiFailure, apiSuccess } from "@/app/api/_lib/api-response";
 import { readJsonBody, RequestBodyError } from "@/lib/api/request-body";
 import { getTenantContextForCurrentUser } from "@/lib/get-tenant";
 import { prisma } from "@/lib/prisma";
@@ -11,42 +12,50 @@ import {
 import { MarketplaceRequalificationService, SellerAcquisitionEditService } from "@whisperm/services";
 import { createAcquisitionServiceBundle } from "@/lib/marketplace-acquisition/acquisition-services";
 
-const errorResponse = (message: string, status: number) =>
-  NextResponse.json({ ok: false, error: { message } }, { status });
-
 interface RouteContext {
   readonly params: { readonly captureId: string };
 }
 
+const validCaptureId = (context: RouteContext): string | null => {
+  const captureId = context.params.captureId?.trim();
+  return captureId === undefined || captureId.length === 0 ? null : captureId;
+};
+
 export async function GET(_request: Request, context: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
-  if (!tenantContext) return errorResponse("Unauthorized", 401);
+  if (!tenantContext) return apiFailure(401, "UNAUTHORIZED", "Unauthorized");
   const { tenant } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
+
+  const captureId = validCaptureId(context);
+  if (captureId === null) return apiFailure(400, "VALIDATION_ERROR", "captureId is required.");
 
   const { services } = createAcquisitionServiceBundle();
   const record = await services.sellerAcquisitionRecords.findByCaptureId(
     { tenantId: tenant.id },
-    context.params.captureId,
+    captureId,
   );
-  if (record === null) return errorResponse("Marketplace capture not found.", 404);
+  if (record === null) return apiFailure(404, "NOT_FOUND", "Marketplace capture not found.");
 
-  return NextResponse.json({ ok: true, data: { record } });
+  return apiSuccess({ record });
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const tenantContext = await getTenantContextForCurrentUser();
-  if (!tenantContext) return errorResponse("Unauthorized", 401);
+  if (!tenantContext) return apiFailure(401, "UNAUTHORIZED", "Unauthorized");
   const { tenant } = tenantContext;
   const featureDenied = await requireSellerAcquisitionFeatureForApi(tenant.id);
   if (featureDenied) return featureDenied;
+
+  const captureId = validCaptureId(context);
+  if (captureId === null) return apiFailure(400, "VALIDATION_ERROR", "captureId is required.");
 
   let body: unknown;
   try {
     body = await readJsonBody(request, { maxBytes: 32_000 });
   } catch (error) {
-    if (error instanceof RequestBodyError) return errorResponse(error.message, error.status);
+    if (error instanceof RequestBodyError) return apiFailure(error.status, "VALIDATION_ERROR", error.message);
     body = {};
   }
   const prismaPersistenceClient = prisma as unknown as PrismaPersistenceClient;
@@ -76,7 +85,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           requestId: request.headers.get("x-request-id") ?? undefined,
         },
       },
-      context.params.captureId,
+      captureId,
       body,
     );
   } catch (error) {
@@ -86,19 +95,19 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     // `this.name = "ZodError"` and both expose the same `.issues` shape.
     if (error instanceof Error && error.name === "ZodError") {
       const issues = (error as { readonly issues?: readonly { readonly message?: string }[] }).issues;
-      return errorResponse(issues?.[0]?.message ?? "Invalid input", 400);
+      return apiFailure(400, "VALIDATION_ERROR", issues?.[0]?.message ?? "Invalid input");
     }
     const asErr = error as { readonly status?: number; readonly message?: string };
-    if (asErr.status === 404) return errorResponse("Marketplace capture not found.", 404);
-    if (typeof asErr.status === "number") return errorResponse(asErr.message ?? "Request failed", asErr.status);
+    if (asErr.status === 404) return apiFailure(404, "NOT_FOUND", "Marketplace capture not found.");
+    if (typeof asErr.status === "number") return apiFailure(asErr.status, "VALIDATION_ERROR", asErr.message ?? "Request failed");
     throw error;
   }
 
   // Re-fetch the full record so the client gets updated data in one round-trip.
   const record = await services.sellerAcquisitionRecords.findByCaptureId(
     { tenantId: tenant.id },
-    context.params.captureId,
+    captureId,
   );
 
-  return NextResponse.json({ ok: true, data: { record, ...editResult } });
+  return apiSuccess({ record, ...editResult });
 }

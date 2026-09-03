@@ -22,7 +22,10 @@
     "doctor": "node scripts/doctor.mjs",
     "test:doctor": "node --test scripts/doctor.test.mjs",
     "bootstrap": "node scripts/bootstrap.mjs",
-    "check:bootstrap": "pnpm run doctor && pnpm --filter @whisperm/types build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/web typecheck"
+    "check:bootstrap": "pnpm run doctor && pnpm --filter @whisperm/types build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/web typecheck",
+    "test:contracts": "pnpm --filter @whisperm/web test:contracts",
+    "test:e2e:required": "pnpm --filter @whisperm/web test:e2e:required",
+    "check:contracts": "pnpm test:contracts && pnpm test:e2e:required"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

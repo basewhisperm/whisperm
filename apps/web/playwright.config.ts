@@ -1,5 +1,14 @@
 import { defineConfig, devices } from '@playwright/test';
 
+import { assertE2eRequiredModeIsConfigured } from './e2e/helpers/env';
+
+// ST1-013N: hard gate -- in required mode (CI, or WHISPERM_REQUIRE_E2E=true), missing E2E env
+// must abort the run loudly, right here at config load, before webServer or any test starts.
+// This replaces the previous behavior where the whole golden-path suite would silently become a
+// no-op via each spec's own test.skip() when credentials were unset. Local/optional runs are
+// unaffected -- specs keep the existing graceful skip for that case.
+assertE2eRequiredModeIsConfigured();
+
 // ST1-011: sandbox SMS provider the acquisition regression suite points the app at, so
 // invitations never touch a real WhatsApp/SMS/email provider. See e2e/mocks/sms-server.mjs.
 const smsMockPort = Number(process.env.E2E_SMS_MOCK_PORT ?? 4310);

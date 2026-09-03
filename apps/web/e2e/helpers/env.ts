@@ -51,3 +51,69 @@ export function assertAuthenticatedRunIsConfigured(): void {
     );
   }
 }
+
+// ST1-013N: minimum set of env vars a real (non-skipped) golden-path E2E run needs. Kept in
+// one place so both the required-mode gate below and docs/CI wiring agree on the list.
+//
+// NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY / CLERK_SECRET_KEY are included here (not just in
+// assertAuthenticatedRunIsConfigured) so a required-mode run fails at config-load time with the
+// exact missing variable names, rather than passing this gate and only failing later -- and less
+// legibly -- inside global-setup.ts/Clerk sign-in.
+export const REQUIRED_E2E_ENV_VARS = [
+  "E2E_USER_EMAIL",
+  "E2E_USER_PASSWORD",
+  "DATABASE_URL",
+  "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+  "CLERK_SECRET_KEY",
+] as const;
+
+/**
+ * Required-mode is CI by default, or an explicit local opt-in via WHISPERM_REQUIRE_E2E=true.
+ * In required mode, missing env must fail the run loudly -- it must never silently degrade into
+ * the pre-existing test.skip() no-op (see assertE2eRequiredModeIsConfigured below).
+ */
+export function isE2eRequiredMode(): boolean {
+  return process.env.WHISPERM_REQUIRE_E2E === "true" || process.env.CI === "true";
+}
+
+/**
+ * Returns only the *names* of missing required-mode env vars, never a value. Callers must not
+ * interpolate anything else from process.env into an error message built from this list.
+ *
+ * NEXT_PUBLIC_APP_URL / PLAYWRIGHT_BASE_URL: the suite needs at least one base URL to run
+ * against; either satisfies the requirement (mirrors playwright.config.ts's own fallback order).
+ * VERCEL_AUTOMATION_BYPASS_SECRET is only required when that base URL is a remote (non-localhost)
+ * deployment -- Vercel Deployment Protection (see playwright.config.ts) only applies there; a
+ * local `pnpm dev` target never needs it.
+ */
+export function missingRequiredE2eEnv(): readonly string[] {
+  const missing: string[] = [];
+  for (const name of REQUIRED_E2E_ENV_VARS) {
+    if (!process.env[name] || process.env[name]?.trim().length === 0) missing.push(name);
+  }
+
+  const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL;
+  if (!baseUrl || baseUrl.trim().length === 0) {
+    missing.push("NEXT_PUBLIC_APP_URL or PLAYWRIGHT_BASE_URL");
+  } else if (!/localhost|127\.0\.0\.1/u.test(baseUrl) && !process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+    missing.push("VERCEL_AUTOMATION_BYPASS_SECRET");
+  }
+
+  return missing;
+}
+
+/**
+ * ST1-013N hard gate: throws with the exact missing variable names (never values) when required
+ * mode (CI, or WHISPERM_REQUIRE_E2E=true) is enabled and any required env var is absent.
+ * Local/optional runs (required mode off) are unaffected -- specs keep their existing
+ * test.skip()-when-unconfigured convention for that case.
+ */
+export function assertE2eRequiredModeIsConfigured(): void {
+  if (!isE2eRequiredMode()) return;
+  const missing = missingRequiredE2eEnv();
+  if (missing.length > 0) {
+    throw new Error(
+      `E2E required mode is enabled but required environment variables are missing: ${missing.join(", ")}`,
+    );
+  }
+}

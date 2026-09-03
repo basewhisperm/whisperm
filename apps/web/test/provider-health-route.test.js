@@ -22,12 +22,18 @@ before(async () => {
   ].join('\n'));
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantForCurrentUser = async () => globalThis.__providerHealthRouteTenant;\n');
   writeFileSync(join(tempDir, 'tenant-features.mjs'), 'export const requireSellerAcquisitionFeatureForApi = async () => globalThis.__providerHealthFeatureDenied ?? null;\n');
+  writeFileSync(join(tempDir, 'api-response.mjs'), [
+    'import { NextResponse } from "./next-server.mjs";',
+    'export function apiSuccess(data, init) { return NextResponse.json({ ok: true, data }, init); }',
+    'export function apiFailure(status, code, message, details) { return NextResponse.json({ ok: false, error: details === undefined ? { code, message } : { code, message, details } }, { status }); }',
+  ].join('\n'));
 
   ({ NextRequest: NextRequestStub } = await import(join(tempDir, 'next-server.mjs')));
 
   const routePath = new URL('../src/app/api/marketplace-acquisition/provider-health/route.ts', import.meta.url).pathname;
   const source = readFileSync(routePath, 'utf8')
     .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
+    .replace(/from "@\/app\/api\/_lib\/api-response"/gu, `from "${join(tempDir, 'api-response.mjs')}"`)
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
     .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
     .replace('from "@whisperm/provider-adapters"', `from "${providerAdaptersUrl}"`);
@@ -84,7 +90,7 @@ test('reports ok:false with a safe diagnostic when the provider is unconfigured'
     const body = await response.json();
     assert.equal(body.ok, false);
     assert.equal(typeof body.error.code, 'string');
-    assert.ok(Array.isArray(body.error.missingEnv) || body.error.code === 'INVALID_CLAIM_BASE_URL');
+    assert.ok(Array.isArray(body.error.details?.missingEnv) || body.error.details?.code === 'INVALID_CLAIM_BASE_URL');
     assert.doesNotMatch(JSON.stringify(body), /secret|token=/iu);
   });
 });
@@ -99,7 +105,7 @@ test('reports ok:true with the resolved provider/channel when fully configured',
     const response = await route.GET(new NextRequestStub('https://app.test/api/marketplace-acquisition/provider-health?channel=WHATSAPP'));
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.deepEqual(body, { ok: true, provider: 'meta_whatsapp', channel: 'whatsapp', claimBaseUrlConfigured: true });
+    assert.deepEqual(body, { ok: true, data: { provider: 'meta_whatsapp', channel: 'whatsapp', claimBaseUrlConfigured: true } });
     assert.doesNotMatch(JSON.stringify(body), /super-secret-token/u);
   });
 });
@@ -114,6 +120,6 @@ test('defaults to the WHATSAPP channel when none is provided', async () => {
     const response = await route.GET(new NextRequestStub('https://app.test/api/marketplace-acquisition/provider-health'));
     const body = await response.json();
     assert.equal(body.ok, true);
-    assert.equal(body.channel, 'whatsapp');
+    assert.equal(body.data.channel, 'whatsapp');
   });
 });

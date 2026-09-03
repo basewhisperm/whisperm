@@ -442,6 +442,7 @@ test('seller acquisition invite-to-completion route E2E creates claim token and 
       executionId: 'execution-1',
       status: 'SENT',
       invitationId: 'invite-1',
+      channel: 'SMS',
     });
     assert.equal(sentMessages.length, 1);
 

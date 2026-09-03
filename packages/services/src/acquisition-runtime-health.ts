@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveExecutionChannel } from "./campaign-runtime.js";
 
 import type {
   CampaignRuntimeExecutionRecord,
@@ -589,7 +590,7 @@ export class AcquisitionRuntimeHealthService {
     let lastFailedUseAt: string | null = null;
     for (const execution of executions) {
       const metrics = isRecord(execution.metrics) ? execution.metrics : {};
-      const usedChannel = stringValue(metrics.channel) ?? stringValue(metrics.selectedChannel);
+      const usedChannel = resolveExecutionChannel(metrics);
       if (usedChannel !== channel) continue;
       const state = typeof metrics.invitationExecutionState === "string" ? metrics.invitationExecutionState : undefined;
       if (state === "DELIVERED") lastSuccessfulUseAt = latestTimestamp(lastSuccessfulUseAt, stringValue(metrics.deliveredAt) ?? execution.completedAt ?? null);

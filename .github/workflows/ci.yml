@@ -53,8 +53,101 @@ jobs:
       - name: Strict typecheck
         run: pnpm typecheck:strict
 
+      # ST1-013N: explicit per-package typechecks for the V1/demo-critical packages, in addition
+      # to the aggregate `pnpm typecheck` above -- a failure here names the exact package, rather
+      # than requiring someone to dig through the aggregate `-r` run's combined output.
+      - name: Typecheck (repositories)
+        run: pnpm --filter @whisperm/repositories typecheck
+      - name: Typecheck (services)
+        run: pnpm --filter @whisperm/services typecheck
+      - name: Typecheck (worker)
+        run: pnpm --filter @whisperm/worker typecheck
+      - name: Typecheck (api)
+        run: pnpm --filter @whisperm/api typecheck
+      - name: Typecheck (web)
+        run: pnpm --filter @whisperm/web typecheck
+
       - name: Test
         run: pnpm test
 
+      - name: Contract tests (ST1-013N)
+        run: pnpm test:contracts
+
       - name: Doctor script tests
         run: pnpm test:doctor
+
+  # ST1-013N Deliverable 6/11: required-mode golden-path E2E. This job intentionally does NOT
+  # gate merges yet (continue-on-error) -- it needs real Clerk test-user credentials and a real
+  # Postgres database as repository secrets, which are not configured for this repository as of
+  # this change (see apps/web/e2e/README.md and docs/contracts/st1-013n-contract-inventory.md for
+  # the exact secret names required: E2E_USER_EMAIL, E2E_USER_PASSWORD,
+  # NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY). Until those secrets exist, this job is
+  # expected to fail loudly (WHISPERM_REQUIRE_E2E=true makes the missing-env failure explicit,
+  # per apps/web/playwright.config.ts) rather than silently skip -- that failure is intentional
+  # and visible, not swallowed. Once an admin adds the secrets below, remove
+  # `continue-on-error: true` so this becomes a real required check, per the acceptance criteria
+  # "protected CI cannot pass with skipped golden-path E2E tests."
+  e2e-required:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: whisperm
+          POSTGRES_PASSWORD: whisperm
+          POSTGRES_DB: whisperm_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://whisperm:whisperm@localhost:5432/whisperm_e2e
+      WHISPERM_REQUIRE_E2E: "true"
+      # The webServer block in apps/web/playwright.config.ts starts `pnpm dev` against this same
+      # localhost URL; without it set here, missingRequiredE2eEnv() (apps/web/e2e/helpers/env.ts)
+      # always reports "NEXT_PUBLIC_APP_URL or PLAYWRIGHT_BASE_URL" missing even once the secrets
+      # below are configured, and the job can never pass.
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+      E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+      E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @whisperm/web exec playwright install --with-deps chromium
+
+      - name: Apply database migrations
+        run: pnpm --filter @whisperm/web migrate:deploy
+
+      # The web app (via `pnpm dev` in playwright.config.ts's webServer) and the E2E specs both
+      # import @whisperm/services et al. by their package export, which resolves to dist/index.js
+      # -- same prerequisite chain as apps/web/package.json's own `build`/`typecheck` scripts.
+      # Without this, `pnpm dev` fails with ERR_MODULE_NOT_FOUND before Playwright ever starts.
+      - name: Build workspace packages
+        run: pnpm --filter @whisperm/types build && pnpm --filter @whisperm/worker-runtime build && pnpm --filter @whisperm/repositories build && pnpm --filter @whisperm/campaign-runtime build && pnpm --filter @whisperm/services build && pnpm --filter @whisperm/provider-adapters build
+
+      - name: Required-mode golden-path E2E
+        run: pnpm test:e2e:required

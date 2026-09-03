@@ -86,6 +86,17 @@ authoritative for "what channel did this invitation actually use". Any reader ne
 channel" — UI, metrics, retry — must read `metrics.channel ?? metrics.selectedChannel`. See
 `runtime-surface.md` §6.
 
+**ST1-013N:** this fallback is centralized in `resolveExecutionChannel(metrics)`
+(`packages/services/src/campaign-runtime.ts`, exported from `@whisperm/services`) — every call
+site (`retryInvitationExecution`, `AcquisitionRuntimeHealthService`'s channel-usage report,
+`invitationExecutionResponse`, and the invite/bulk-invite API responses) resolves through this one
+function rather than re-deriving the fallback inline, and the invite/bulk-invite/retry API
+responses now include the resolved `channel` in their JSON body. `metrics.selectedChannel` is
+never overwritten by a retry and retry never silently defaults to WhatsApp when a more specific
+channel (SMS/EMAIL) was originally selected — see
+`packages/services/test/campaign-runtime.test.mjs` ("resolveExecutionChannel ..." and "retry does
+not fall back to WhatsApp ..." tests) for the regression coverage.
+
 ## QueueJob.state (canonical durable job lifecycle)
 
 | Status | Meaning | Set By | Next Allowed States |

@@ -573,12 +573,29 @@ export class MarketplaceDiscoveryService {
     };
   }
 
+  /**
+   * ST1-013N: campaign-scoped like promoteSellerToCapture -- a seller row belongs to exactly
+   * one campaign (DiscoveredMarketplaceSeller.campaignId), so rejecting must verify the seller
+   * actually belongs to the campaign named in the request before mutating it. Without this
+   * check, any sellerId known to the tenant could be rejected via any campaignId's URL,
+   * silently mutating a different campaign's roster.
+   */
   async rejectSeller(
     context: DiscoveryServiceContext,
+    campaignId: string,
     sellerId: string,
   ): Promise<DiscoveredSellerRecord> {
+    const repoContext = { tenantId: context.tenantId };
+    const seller = await this.deps.discoveryRepo.findDiscoveredSellerById(repoContext, sellerId);
+    if (seller === null) {
+      throw new DiscoveryPromotionError({ code: "SELLER_NOT_FOUND", message: "Discovered seller was not found for this workspace.", status: 404 });
+    }
+    if (seller.campaignId !== campaignId) {
+      throw new DiscoveryPromotionError({ code: "CAMPAIGN_MISMATCH", message: "Discovered seller does not belong to the specified campaign.", status: 409 });
+    }
+
     return this.deps.discoveryRepo.updateDiscoveredSellerStatus(
-      context,
+      repoContext,
       sellerId,
       "REJECTED",
       { reviewedBy: context.actorId },

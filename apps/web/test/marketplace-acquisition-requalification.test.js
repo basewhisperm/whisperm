@@ -230,6 +230,7 @@ const zodUrl = import.meta.resolve('zod');
 const transpileRoute = (routePath, tempDir) => {
   const source = readFileSync(routePath, 'utf8')
     .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
+    .replace(/from "@\/app\/api\/_lib\/api-response"/gu, `from "${join(tempDir, 'api-response.mjs')}"`)
     .replace(/from "@\/lib\/api\/request-body"/gu, `from "${join(tempDir, 'request-body.mjs')}"`)
     .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
     .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
@@ -250,6 +251,11 @@ const createHarness = async (state) => {
   const tempDir = join(tmpdir(), `whisperm-requalification-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(tempDir);
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\nexport class NextRequest extends Request {}\n');
+  writeFileSync(join(tempDir, 'api-response.mjs'), [
+    'import { NextResponse } from "./next-server.mjs";',
+    'export function apiSuccess(data, init) { return NextResponse.json({ ok: true, data }, init); }',
+    'export function apiFailure(status, code, message, details) { return NextResponse.json({ ok: false, error: details === undefined ? { code, message } : { code, message, details } }, { status }); }',
+  ].join('\n'));
   writeFileSync(join(tempDir, 'request-body.mjs'), [
     'export class RequestBodyError extends Error { constructor(message, status = 400, code) { super(message); this.status = status; this.code = code ?? (status === 413 ? "REQUEST_BODY_TOO_LARGE" : "REQUEST_BODY_INVALID"); } }',
     'export const readJsonBody = async (request) => { try { return await request.json(); } catch { throw new RequestBodyError("Request body must be valid JSON.", 400); } };',

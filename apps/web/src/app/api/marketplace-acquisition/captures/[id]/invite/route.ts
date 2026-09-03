@@ -12,7 +12,7 @@ import {
   PrismaSellerInvitationRepository,
   type PrismaPersistenceClient,
 } from "@whisperm/repositories";
-import { CampaignRuntimeService } from "@whisperm/services";
+import { CampaignRuntimeService, resolveExecutionChannel } from "@whisperm/services";
 import { sellerInvitationCreateRequestSchema } from "@whisperm/types";
 import { createSellerInvitationExecutor } from "@/lib/marketplace-acquisition/invitation-executor";
 import { createInvitationRuntimeJobQueue } from "@/lib/marketplace-acquisition/runtime-job-queue";
@@ -94,6 +94,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       invitationId,
       executionId: execution.id,
       status: execution.status === "COMPLETED" ? "SENT" : "QUEUED",
+      channel: resolveExecutionChannel(metrics),
     }, { status: execution.status === "COMPLETED" ? 200 : 202 });
   } catch (error) {
     if (error instanceof PersistenceError) {

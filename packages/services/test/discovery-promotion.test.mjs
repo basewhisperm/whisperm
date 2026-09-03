@@ -16,6 +16,9 @@ class MemoryDiscoveryRepo {
     this.sellers[index] = { ...this.sellers[index], status, ...extra, updatedAt: now };
     return this.sellers[index];
   }
+  async listDiscoveredSellersByCampaign(ctx, campaignId, status) {
+    return this.sellers.filter((seller) => seller.tenantId === ctx.tenantId && seller.campaignId === campaignId && (status === undefined || seller.status === status));
+  }
 }
 
 /**
@@ -427,6 +430,81 @@ test('promoted seller is discoverable through the normal campaign member query p
   const page = await campaigns.listMembers(context, 'campaign-1');
 
   assert.equal(page.items.some((member) => member.id === result.campaignMemberId), true);
+});
+
+// ST1-013N: campaign isolation proof for rejectSeller (previously mutated any sellerId known
+// to the tenant regardless of which campaign the request URL named -- see reject/route.ts).
+
+test('rejectSeller sets status to REJECTED for a seller belonging to the specified campaign', async () => {
+  const { discoveryRepo, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  const result = await service.rejectSeller(context, 'campaign-1', 'seller-1');
+
+  assert.equal(result.status, 'REJECTED');
+  assert.equal(discoveryRepo.sellers[0].status, 'REJECTED');
+  assert.equal(discoveryRepo.sellers[0].reviewedBy, 'actor-1');
+});
+
+test('rejectSeller is denied with CAMPAIGN_MISMATCH when the seller belongs to a different campaign', async () => {
+  const { discoveryRepo, campaigns, service } = harness();
+  campaigns.campaigns.push({ id: 'campaign-2', tenantId: 'tenant-1', name: 'Other Campaign', status: 'ACTIVE', createdAt: now, updatedAt: now });
+  discoveryRepo.sellers.push(baseSeller({ campaignId: 'campaign-2' }));
+
+  await assert.rejects(
+    () => service.rejectSeller(context, 'campaign-1', 'seller-1'),
+    (error) => error instanceof DiscoveryPromotionError && error.code === 'CAMPAIGN_MISMATCH',
+  );
+  assert.equal(discoveryRepo.sellers[0].status, 'QUALIFIED');
+});
+
+test('rejectSeller is denied with SELLER_NOT_FOUND for a cross-tenant seller', async () => {
+  const { discoveryRepo, service } = harness();
+  discoveryRepo.sellers.push(baseSeller());
+
+  await assert.rejects(
+    () => service.rejectSeller({ tenantId: 'tenant-2', actorId: 'actor-1' }, 'campaign-1', 'seller-1'),
+    (error) => error instanceof DiscoveryPromotionError && error.code === 'SELLER_NOT_FOUND',
+  );
+});
+
+test('campaign isolation: the same seller identity can exist independently in campaign A and campaign B', async () => {
+  const { discoveryRepo, campaigns, service } = harness();
+  campaigns.campaigns.push({ id: 'campaign-b', tenantId: 'tenant-1', name: 'Campaign B', status: 'ACTIVE', createdAt: now, updatedAt: now });
+  discoveryRepo.sellers.push(baseSeller({ id: 'seller-a', campaignId: 'campaign-1' }));
+  discoveryRepo.sellers.push(baseSeller({ id: 'seller-b', campaignId: 'campaign-b', listingUrl: 'https://jiji.com.gh/cars/listing-1-b' }));
+
+  // Reject the seller in campaign A.
+  await service.rejectSeller(context, 'campaign-1', 'seller-a');
+  const sellerA = await discoveryRepo.findDiscoveredSellerById(context, 'seller-a');
+  const sellerB = await discoveryRepo.findDiscoveredSellerById(context, 'seller-b');
+  assert.equal(sellerA.status, 'REJECTED');
+  assert.equal(sellerB.status, 'QUALIFIED', 'campaign B seller must be untouched by campaign A reject');
+
+  // Promote the (still-qualified) seller in campaign B.
+  const promoted = await service.promoteSellerToCapture(context, 'campaign-b', 'seller-b');
+  assert.equal(promoted.status, 'PROMOTED');
+
+  const sellerAAfter = await discoveryRepo.findDiscoveredSellerById(context, 'seller-a');
+  assert.equal(sellerAAfter.status, 'REJECTED', 'campaign A seller must remain rejected after campaign B promote');
+
+  // Listing each campaign is independent.
+  const listA = await discoveryRepo.listDiscoveredSellersByCampaign(context, 'campaign-1');
+  const listB = await discoveryRepo.listDiscoveredSellersByCampaign(context, 'campaign-b');
+  assert.deepEqual(listA.map((s) => s.id), ['seller-a']);
+  assert.deepEqual(listB.map((s) => s.id), ['seller-b']);
+  assert.equal(listA[0].status, 'REJECTED');
+  assert.equal(listB[0].status, 'PROMOTED');
+
+  // Cross-campaign mutation is rejected even after both operations above.
+  await assert.rejects(
+    () => service.rejectSeller(context, 'campaign-1', 'seller-b'),
+    (error) => error instanceof DiscoveryPromotionError && error.code === 'CAMPAIGN_MISMATCH',
+  );
+  await assert.rejects(
+    () => service.promoteSellerToCapture(context, 'campaign-b', 'seller-a'),
+    (error) => error instanceof DiscoveryPromotionError && error.code === 'CAMPAIGN_MISMATCH',
+  );
 });
 
 test('promotion race that hits a campaign-member conflict still resolves to the existing member', async () => {

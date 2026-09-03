@@ -86,6 +86,8 @@ const usageEventRepository = (state) => ({
 
 const sharedModuleReplacements = (tempDir) => (source) => source
   .replace(/from "next\/server"/gu, `from "${join(tempDir, 'next-server.mjs')}"`)
+  .replace(/from "@\/app\/api\/_lib\/api-response"/gu, `from "${join(tempDir, 'api-response.mjs')}"`)
+  .replace(/from "@\/app\/api\/_lib\/service-error"/gu, `from "${join(tempDir, 'service-error.mjs')}"`)
   .replace(/from "@\/lib\/get-tenant"/gu, `from "${join(tempDir, 'get-tenant.mjs')}"`)
   .replace(/from "@\/lib\/prisma"/gu, `from "${join(tempDir, 'prisma.mjs')}"`)
   .replace(/from "@\/lib\/tenant-features"/gu, `from "${join(tempDir, 'tenant-features.mjs')}"`)
@@ -98,6 +100,21 @@ const createHarness = async (state) => {
   const tempDir = join(tmpdir(), `whisperm-capture-route-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(tempDir);
   writeFileSync(join(tempDir, 'next-server.mjs'), 'export class NextResponse extends Response { static json(body, init) { return Response.json(body, init); } }\nexport class NextRequest extends Request {}\n');
+  writeFileSync(join(tempDir, 'api-response.mjs'), [
+    'import { NextResponse } from "./next-server.mjs";',
+    'export function apiSuccess(data, init) { return NextResponse.json({ ok: true, data }, init); }',
+    'export function apiFailure(status, code, message, details) { return NextResponse.json({ ok: false, error: details === undefined ? { code, message } : { code, message, details } }, { status }); }',
+  ].join('\n'));
+  writeFileSync(join(tempDir, 'service-error.mjs'), [
+    `import { ServiceError } from ${JSON.stringify(import.meta.resolve('@whisperm/services'))};`,
+    `import { PersistenceError } from ${JSON.stringify(join(tempDir, 'repositories.mjs'))};`,
+    `import { apiFailure } from ${JSON.stringify(join(tempDir, 'api-response.mjs'))};`,
+    'export function apiFailureFromError(error, fallbackMessage) {',
+    '  if (error instanceof ServiceError) return apiFailure(error.status, "VALIDATION_ERROR", error.message);',
+    '  if (error instanceof PersistenceError) return apiFailure(error.status, "CONFLICT", error.message);',
+    '  return apiFailure(500, "INTERNAL_ERROR", fallbackMessage);',
+    '}',
+  ].join('\n'));
   writeFileSync(join(tempDir, 'get-tenant.mjs'), 'export const getTenantContextForCurrentUser = async () => globalThis.__captureRouteState.tenantContext;\n');
   writeFileSync(join(tempDir, 'prisma.mjs'), 'export const prisma = {};\n');
   writeFileSync(join(tempDir, 'tenant-features.mjs'), 'export const requireSellerAcquisitionFeatureForApi = async () => null;\n');
@@ -233,7 +250,7 @@ test('ST1-013M: campaign assignment success is reported explicitly and capture s
     const body = await response.json();
     assert.equal(response.status, 200, JSON.stringify(body));
     assert.equal(body.ok, true);
-    assert.deepEqual(body.campaignAssignment, { status: 'COMPLETED' });
+    assert.deepEqual(body.data.campaignAssignment, { status: 'COMPLETED' });
     assert.equal(state.campaignMembers.length, 1);
     assert.equal(state.campaignMembers[0].campaignId, 'campaign-1');
     assert.equal(state.campaignMembers[0].marketplaceCaptureId, body.data.captureId);
@@ -252,8 +269,8 @@ test('ST1-013M: campaign assignment failure is visible in the response and durab
     assert.equal(response.status, 200, JSON.stringify(body));
     assert.equal(body.ok, true, 'capture must still be reported successful even when campaign assignment fails');
     assert.equal(typeof body.data.captureId, 'string');
-    assert.equal(body.campaignAssignment.status, 'FAILED');
-    assert.equal(body.campaignAssignment.error.code, 'PERSISTENCE_NOT_FOUND');
+    assert.equal(body.data.campaignAssignment.status, 'FAILED');
+    assert.equal(body.data.campaignAssignment.error.code, 'PERSISTENCE_NOT_FOUND');
     assert.equal(state.campaignMembers, undefined, 'a failed assignment must never create a campaign seller record');
     const assignmentFailureAudits = state.audits.filter((entry) => entry.action === 'MARKETPLACE_CAPTURE_CAMPAIGN_ASSIGNMENT_FAILED');
     assert.equal(assignmentFailureAudits.length, 1, 'assignment failure must be recorded durably in the audit log, not swallowed');
@@ -270,14 +287,14 @@ test('ST1-013M: duplicate campaign assignment is idempotent, not reported as a f
   try {
     const payload = { campaignId: 'campaign-1', listingUrl: 'https://market.example/listings/6', title: 'Bike', priceText: 'USD 100', sellerPhone: '+15555550113', sellerName: 'Duplicate Assignment Seller' };
     const first = await (await harness.route.POST(makeRequest(payload))).json();
-    assert.deepEqual(first.campaignAssignment, { status: 'COMPLETED' });
+    assert.deepEqual(first.data.campaignAssignment, { status: 'COMPLETED' });
 
     // Simulate the underlying unique-constraint conflict a second identical assignment attempt
     // would hit against the same (tenantId, campaignId, marketplaceCaptureId) row.
     state.campaignAssignmentMode = 'CONFLICT';
     const second = await (await harness.route.POST(makeRequest(payload))).json();
     assert.equal(second.ok, true);
-    assert.deepEqual(second.campaignAssignment, { status: 'ALREADY_ASSIGNED' });
+    assert.deepEqual(second.data.campaignAssignment, { status: 'ALREADY_ASSIGNED' });
     assert.equal(state.campaignMembers.length, 1, 'duplicate assignment must not create a second campaign seller record');
     const assignmentFailureAudits = state.audits.filter((entry) => entry.action === 'MARKETPLACE_CAPTURE_CAMPAIGN_ASSIGNMENT_FAILED');
     assert.equal(assignmentFailureAudits.length, 0, 'an idempotent duplicate is not a failure and must not be audited as one');
