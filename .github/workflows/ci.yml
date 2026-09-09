@@ -9,7 +9,7 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -25,9 +25,12 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
+        id: install
         run: pnpm install --frozen-lockfile
 
       - name: Migration safety check
+        id: migration
+        if: ${{ always() }}
         run: |
           if grep -rn "DROP TABLE" prisma/migrations/ || grep -rn "DROP COLUMN" prisma/migrations/ || grep -rn "TRUNCATE" prisma/migrations/; then
             echo "DESTRUCTIVE MIGRATION DETECTED - halt deployment"
@@ -35,26 +38,92 @@ jobs:
           fi
           echo "Migration safety check passed - expand-only confirmed"
 
-
       - name: Lint
+        id: lint
+        if: ${{ always() }}
         run: pnpm lint
 
-      - name: Bootstrap check (ST1-013L)
+      - name: Bootstrap check
+        id: bootstrap
+        if: ${{ always() }}
         run: pnpm check:bootstrap
         env:
-          # `pnpm run doctor` only checks DATABASE_URL is set and parseable -- it never connects.
-          # No real database is provisioned in CI; this placeholder exists so a missing/malformed
-          # DATABASE_URL is caught here rather than only discovered by a new engineer locally.
           DATABASE_URL: postgresql://ci:ci@localhost:5432/whisperm_ci
 
       - name: Typecheck
+        id: typecheck
+        if: ${{ always() }}
         run: pnpm typecheck
 
       - name: Strict typecheck
+        id: strict_typecheck
+        if: ${{ always() }}
         run: pnpm typecheck:strict
 
       - name: Test
+        id: test
+        if: ${{ always() }}
         run: pnpm test
 
       - name: Doctor script tests
+        id: doctor
+        if: ${{ always() }}
         run: pnpm test:doctor
+
+      - name: Production build
+        id: build
+        if: ${{ always() }}
+        run: pnpm build
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/whisperm_ci
+
+      - name: Generate C31 evidence manifest
+        id: evidence
+        if: ${{ always() }}
+        run: node scripts/write-c31-ci-evidence.mjs
+        env:
+          C31_ATTEMPT_ID: C31-A01
+          C31_PNPM_VERSION: 9.15.4
+          C31_MIGRATION_OUTCOME: ${{ steps.migration.outcome }}
+          C31_LINT_OUTCOME: ${{ steps.lint.outcome }}
+          C31_BOOTSTRAP_OUTCOME: ${{ steps.bootstrap.outcome }}
+          C31_TYPECHECK_OUTCOME: ${{ steps.typecheck.outcome }}
+          C31_STRICTTYPECHECK_OUTCOME: ${{ steps.strict_typecheck.outcome }}
+          C31_TEST_OUTCOME: ${{ steps.test.outcome }}
+          C31_DOCTOR_OUTCOME: ${{ steps.doctor.outcome }}
+          C31_BUILD_OUTCOME: ${{ steps.build.outcome }}
+
+      - name: Upload C31 evidence
+        id: evidence_upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: c31-ci-evidence-${{ github.sha }}
+          path: docs/traceability/c31-ci-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce aggregate validation
+        if: ${{ always() }}
+        env:
+          INSTALL: ${{ steps.install.outcome }}
+          MIGRATION: ${{ steps.migration.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          BOOTSTRAP: ${{ steps.bootstrap.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          STRICT_TYPECHECK: ${{ steps.strict_typecheck.outcome }}
+          TEST: ${{ steps.test.outcome }}
+          DOCTOR: ${{ steps.doctor.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          EVIDENCE: ${{ steps.evidence.outcome }}
+          EVIDENCE_UPLOAD: ${{ steps.evidence_upload.outcome }}
+        run: |
+          failed=0
+          for stage in INSTALL MIGRATION LINT BOOTSTRAP TYPECHECK STRICT_TYPECHECK TEST DOCTOR BUILD EVIDENCE EVIDENCE_UPLOAD; do
+            outcome="${!stage}"
+            echo "${stage}=${outcome}"
+            if [ "${outcome}" != "success" ]; then
+              failed=1
+            fi
+          done
+          exit "${failed}"
