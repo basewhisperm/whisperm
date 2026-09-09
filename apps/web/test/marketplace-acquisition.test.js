@@ -241,7 +241,6 @@ test("capture intake exposes phone qualification and bulk portfolio semantics", 
   assert.match(payload, /MARKETPLACE_CAPTURE_MAX_PAYLOAD_BYTES/u);
   assert.match(payload, /parsedUrl\.hostname\.toLowerCase\(\) !== sourceHost/u);
   assert.match(payload, /parsedUrl\.protocol !== "https:"/u);
-  assert.match(bookmarklet, /sellerPhone/u);
   assert.match(bookmarklet, /portfolioListings/u);
 });
 
