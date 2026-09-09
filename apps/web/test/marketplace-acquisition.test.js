@@ -187,7 +187,7 @@ test("marketplace sellers page renders workbench actions and record inventory pr
     assert.match(workbenchDomain, new RegExp(label, "u"));
   }
   assert.match(workbenchDomain, /draftInventory\?\.title \?\? record\.capture\.title/u);
-  const sellerPresentation = read("../../../../packages/services/src/seller-presentation.ts");
+  const sellerPresentation = read("../../../packages/services/src/seller-presentation.ts");
   assert.match(sellerPresentation, /record\.draftInventory\?\.price \?\? record\.capture\.price/u);
   assert.match(sellerPresentation, /resolveDisplayPrice/u);
   assert.match(source, /marketplaceSource/u);
