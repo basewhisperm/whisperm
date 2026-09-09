@@ -225,23 +225,22 @@ test("seller acquisition detail renders invitation UX with WhatsApp first, SMS f
   assert.match(invitePanel, /role="status"/u);
 });
 
-test("capture intake and bookmarklet support mobile-required WhatsApp-first bulk portfolio copy", () => {
+test("capture intake exposes phone qualification and bulk portfolio semantics", () => {
   const capturePage = read("app/(app)/marketplace-acquisition/capture/page.tsx");
+  const intakePage = read("app/(app)/marketplace-acquisition/capture/intake/page.tsx");
   const bookmarklet = read("lib/marketplace-capture/bookmarklet.js");
   const payload = read("lib/marketplace-capture/payload.ts");
 
-  for (const expected of [
-    "Reveal the seller phone/mobile number before capture",
-    "Mobile number is required for qualification",
-    "WhatsApp will be attempted first",
-    "Bulk seller portfolio",
-    "multiple listings",
-  ]) {
-    assert.match(capturePage + bookmarklet + payload, new RegExp(expected, "u"));
-  }
-  for (const token of ["portfolioListings", "rawSellerText", "sellerProfileUrl", "marketplaceListingId", "phone", "sellerPhone"]) {
-    assert.match(bookmarklet + payload, new RegExp(token, "u"));
-  }
+  assert.match(capturePage, /Mobile number is required for qualification/u);
+  assert.match(capturePage, /WhatsApp will be attempted first/u);
+  assert.match(capturePage, /name="url"/u);
+  assert.match(intakePage, /portfolioListings/u);
+  assert.match(intakePage, /listingUrl: l\\.listingUrl/u);
+  assert.match(payload, /MARKETPLACE_CAPTURE_MAX_PAYLOAD_BYTES/u);
+  assert.match(payload, /parsedUrl\\.hostname\\.toLowerCase\\(\\) !== sourceHost/u);
+  assert.match(payload, /parsedUrl\\.protocol !== "https:"/u);
+  assert.match(bookmarklet, /sellerPhone/u);
+  assert.match(bookmarklet, /portfolioListings/u);
 });
 
 
