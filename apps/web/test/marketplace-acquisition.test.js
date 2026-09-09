@@ -188,7 +188,7 @@ test("marketplace sellers page renders workbench actions and record inventory pr
   }
   assert.match(workbenchDomain, /draftInventory\?\.title \?\? record\.capture\.title/u);
   const sellerPresentation = read("../../../packages/services/src/seller-presentation.ts");
-  assert.match(sellerPresentation, /record\.draftInventory\?\.price \?\? record\.capture\.price/u);
+  assert.match(sellerPresentation, /input\.draftInventory\?\.price \?\? input\.capture\.price/u);
   assert.match(sellerPresentation, /resolveDisplayPrice/u);
   assert.match(source, /marketplaceSource/u);
   assert.match(source, /\/api\/marketplace-acquisition\/captures\/\$\{record\.capture\.id\}\/invite/u);
@@ -237,10 +237,10 @@ test("capture intake exposes phone qualification and bulk portfolio semantics", 
   assert.match(capturePage, /WhatsApp will be attempted first/u);
   assert.match(capturePage, /name="url"/u);
   assert.match(intakePage, /portfolioListings/u);
-  assert.match(intakePage, /listingUrl: l\\.listingUrl/u);
+  assert.match(intakePage, /listingUrl: l\.listingUrl/u);
   assert.match(payload, /MARKETPLACE_CAPTURE_MAX_PAYLOAD_BYTES/u);
-  assert.match(payload, /parsedUrl\\.hostname\\.toLowerCase\\(\\) !== sourceHost/u);
-  assert.match(payload, /parsedUrl\\.protocol !== "https:"/u);
+  assert.match(payload, /parsedUrl\.hostname\.toLowerCase\(\) !== sourceHost/u);
+  assert.match(payload, /parsedUrl\.protocol !== "https:"/u);
   assert.match(bookmarklet, /sellerPhone/u);
   assert.match(bookmarklet, /portfolioListings/u);
 });
