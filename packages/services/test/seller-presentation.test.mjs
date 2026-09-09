@@ -69,6 +69,28 @@ test('price formats with the seller currency', () => {
   assert.equal(presentation.displayPrice, new Intl.NumberFormat('en-US', { style: 'currency', currency: 'GHS', maximumFractionDigits: 0 }).format(45000));
 });
 
+test('draft inventory price and currency take precedence over captured values', () => {
+  const presentation = sellerPresentation(seller({
+    draftInventory: { title: 'Draft listing', price: 52000, currency: 'GHS' },
+  }));
+  assert.equal(presentation.displayPrice, new Intl.NumberFormat('en-US', { style: 'currency', currency: 'GHS', maximumFractionDigits: 0 }).format(52000));
+  assert.equal(presentation.displayTitle, 'Draft listing');
+});
+
+test('captured price is used when draft inventory has no price', () => {
+  const presentation = sellerPresentation(seller({
+    draftInventory: { title: 'Draft title only', price: null, currency: null },
+  }));
+  assert.equal(presentation.displayPrice, new Intl.NumberFormat('en-US', { style: 'currency', currency: 'GHS', maximumFractionDigits: 0 }).format(45000));
+});
+
+test('missing currency falls back to USD without throwing', () => {
+  const presentation = sellerPresentation(seller({
+    capture: { ...seller().capture, currency: null, price: 1250 },
+  }));
+  assert.equal(presentation.displayPrice, '$1,250');
+});
+
 test('a long listing title is preserved in full -- clamping is a CSS concern, not a text-truncation one', () => {
   const longTitle = 'Mercedes-Benz C300 Base C300 4MATIC AWD Sedan Full Service History One Owner';
   const presentation = sellerPresentation(seller({ capture: { ...seller().capture, title: longTitle } }));
