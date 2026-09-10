@@ -82,8 +82,12 @@ jobs:
         if: ${{ always() }}
         run: node scripts/write-c31-ci-evidence.mjs
         env:
-          C31_ATTEMPT_ID: C31-A01
+          C31_ATTEMPT_ID: C31-A02
+          C31_EVIDENCE_MODE: manifest
+          C31_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          C31_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           C31_PNPM_VERSION: 9.15.4
+          C31_INSTALL_OUTCOME: ${{ steps.install.outcome }}
           C31_MIGRATION_OUTCOME: ${{ steps.migration.outcome }}
           C31_LINT_OUTCOME: ${{ steps.lint.outcome }}
           C31_BOOTSTRAP_OUTCOME: ${{ steps.bootstrap.outcome }}
@@ -98,8 +102,32 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: c31-ci-evidence-${{ github.sha }}
+          name: c31-ci-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: docs/traceability/c31-ci-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Generate C31 evidence upload receipt
+        id: evidence_receipt
+        if: ${{ always() }}
+        run: node scripts/write-c31-ci-evidence.mjs
+        env:
+          C31_ATTEMPT_ID: C31-A02
+          C31_EVIDENCE_MODE: receipt
+          C31_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          C31_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          C31_EVIDENCE_UPLOAD_OUTCOME: ${{ steps.evidence_upload.outcome }}
+          C31_ARTIFACT_ID: ${{ steps.evidence_upload.outputs.artifact-id }}
+          C31_ARTIFACT_URL: ${{ steps.evidence_upload.outputs.artifact-url }}
+          C31_ARTIFACT_DIGEST: ${{ steps.evidence_upload.outputs.artifact-digest }}
+
+      - name: Upload C31 evidence receipt
+        id: evidence_receipt_upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: c31-ci-evidence-receipt-${{ github.event.pull_request.head.sha || github.sha }}
+          path: docs/traceability/c31-ci-evidence-receipt.json
           if-no-files-found: error
           retention-days: 30
 
@@ -117,9 +145,11 @@ jobs:
           BUILD: ${{ steps.build.outcome }}
           EVIDENCE: ${{ steps.evidence.outcome }}
           EVIDENCE_UPLOAD: ${{ steps.evidence_upload.outcome }}
+          EVIDENCE_RECEIPT: ${{ steps.evidence_receipt.outcome }}
+          EVIDENCE_RECEIPT_UPLOAD: ${{ steps.evidence_receipt_upload.outcome }}
         run: |
           failed=0
-          for stage in INSTALL MIGRATION LINT BOOTSTRAP TYPECHECK STRICT_TYPECHECK TEST DOCTOR BUILD EVIDENCE EVIDENCE_UPLOAD; do
+          for stage in INSTALL MIGRATION LINT BOOTSTRAP TYPECHECK STRICT_TYPECHECK TEST DOCTOR BUILD EVIDENCE EVIDENCE_UPLOAD EVIDENCE_RECEIPT EVIDENCE_RECEIPT_UPLOAD; do
             outcome="${!stage}"
             echo "${stage}=${outcome}"
             if [ "${outcome}" != "success" ]; then
